@@ -50,6 +50,12 @@ const CREDENTIAL_CHANGES: Partial<Record<FaultId, (payload: Payload, ctx: Creden
     statusListOf(p).idx = c.statusListEntries;
   },
   'credential.no-status': (p) => void delete p.status,
+  'credential.no-cnf': (p) => void delete p.cnf,
+  'credential.minimal-cnf-jwk': (p) => {
+    const jwk = (p.cnf as { jwk?: JsonWebKey } | undefined)?.jwk;
+    if (!jwk) throw new Error('the credential has no cnf.jwk');
+    p.cnf = { jwk: { kty: jwk.kty, crv: jwk.crv, x: jwk.x, y: jwk.y } };
+  },
 };
 
 function statusListOf(payload: Payload): Record<string, unknown> {

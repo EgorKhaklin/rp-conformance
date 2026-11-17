@@ -2,7 +2,7 @@
 // as a DeviceResponse with a device signature over the SessionTranscript of OpenID4VP Appendix B.2.6.1.
 import { randomBytes } from 'node:crypto';
 import { DateOnly, Issuer, SessionTranscript, SignatureAlgorithm } from '@owf/mdoc';
-import { type CborMap, COSE, COSE_ALG, decodeCbor, decodeEmbedded, embedded, encodeCbor, readCose, signCoseSign1, type Tagged } from './cbor';
+import { type CborMap, COSE, COSE_ALG, coseValue, decodeCbor, decodeEmbedded, embedded, encodeCbor, readCose, sigStructure, signCoseSign1, type Tagged } from './cbor';
 import { base64url } from './crypto';
 import { coseSigningKey, deviceKeyOf, mdocContext } from './mdoc-context';
 import type { CertifiedKey } from './pki';
@@ -124,6 +124,10 @@ export interface MdocPresentOptions {
   jwkThumbprint: Uint8Array | null;
   /** The elements to disclose, by namespace. */
   elements: Record<string, string[]>;
+  /** Device-signed elements by namespace (DeviceBinding_011); default none, an empty `DeviceNameSpaces`. */
+  deviceNameSpaces?: Map<string, Map<string, unknown>>;
+  /** Signs `Sig_structure` instead of ES256 with `holderPrivateKey`, under the COSE algorithm `alg` (the ES256K fault). */
+  deviceSigner?: { alg: number; sign: (data: Uint8Array) => Promise<Uint8Array> | Uint8Array };
 }
 
 /** The SessionTranscript of OpenID4VP 1.0 Appendix B.2.6.1 or B.2.6.2, computed with @owf/mdoc, as a CBOR value. */
@@ -154,20 +158,29 @@ export async function presentMdoc(issuerSignedBytes: Uint8Array, options: MdocPr
     const disclosed = items.filter((item) => requested.includes(String(decodeEmbedded<CborMap>(item).get('elementIdentifier'))));
     if (disclosed.length) namespaces.set(namespace, disclosed);
   }
-  const deviceNameSpaces = embedded(new Map());
+  const deviceNameSpaces = embedded(options.deviceNameSpaces ?? new Map());
   const deviceAuthentication = encodeCbor(embedded(['DeviceAuthentication', await oid4vpSessionTranscript(options), docType, deviceNameSpaces]));
-  const deviceSignature = await signCoseSign1({
-    protectedHeader: new Map([[COSE.alg, COSE_ALG.ES256]]),
-    payload: null,
-    detached: deviceAuthentication,
-    privateKey: options.holderPrivateKey,
-  });
+  const deviceSignature = options.deviceSigner
+    ? await signCoseSign1With(options.deviceSigner, deviceAuthentication)
+    : await signCoseSign1({
+        protectedHeader: new Map([[COSE.alg, COSE_ALG.ES256]]),
+        payload: null,
+        detached: deviceAuthentication,
+        privateKey: options.holderPrivateKey,
+      });
   const document = new Map<string, unknown>([
     ['docType', docType],
     ['issuerSigned', new Map<string, unknown>([['nameSpaces', namespaces], ['issuerAuth', issuerSigned.get('issuerAuth')]])],
     ['deviceSigned', new Map<string, unknown>([['nameSpaces', deviceNameSpaces], ['deviceAuth', new Map([['deviceSignature', deviceSignature]])]])],
   ]);
   return encodeCbor(new Map<string, unknown>([['version', '1.0'], ['documents', [document]], ['status', 0]]));
+}
+
+/** A detached COSE_Sign1 over `detached`, signed by `signer` under its algorithm. */
+async function signCoseSign1With(signer: NonNullable<MdocPresentOptions['deviceSigner']>, detached: Uint8Array) {
+  const protectedBytes = encodeCbor(new Map([[COSE.alg, signer.alg]]));
+  const signature = await signer.sign(sigStructure(protectedBytes, detached));
+  return coseValue({ protectedBytes, unprotectedHeader: new Map(), payload: null, signature });
 }
 
 /** A DeviceResponse as the `vp_token` entry of OpenID4VP Appendix B.2.4: base64url without padding. */

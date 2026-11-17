@@ -3,9 +3,12 @@ import { dirname, join, relative } from 'node:path';
 import type { TestCaseDefinition } from '@rp-conformance/core';
 import { loadSharedPages, loadUpstreamPages, renderOverlay } from './overlay';
 
-/** Renders the overlay of the given definitions with the vendored FCAF base pages and the shared pages. */
-export async function renderBaseline(definitions: TestCaseDefinition[]): Promise<Map<string, string>> {
-  return renderOverlay(definitions, await loadUpstreamPages(), await loadSharedPages());
+/**
+ * Renders the overlay of the given definitions with the vendored FCAF base pages and the shared pages; the baseline
+ * lists name the definitions in `baseline` (default: all).
+ */
+export async function renderBaseline(definitions: TestCaseDefinition[], baseline?: TestCaseDefinition[]): Promise<Map<string, string>> {
+  return renderOverlay(definitions, await loadUpstreamPages(), await loadSharedPages(), baseline && new Set(baseline.map((d) => d.id)));
 }
 
 async function listFiles(root: string): Promise<string[]> {

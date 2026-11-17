@@ -81,6 +81,7 @@ const MDOC_CHANGES: Partial<Record<FaultId, (mso: CborMap, ctx: MdocFaultContext
     statusListEntryOf(m).set('idx', c.statusListEntries);
   },
   'mdoc.no-status': (m) => void m.delete('status'),
+  'mdoc.no-device-key': (m) => void m.delete('deviceKeyInfo'),
 };
 
 /** Applies a credential fault to an issued mdoc (`IssuerSigned`, CBOR) and returns the changed `IssuerSigned`. */
@@ -97,6 +98,29 @@ export async function applyMdocFault(fault: FaultId, issuerSignedBytes: Uint8Arr
   const mso = decodeEmbedded<CborMap>(decodeCbor(issuerAuth.payload ?? new Uint8Array()));
   change(mso, ctx);
   issuerSigned.set('issuerAuth', await resign(issuerAuth, encodeCbor(embedded(mso)), ctx.signer.key.privateKey));
+  return encodeCbor(issuerSigned);
+}
+
+/** COSE elliptic curve secp256k1 (RFC 8812 section 3.1). */
+const COSE_CRV_SECP256K1 = 8;
+
+/**
+ * Binds an issued mdoc to a device key on secp256k1, which @owf/mdoc does not issue: the MSO's `deviceKey` becomes that
+ * EC2 key and the IssuerAuth is signed again by the document signer (the `ES256K` device authentication fault).
+ */
+export async function bindMdocToSecp256k1Key(issuerSignedBytes: Uint8Array, publicJwk: JsonWebKey, signer: CertifiedKey): Promise<Uint8Array> {
+  if (publicJwk.crv !== 'secp256k1' || !publicJwk.x || !publicJwk.y) throw new Error('not a secp256k1 public key');
+  const issuerSigned = decodeCbor<CborMap>(issuerSignedBytes);
+  const issuerAuth = readCose(issuerSigned.get('issuerAuth'));
+  const mso = decodeEmbedded<CborMap>(decodeCbor(issuerAuth.payload ?? new Uint8Array()));
+  const deviceKey = new Map<number, unknown>([
+    [1, 2],
+    [-1, COSE_CRV_SECP256K1],
+    [-2, new Uint8Array(Buffer.from(publicJwk.x, 'base64url'))],
+    [-3, new Uint8Array(Buffer.from(publicJwk.y, 'base64url'))],
+  ]);
+  (mso.get('deviceKeyInfo') as CborMap).set('deviceKey', deviceKey);
+  issuerSigned.set('issuerAuth', await resign(issuerAuth, encodeCbor(embedded(mso)), signer.key.privateKey));
   return encodeCbor(issuerSigned);
 }
 

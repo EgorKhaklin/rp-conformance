@@ -5,7 +5,11 @@
 import type { CheckId } from './checks';
 import type { Flow } from './definition';
 
-export type FaultPoint = 'credential' | 'status-list' | 'identifier-list' | 'response';
+/**
+ * Where a fault is applied: the issued credential, the status list or identifier list the Test Status Provider serves,
+ * the presentation the Conformance Wallet builds for the request (KB-JWT, DeviceAuth), or the Authorization Response.
+ */
+export type FaultPoint = 'credential' | 'status-list' | 'identifier-list' | 'presentation' | 'response';
 
 /** The artifact format a fault applies to: a credential format, or the format of a status or identifier list. */
 export type FaultFormat = 'dc+sd-jwt' | 'mso_mdoc' | 'jwt' | 'cwt';
@@ -17,8 +21,13 @@ export interface FaultInfo {
   target: CheckId | null;
   /** The difference from the valid artifact, as the FCAF scenario words it (after "except that" / "only in that"). */
   text: string;
-  /** The presentation flow a response fault belongs to; left out when it applies to both. */
+  /** The presentation flow a response or presentation fault belongs to; left out when it applies to both. */
   flow?: Flow;
+  /**
+   * The curve of the Conformance Wallet key the credential is bound to, when it is not P-256: the device authentication
+   * faults with `ES256K` need a credential bound to a key on secp256k1.
+   */
+  holderCurve?: 'secp256k1';
 }
 
 const credential = (target: CheckId | null, text: string): FaultInfo => ({ point: 'credential', format: 'dc+sd-jwt', target, text });
@@ -27,6 +36,8 @@ const statusList = (target: CheckId | null, text: string): FaultInfo => ({ point
 const statusListCwt = (target: CheckId | null, text: string): FaultInfo => ({ point: 'status-list', format: 'cwt', target, text });
 const identifierList = (target: CheckId | null, text: string): FaultInfo => ({ point: 'identifier-list', format: 'cwt', target, text });
 const response = (target: CheckId | null, text: string, flow?: Flow): FaultInfo => ({ point: 'response', target, text, ...(flow ? { flow } : {}) });
+const kbJwt = (target: CheckId, text: string, flow?: Flow): FaultInfo => ({ point: 'presentation', format: 'dc+sd-jwt', target, text, ...(flow ? { flow } : {}) });
+const deviceAuth = (target: CheckId, text: string, flow?: Flow): FaultInfo => ({ point: 'presentation', format: 'mso_mdoc', target, text, ...(flow ? { flow } : {}) });
 
 /** Wording shared by faults of both formats. */
 const SHARED_TEXT = {
@@ -63,6 +74,8 @@ export const FAULTS = {
   'credential.status-uri-invalid': credential('status-reference', 'the `uri` member of its `status.status_list` object is the string `not a uri`'),
   'credential.status-idx-out-of-range': credential('status-index', SHARED_TEXT.outOfRange),
   'credential.no-status': credential('status-reference', 'it carries no `status` claim'),
+  'credential.no-cnf': credential('key-binding', 'its Issuer-signed JWT carries no `cnf` claim, so it is bound to no key'),
+  'credential.minimal-cnf-jwk': credential(null, 'the `jwk` member of its `cnf` claim carries only the members `kty`, `crv`, `x` and `y`'),
 
   // Credential (mdoc), after a valid issuance: the MSO is decoded, changed and its IssuerAuth signed again.
   'mdoc.valid-until-past': mdoc(
@@ -88,6 +101,7 @@ export const FAULTS = {
   'mdoc.status-uri-invalid': mdoc('status-reference', 'the `uri` entry of the `status_list` map in its MSO is the text string `not a uri`'),
   'mdoc.status-idx-out-of-range': mdoc('status-index', SHARED_TEXT.outOfRange),
   'mdoc.no-status': mdoc('status-reference', 'its MSO carries no `status` element'),
+  'mdoc.no-device-key': mdoc('key-binding', 'its MSO carries no `deviceKeyInfo`, so it is bound to no device key'),
 
   // Status List Token (JWT), after a valid build: decoded, changed and signed again, or served in another form.
   'status-list.signature-bitflip': statusList('status-list-signature', 'one bit of its signature value is flipped'),
@@ -182,6 +196,106 @@ export const FAULTS = {
   ),
   'identifier-list.signer-ca-x': identifierList('identifier-list-trust', 'the referenced identifier list is signed by a certificate issued by `CA-X`'),
 
+  // Presentation (SD-JWT VC): the KB-JWT the Conformance Wallet appends for the request, decoded, changed and signed
+  // again with the holder key, or replaced.
+  'presentation.kb-nonce-other': kbJwt('key-binding', 'the `nonce` claim of its KB-JWT is a newly generated random value instead of the `nonce` of the request'),
+  'presentation.kb-aud-other-client': kbJwt(
+    'key-binding',
+    'the `aud` claim of its KB-JWT is the Client Identifier of another Relying Party: the prefix `x509_hash:` followed by the hash of a different certificate',
+    'redirect',
+  ),
+  'presentation.kb-aud-no-prefix': kbJwt(
+    'key-binding',
+    'the `aud` claim of its KB-JWT is the Client Identifier of the request without its prefix `x509_hash:`',
+    'redirect',
+  ),
+  'presentation.kb-aud-client-id': kbJwt(
+    'key-binding',
+    'the `aud` claim of its KB-JWT is the Client Identifier of the request instead of `origin:` followed by the Origin of the page',
+    'dc-api',
+  ),
+  'presentation.kb-aud-other-origin': kbJwt(
+    'key-binding',
+    'the `aud` claim of its KB-JWT is `origin:https://other.example` instead of `origin:` followed by the Origin of the page',
+    'dc-api',
+  ),
+  'presentation.kb-iat-past': kbJwt('kb-freshness', 'the `iat` claim of its KB-JWT is set to the current time minus `T_kb` minus one hour'),
+  'presentation.kb-iat-future': kbJwt('kb-freshness', 'the `iat` claim of its KB-JWT is set to the current time plus `T_skew` plus one hour'),
+  'presentation.kb-signature-bitflip': kbJwt('key-binding', 'one bit of the signature value of its KB-JWT is flipped'),
+  'presentation.kb-other-key': kbJwt(
+    'key-binding',
+    'its KB-JWT is signed with a newly generated P-256 key instead of the key in the `cnf` claim of the credential',
+  ),
+  'presentation.no-kb-jwt': kbJwt('key-binding', 'it carries no KB-JWT: the presented SD-JWT ends with `~` after its last disclosure'),
+  'presentation.kb-typ-missing': kbJwt('key-binding', 'the header of its KB-JWT has no `typ` member'),
+  'presentation.kb-typ-jwt': kbJwt('key-binding', 'the `typ` header of its KB-JWT is `JWT`'),
+  'presentation.kb-sd-hash-other': kbJwt(
+    'key-binding',
+    'the `sd_hash` claim of its KB-JWT is computed over the presented SD-JWT without its last disclosure',
+  ),
+  'presentation.kb-alg-none': kbJwt('key-binding', 'its KB-JWT is an unsecured JWT with `alg` `none` and an empty signature'),
+  'presentation.kb-hs256-public-key': kbJwt(
+    'key-binding',
+    'its KB-JWT is protected with `HS256`, keyed with the PEM encoding of the public key in the `cnf` claim of the credential',
+  ),
+  'presentation.kb-es256k': {
+    ...kbJwt(
+      'key-binding',
+      'the credential is bound (`cnf`) to a key of the Conformance Wallet on curve secp256k1, and its KB-JWT is signed with that key and `alg` `ES256K`',
+    ),
+    holderCurve: 'secp256k1',
+  },
+
+  // Presentation (mdoc): the DeviceResponse the Conformance Wallet builds for the request, with the SessionTranscript
+  // computed from different values, or the DeviceSigned structure changed.
+  'presentation.transcript-nonce': deviceAuth(
+    'key-binding',
+    'the SessionTranscript its device signature covers is computed with a newly generated `nonce` instead of the `nonce` of the request',
+  ),
+  'presentation.transcript-client-id': deviceAuth(
+    'key-binding',
+    'the `OpenID4VPHandover` in the SessionTranscript its device signature covers is computed with the Client Identifier of another Relying Party instead of the `client_id` of the request',
+    'redirect',
+  ),
+  'presentation.transcript-response-uri': deviceAuth(
+    'key-binding',
+    'the `OpenID4VPHandover` in the SessionTranscript its device signature covers is computed with a `response_uri` other than that of the request',
+    'redirect',
+  ),
+  'presentation.transcript-jwk-thumbprint': deviceAuth(
+    'key-binding',
+    'the SessionTranscript its device signature covers is computed with the JWK thumbprint of a newly generated key instead of that of the encryption key of the request',
+  ),
+  'presentation.transcript-origin': deviceAuth(
+    'key-binding',
+    'the `OpenID4VPDCAPIHandover` in the SessionTranscript its device signature covers is computed with the Origin `https://other.example` instead of the Origin of the page',
+    'dc-api',
+  ),
+  'presentation.device-signature-bitflip': deviceAuth('key-binding', 'one bit of the signature value of its `DeviceSignature` is flipped'),
+  'presentation.device-signature-other-key': deviceAuth(
+    'key-binding',
+    'its `DeviceSignature` is made with a newly generated P-256 key instead of the device key in the `deviceKeyInfo` of the MSO',
+  ),
+  'presentation.no-device-auth': deviceAuth('key-binding', 'the `deviceSigned` structure of its document has no `deviceAuth`'),
+  'presentation.device-signed-element': deviceAuth(
+    'key-binding',
+    'the `DeviceNameSpaces` its device signature covers contain the element `family_name` with the value `Musterfrau` in the namespace `eu.europa.ec.eudi.pid.1`, which the MSO does not authorise through `keyAuthorizations`',
+  ),
+  'presentation.device-signature-es256k': {
+    ...deviceAuth(
+      'key-binding',
+      'the mdoc is bound (`deviceKeyInfo`) to a key of the Conformance Wallet on curve secp256k1, and its `DeviceSignature` is made with that key and algorithm `ES256K` (-47)',
+    ),
+    holderCurve: 'secp256k1',
+  },
+
+  // Presentation in either format: the `vp_token` entry of an earlier transaction (SessionBinding_005).
+  'presentation.replay': {
+    point: 'presentation',
+    target: 'key-binding',
+    text: 'its `vp_token` carries, unchanged, the presentation the Conformance Wallet sent in T1, while the Authorization Response itself is encrypted to the encryption key of T2',
+  },
+
   // Authorization Response (direct_post.jwt via redirects, dc_api.jwt via the W3C Digital Credentials API): built from
   // the valid payload and the Relying Party's encryption key. Only the unencrypted response differs between the flows.
   'response.unencrypted': response(
@@ -219,7 +333,7 @@ export type FaultId = keyof typeof FAULTS;
 export const FAULT_IDS = Object.keys(FAULTS) as FaultId[];
 
 export function faultInfo(id: FaultId): FaultInfo {
-  const info = FAULTS[id];
+  const info = FAULTS[id] as FaultInfo | undefined;
   if (!info) throw new Error(`unknown fault ${id}`);
   return info;
 }

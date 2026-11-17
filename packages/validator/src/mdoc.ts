@@ -152,11 +152,10 @@ export async function validateMdocPresentation(presentation: string, options: Md
       if (mso.get('digestAlgorithm') !== 'SHA-256') fail(`digestAlgorithm ${String(mso.get('digestAlgorithm'))} is not supported`);
       if (mso.get('docType') !== document.get('docType')) fail('the MSO docType differs from the document docType');
       asMap(mso.get('valueDigests'), 'valueDigests');
-      asMap(asMap(mso.get('deviceKeyInfo'), 'deviceKeyInfo').get('deviceKey'), 'deviceKey');
       const validityInfo = asMap(mso.get('validityInfo'), 'validityInfo');
       for (const key of ['signed', 'validFrom', 'validUntil']) if (!dateOf(validityInfo.get(key))) fail(`validityInfo.${key} is not a tdate`);
+      // deviceKeyInfo and deviceAuth are checked by key-binding, so a credential without device binding fails there.
       const deviceSigned = asMap(document.get('deviceSigned'), 'deviceSigned');
-      asMap(deviceSigned.get('deviceAuth'), 'deviceAuth');
       attempt(() => decodeEmbedded(deviceSigned.get('nameSpaces')), 'deviceSigned.nameSpaces');
     });
 
@@ -229,17 +228,22 @@ export async function validateMdocPresentation(presentation: string, options: Md
       if (expectedUpdate && expectedUpdate < now) return `expectedUpdate ${expectedUpdate.toISOString()} has passed (informative)`;
     });
 
+    // Device binding and session binding (ISO/IEC 18013-5 section 9.1.3, OpenID4VP Appendix B.2.6): a device signature
+    // by the MSO's device key over the SessionTranscript of this request, with no unauthorised device-signed element.
     await recorder.run('key-binding', ['format'], async () => {
       const deviceSigned = document.get('deviceSigned') as CborMap;
-      const deviceAuth = deviceSigned.get('deviceAuth') as CborMap;
-      if (!deviceAuth.has('deviceSignature')) fail('deviceAuth carries no deviceSignature (a deviceMac needs a reader key, which OpenID4VP has not)');
-      const signature = attempt(() => readCose(deviceAuth.get('deviceSignature')), 'deviceSignature');
+      const deviceAuth = deviceSigned.get('deviceAuth');
+      if (!(deviceAuth instanceof Map)) fail('the document carries no deviceAuth');
+      if (!(deviceAuth as CborMap).has('deviceSignature')) fail('deviceAuth carries no deviceSignature (a deviceMac needs a reader key, which OpenID4VP has not)');
+      const signature = attempt(() => readCose((deviceAuth as CborMap).get('deviceSignature')), 'deviceSignature');
       if (signature.protectedHeader.get(COSE.alg) !== COSE_ALG.ES256) fail(`deviceSignature alg ${String(signature.protectedHeader.get(COSE.alg))} is not supported`);
       if (signature.payload !== null) fail('the deviceSignature payload is not detached');
       const deviceNameSpaces = deviceSigned.get('nameSpaces') as Tagged;
       const elements = decodeEmbedded<unknown>(deviceNameSpaces);
       if (!(elements instanceof Map) || elements.size > 0) fail('DeviceNameSpaces is not empty, and the MSO authorizes no device-signed element');
-      const jwk = jwkOfCoseKey((mso.get('deviceKeyInfo') as CborMap).get('deviceKey'));
+      const deviceKeyInfo = mso.get('deviceKeyInfo');
+      if (!(deviceKeyInfo instanceof Map) || !deviceKeyInfo.has('deviceKey')) fail('the MSO carries no deviceKeyInfo, so it is bound to no device key');
+      const jwk = jwkOfCoseKey((deviceKeyInfo as CborMap).get('deviceKey'));
       const transcript = openid4vpSessionTranscript(options);
       const deviceAuthentication = encodeCbor(embedded(['DeviceAuthentication', transcript, document.get('docType'), deviceNameSpaces]));
       if (!(await verifyEs256(jwk, sigStructure(signature.protectedBytes, deviceAuthentication), signature.signature))) {

@@ -121,14 +121,19 @@ export interface IdentifierListSpec {
   faults: FaultId[];
 }
 
-/** The Authorization Response the Conformance Wallet sends. */
+/**
+ * The Authorization Response the Conformance Wallet sends, with the presentation it builds for the request: the KB-JWT
+ * of an SD-JWT VC, the DeviceAuth of an mdoc.
+ */
 export interface ResponseSpec {
   /** Content encryption; default the first of the request's `encrypted_response_enc_values_supported` the wallet supports. */
   enc?: 'A128GCM' | 'A256GCM';
-  /** Named faults (at most one); empty for a valid response. */
+  /** Named faults (at most one) of the response or of the presentation in it; empty for a valid response. */
   faults: FaultId[];
   /** For `response.other-transaction-key`: the step (1-based) whose transaction's encryption key is used. */
   keyOfStep?: number;
+  /** For `presentation.replay`: the step (1-based) whose presentation the `vp_token` carries again. */
+  presentationOfStep?: number;
 }
 
 /** Start a presentation, present a credential and send the Authorization Response. */
@@ -162,9 +167,10 @@ export type StepAction = PresentationAction | StartAction | TrustListAction;
 /**
  * Expected-result codes of the catalogue (harness design section 5). `LIST_RETRIEVED`: the Test Trust Infrastructure
  * logged a retrieval of the list version the step published. `ENC_KEY`: the request carries an encryption key in its
- * `client_metadata`.
+ * `client_metadata`. `REJ_OR_ACC`: the Relying Party rejects the presentation, or accepts it and releases exactly the
+ * requested attributes with their issuer-signed values (DeviceBinding_011: a device-signed element is ignored).
  */
-export type ExpectationCode = 'ACC' | 'REJ' | 'NOSTAT' | 'NOFETCH' | 'FETCHED' | 'POLICY' | 'LIST_RETRIEVED' | 'ENC_KEY';
+export type ExpectationCode = 'ACC' | 'REJ' | 'REJ_OR_ACC' | 'NOSTAT' | 'NOFETCH' | 'FETCHED' | 'POLICY' | 'LIST_RETRIEVED' | 'ENC_KEY';
 
 /** The ICS declaration a `POLICY` expectation is compared with. */
 export interface PolicyReference {
@@ -307,17 +313,27 @@ export function presentation(
     throw new Error(`a ${credential.format} credential references a Status List Token in ${statusListFormatOf(credential.format)} format`);
   }
   if (result.identifierList && credential.format !== 'mso_mdoc') throw new Error('only an mdoc references an identifier list');
-  for (const [fault, point, format] of [
-    ...credential.faults.map((f) => [f, 'credential', credential.format] as const),
-    ...(result.statusList?.faults ?? []).map((f) => [f, 'status-list', result.statusList?.format] as const),
-    ...(result.identifierList?.faults ?? []).map((f) => [f, 'identifier-list', 'cwt'] as const),
-    ...result.response.faults.map((f) => [f, 'response', undefined] as const),
+  for (const [fault, points, format] of [
+    ...credential.faults.map((f) => [f, ['credential'], credential.format] as const),
+    ...(result.statusList?.faults ?? []).map((f) => [f, ['status-list'], result.statusList?.format] as const),
+    ...(result.identifierList?.faults ?? []).map((f) => [f, ['identifier-list'], 'cwt'] as const),
+    // The presentation travels in the response; a presentation fault applies to the credential's format.
+    ...result.response.faults.map((f) => [f, ['response', 'presentation'], faultInfo(f).point === 'presentation' ? credential.format : undefined] as const),
   ]) {
     const info = faultInfo(fault);
-    if (info.point !== point) throw new Error(`fault ${fault} does not apply to the ${point}`);
+    if (!(points as readonly string[]).includes(info.point)) throw new Error(`fault ${fault} does not apply to the ${points.join(' or ')}`);
     if (info.format && info.format !== format) throw new Error(`fault ${fault} applies to ${info.format}, not ${format}`);
   }
+  const replays = result.response.faults.includes('presentation.replay');
+  if (replays !== (result.response.presentationOfStep !== undefined)) {
+    throw new Error('presentation.replay and presentationOfStep go together');
+  }
   return result;
+}
+
+/** The curve of the Conformance Wallet key a step's credential is bound to: P-256, or secp256k1 for an `ES256K` fault. */
+export function holderCurveOf(action: StepAction): 'P-256' | 'secp256k1' {
+  return faultsOf(action).some((fault) => faultInfo(fault).holderCurve === 'secp256k1') ? 'secp256k1' : 'P-256';
 }
 
 /** Every fault of a presentation. */

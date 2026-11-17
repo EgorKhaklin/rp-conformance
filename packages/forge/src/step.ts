@@ -2,9 +2,9 @@
 // and the credential the Conformance Wallet presents, valid first and then with the step's fault. The controller and
 // the self-validation use the same function, so the self-validated artifacts are the ones the Relying Party receives.
 import { randomInt } from 'node:crypto';
-import type { CredentialFormat, PresentationAction } from '@rp-conformance/core';
+import { type CredentialFormat, holderCurveOf, type PresentationAction } from '@rp-conformance/core';
 import { applyCredentialFault, applyStatusListFault, type ServedStatusList, type StatusListFaultContext } from './faults';
-import { applyIdentifierListFault, applyMdocFault, applyStatusListCwtFault } from './faults-cose';
+import { applyIdentifierListFault, applyMdocFault, applyStatusListCwtFault, bindMdocToSecp256k1Key } from './faults-cose';
 import { buildIdentifierListCwt, IDENTIFIER_LIST_CWT_TYPE } from './identifier-list';
 import { issueCredentialAMdoc, issueCredentialASdJwtVc } from './attestation';
 import { issuePidMdoc, newMdocIdentifier } from './mdoc';
@@ -21,6 +21,8 @@ export interface StepForgeContext {
   pki: TestPki;
   /** The Conformance Wallet key the credential is bound to. */
   holderPublicJwk: JsonWebKey;
+  /** The Conformance Wallet key on secp256k1, which the credential of an `ES256K` fault is bound to instead. */
+  holderSecp256k1PublicJwk?: JsonWebKey;
   /** A new, unique status list URI (harness design section 4.6). */
   allocateStatusUri: () => string;
   /** `T_skew`, seconds, for time faults. */
@@ -126,6 +128,9 @@ export async function forgePresentation(action: PresentationAction, ctx: StepFor
     identifierList = { uri, identifier, contains: listSpec.contains, validToken: token, served };
   }
 
+  // An `ES256K` device authentication fault presents a credential bound to the wallet's secp256k1 key.
+  const secp256k1 = holderCurveOf(action) === 'secp256k1';
+  if (secp256k1 && !ctx.holderSecp256k1PublicJwk) throw new Error('the step needs the Conformance Wallet key on secp256k1');
   const short = spec.defaultCredential === 'default_credential_pid_short';
   // `default_credential_qeaa`, `_pubeaa` and `_eaa` are `default_credential_A`, issued like the PID.
   const pid = spec.defaultCredential === 'default_credential_pid' || short;
@@ -144,16 +149,17 @@ export async function forgePresentation(action: PresentationAction, ctx: StepFor
       now,
       short,
     });
+    const bound = secp256k1 ? await bindMdocToSecp256k1Key(issued.issuerSigned, ctx.holderSecp256k1PublicJwk as JsonWebKey, signer) : issued.issuerSigned;
     const credential = fault
-      ? await applyMdocFault(fault, issued.issuerSigned, { signer, now, skewSeconds: ctx.skewSeconds, statusListEntries: statusList?.entries })
-      : issued.issuerSigned;
+      ? await applyMdocFault(fault, bound, { signer, now, skewSeconds: ctx.skewSeconds, statusListEntries: statusList?.entries })
+      : bound;
     return { format: spec.format, credential, claims: issued.claims, signer, statusList, identifierList };
   }
 
   const issued = await (pid ? issuePidSdJwtVc : issueCredentialASdJwtVc)({
     signer,
     issuer: issuer.issuerUri,
-    holderPublicJwk: ctx.holderPublicJwk,
+    holderPublicJwk: secp256k1 ? (ctx.holderSecp256k1PublicJwk as JsonWebKey) : ctx.holderPublicJwk,
     status: statusList && { uri: statusList.uri, idx: statusList.index },
     now,
     ...(short ? { validitySeconds: SHORT_VALIDITY_SECONDS } : {}),
