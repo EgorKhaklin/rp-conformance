@@ -19,6 +19,7 @@ import {
   statusListFormatOf,
   statusListToken,
 } from './definition';
+import type { RequestCheck } from './checks';
 import { type FaultId, faultInfo } from './faults';
 
 /** Markup of a `default_*` item, as the FCAF lint expects it. */
@@ -196,6 +197,9 @@ export const listRetrieved = (list: string): Expectation => ({
   codes: ['LIST_RETRIEVED'],
   text: `The Test Trust Infrastructure logs a retrieval of the new version of \`${list}\` by the Relying Party.`,
 });
+
+/** `CONF`: the captured requests pass the named request checks; `text` states the rule. */
+export const conf = (checks: RequestCheck[], text: string): Expectation => ({ codes: ['CONF'], checks, text });
 
 /** `STALE`: the verification result signals that a trust list it relies on is stale. */
 export const stale = (list: string): Expectation => ({

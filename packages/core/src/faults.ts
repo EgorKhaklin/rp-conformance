@@ -9,7 +9,7 @@ import type { Flow } from './definition';
  * Where a fault is applied: the issued credential, the status list or identifier list the Test Status Provider serves,
  * the presentation the Conformance Wallet builds for the request (KB-JWT, DeviceAuth), or the Authorization Response.
  */
-export type FaultPoint = 'credential' | 'status-list' | 'identifier-list' | 'presentation' | 'response' | 'trust-list';
+export type FaultPoint = 'credential' | 'status-list' | 'identifier-list' | 'presentation' | 'response' | 'trust-list' | 'request';
 
 /** The artifact format a fault applies to: a credential format, or the format of a status or identifier list. */
 export type FaultFormat = 'dc+sd-jwt' | 'mso_mdoc' | 'jwt' | 'cwt' | 'lote' | 'trusted-list';
@@ -43,6 +43,7 @@ const identifierList = (target: CheckId | null, text: string): FaultInfo => ({ p
 const response = (target: CheckId | null, text: string, flow?: Flow): FaultInfo => ({ point: 'response', target, text, ...(flow ? { flow } : {}) });
 const lote = (target: CheckId | null, text: string): FaultInfo => ({ point: 'trust-list', format: 'lote', target, text });
 const trustedList = (target: CheckId | null, text: string): FaultInfo => ({ point: 'trust-list', format: 'trusted-list', target, text });
+const request = (target: CheckId, text: string, flow?: Flow): FaultInfo => ({ point: 'request', target, text, ...(flow ? { flow } : {}) });
 const kbJwt = (target: CheckId, text: string, flow?: Flow): FaultInfo => ({ point: 'presentation', format: 'dc+sd-jwt', target, text, ...(flow ? { flow } : {}) });
 const deviceAuth = (target: CheckId, text: string, flow?: Flow): FaultInfo => ({ point: 'presentation', format: 'mso_mdoc', target, text, ...(flow ? { flow } : {}) });
 
@@ -443,6 +444,33 @@ export const FAULTS = {
     'trust-list-signer',
     'it is signed by a certificate issued by `CA-X`, which is not the certificate the LOTL names in its pointer to `TL-QEAA`',
   ),
+
+  // Request (self-validation of the request-side checks only): a valid request of the reference Relying Party's form,
+  // changed in one property. The harness never sends these; it checks the requests the Relying Party sends.
+  'request.unsigned-parameter': request('request-by-reference', 'its invocation URI additionally carries the parameter `nonce`', 'redirect'),
+  'request.response-mode-direct-post': request('request-object', 'its request object asks for response mode `direct_post`', 'redirect'),
+  'request.nonce-short': request('nonce', 'its `nonce` is `abc123`'),
+  'request.nonce-reused': request('nonce', 'it carries the `nonce` of an earlier request'),
+  'request.state-short': request('state', 'its `state` is `1`', 'redirect'),
+  'request.dc-api-response-uri': request('dc-api-request', 'its request object carries a `response_uri`', 'dc-api'),
+  'request.expected-origins-other': request('expected-origins', 'its `expected_origins` also names `https://other.example`', 'dc-api'),
+  'request.enc-key-private': request('encryption-key', 'the encryption key in its `client_metadata` carries the private key member `d`'),
+  'request.enc-values-one': request('enc-values', 'its `encrypted_response_enc_values_supported` lists only `A128GCM`'),
+  'request.enc-key-reused': request('ephemeral-key', 'it carries the encryption key of an earlier request'),
+  'request.vp-formats-es256k': request('vp-formats', 'its `vp_formats_supported` also lists the algorithm `ES256K` for SD-JWT VC and -47 for mdoc'),
+  'request.dcql-duplicate-id': request('dcql', 'its DCQL query carries a second credential query with the same `id`'),
+  'request.holder-binding-false': request('holder-binding', 'its credential query for the PID sets `require_cryptographic_holder_binding` to false'),
+  'request.trusted-authorities-other': request('trusted-authorities', 'its `trusted_authorities` names the key identifier of `CA-X`'),
+  'request.typ-jwt': request('request-signature', 'the `typ` header of its request object is `JWT`'),
+  'request.client-id-other': request('client-id', 'its `client_id` is the `x509_hash` Client Identifier of another certificate'),
+  'request.x5c-anchor': request('access-certificate-chain', 'the `x5c` header of its request object also carries the trust anchor of `AC-A`'),
+  'request.access-certificate-plain': request(
+    'access-certificate',
+    'it is signed with an end-entity certificate of `AC-A` without the policy, contact and subject of an access certificate',
+  ),
+  'request.registration-certificate-missing': request('registration-certificate', 'it carries no `verifier_info`'),
+  'request.unregistered-claim': request('registered-attributes', 'its DCQL query also requests the claim `nationalities`, which its registration certificate does not list'),
+  'request.unsigned': request('signed-request', 'it is not signed: an unsigned request object (`alg` `none`) via redirects, protocol `openid4vp-v1-unsigned` via the DC API'),
 
   // Authorization Response (direct_post.jwt via redirects, dc_api.jwt via the W3C Digital Credentials API): built from
   // the valid payload and the Relying Party's encryption key. Only the unencrypted response differs between the flows.

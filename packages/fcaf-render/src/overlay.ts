@@ -90,7 +90,7 @@ export function renderOverlay(
   write(`${rp}/index.md`, pages.relyingParty);
   write(`${rp}/wallet_solution/rp_ws.md`, pages.rpWs);
   write(`${rp}/pid_provider/rp_pp.md`, pages.rpPp);
-  write(`${rp}/trust_infrastructure/rp_inf.md`, pages.rpInf);
+  write(`${rp}/infrastructure/rp_inf.md`, pages.rpInf);
   for (const [sutClass, classDir] of Object.entries(CLASS_DIR)) {
     const mine = definitions.filter((d) => parseTestCaseId(d.id).sutClass === sutClass);
     write(`${rp}/${classDir}/test-cases.md`, testCasesPage(CLASS_TITLE[sutClass]));

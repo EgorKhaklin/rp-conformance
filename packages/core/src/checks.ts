@@ -74,12 +74,41 @@ export const RESPONSE_CHECKS = [
  */
 export const TRUST_LIST_CHECKS = ['trust-list-signer', 'trust-list-signature', 'trust-list-type', 'trust-list-freshness', 'trust-list-sequence'] as const;
 
+/**
+ * Checks of the request a Relying Party sends (catalogue scenario SCN-Q, `RP_WS_MS_*` and `RP_WS_SM_RpIntegrity`), one
+ * per property, evaluated over every request a step captures; `nonce`, `state` and `ephemeral-key` also compare the
+ * requests with each other.
+ */
+export const REQUEST_CHECKS = [
+  'signed-request',
+  'request-by-reference',
+  'request-object',
+  'nonce',
+  'state',
+  'dc-api-request',
+  'expected-origins',
+  'encryption-key',
+  'enc-values',
+  'ephemeral-key',
+  'vp-formats',
+  'dcql',
+  'holder-binding',
+  'trusted-authorities',
+  'request-signature',
+  'client-id',
+  'access-certificate-chain',
+  'access-certificate',
+  'registration-certificate',
+  'registered-attributes',
+] as const;
+
 export type CredentialCheck = (typeof CREDENTIAL_CHECKS)[number];
 export type StatusListCheck = (typeof STATUS_LIST_CHECKS)[number];
 export type IdentifierListCheck = (typeof IDENTIFIER_LIST_CHECKS)[number];
 export type ResponseCheck = (typeof RESPONSE_CHECKS)[number];
 export type TrustListCheck = (typeof TRUST_LIST_CHECKS)[number];
-export type CheckId = CredentialCheck | StatusListCheck | IdentifierListCheck | ResponseCheck | TrustListCheck;
+export type RequestCheck = (typeof REQUEST_CHECKS)[number];
+export type CheckId = CredentialCheck | StatusListCheck | IdentifierListCheck | ResponseCheck | TrustListCheck | RequestCheck;
 
 /** `pass`; `fail`; `skip` when a check could not be evaluated because a check it depends on did not pass, or does not apply. */
 export type CheckStatus = 'pass' | 'fail' | 'skip';

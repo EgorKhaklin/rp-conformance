@@ -12,6 +12,7 @@
     "@rp-conformance/forge": "workspace:*",
     "@rp-conformance/status-provider": "workspace:*",
     "@rp-conformance/trust-infrastructure": "workspace:*",
+    "@rp-conformance/validator": "workspace:*",
     "@rp-conformance/wallet": "workspace:*",
     "tsx": "^4.23.15",
     "yaml": "^2.9.1"

@@ -3,4 +3,5 @@ export * from './checks';
 export * from './definition';
 export * from './faults';
 export * from './http';
+export * from './request';
 export * from './wording';

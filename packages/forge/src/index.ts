@@ -12,6 +12,7 @@ export * from './pki';
 export * from './presentation';
 export * from './queries';
 export * from './registration';
+export * from './request';
 export * from './status-list';
 export * from './signers';
 export * from './step';

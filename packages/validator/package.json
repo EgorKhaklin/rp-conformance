@@ -6,8 +6,10 @@
   "exports": "./src/index.ts",
   "dependencies": {
     "@owf/crypto": "^0.7.0",
+    "@owf/eudi-access-certificate": "^0.6.0",
     "@owf/eudi-jades": "^0.6.0",
     "@owf/eudi-lote": "^0.6.0",
+    "@owf/eudi-registration-certificate": "^0.6.0",
     "@owf/eudi-tl": "^0.6.0",
     "@owf/identity-common": "^0.7.0",
     "@owf/token-status-list": "^0.7.0",

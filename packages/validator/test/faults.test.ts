@@ -190,7 +190,7 @@ describe('fault self-validation', () => {
     },
   );
 
-  it.each(FAULT_IDS.filter((fault) => faultInfo(fault).point !== 'trust-list'))('%s fails exactly its target check', async (fault) => {
+  it.each(FAULT_IDS.filter((fault) => !['trust-list', 'request'].includes(faultInfo(fault).point)))('%s fails exactly its target check', async (fault) => {
     const result = await fixture.validate(actionWith(fault), { other: await otherFor(fault) });
     const target = faultInfo(fault).target;
     expect(result.failures).toEqual(target ? [target] : []);
@@ -229,6 +229,28 @@ describe('fault self-validation', () => {
     } finally {
       await fixture.restore();
     }
+  });
+
+  // The request-side checks: a valid request of the reference Relying Party's form passes every check that applies in
+  // its flow, and each request fault fails exactly its target check, in each flow it applies to.
+  it.each(['redirect', 'dc-api'] as const)('valid requests via %s pass every request check that applies', async (flow) => {
+    for (const query of ['default_query_pid', 'default_query_pid_mdoc', 'default_query_pid_trusted_authorities'] as const) {
+      const result = await fixture.validateRequests(flow, query, { count: 3 });
+      expect(result.failures, query).toEqual([]);
+      const skipped = result.checks.filter((c) => c.status === 'skip').map((c) => c.check);
+      const otherFlow = flow === 'redirect' ? ['dc-api-request', 'expected-origins'] : ['request-by-reference', 'request-object', 'state'];
+      expect(skipped.sort(), query).toEqual([...otherFlow, ...(query.endsWith('_trusted_authorities') ? [] : ['trusted-authorities'])].sort());
+    }
+  });
+
+  it.each(
+    FAULT_IDS.filter((fault) => faultInfo(fault).point === 'request').flatMap((fault) =>
+      (faultInfo(fault).flow ? [faultInfo(fault).flow] : ['redirect', 'dc-api']).map((flow) => [fault, flow] as const),
+    ),
+  )('%s fails exactly its target check via %s', async (fault, flow) => {
+    const query = fault === 'request.trusted-authorities-other' ? 'default_query_pid_trusted_authorities' : 'default_query_pid';
+    const result = await fixture.validateRequests(flow as 'redirect' | 'dc-api', query, { fault });
+    expect(result.failures).toEqual([faultInfo(fault).target]);
   });
 
   it('every fault that fails key-binding or kb-freshness has its own expected reason', () => {

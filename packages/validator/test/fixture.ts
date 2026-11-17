@@ -8,6 +8,7 @@ import {
   type DefaultQueryId,
   type Flow,
   faultsOf,
+  type FaultId,
   faultInfo,
   type PresentationAction,
   type TrustListAction,
@@ -19,6 +20,9 @@ import {
   buildSealedLote,
   buildTrustedLists,
   buildTrustListVersion,
+  buildRequest,
+  issueRegistrationCertificate,
+  requestAnchorKeyIds,
   trustedListEntitiesOf,
   createTestPki,
   defaultEntitiesOf,
@@ -50,6 +54,7 @@ import {
   type ValidationMode,
   validateAuthorizationResponse,
   validateMdocPresentation,
+  validateRequests,
   validateSdJwtVcPresentation,
 } from '../src/index';
 
@@ -166,6 +171,47 @@ export class Fixture {
   async reload() {
     const failed = (await this.trust.refresh()).filter((r) => r.error);
     if (failed.length) throw new Error(failed.map((f) => f.error).join('; '));
+  }
+
+  /** The registration certificate of the Relying Party, for every default query, as the harness issues it. */
+  private registration?: Promise<string>;
+
+  /**
+   * Builds `count` requests of the reference Relying Party's form for a default query via `flow`, the first with
+   * `fault` (or, for the faults that repeat an earlier request's value, the second), and runs the request checks over them.
+   */
+  async validateRequests(flow: Flow, query: DefaultQueryId, options: { count?: number; fault?: FaultId } = {}) {
+    this.registration ??= issueRegistrationCertificate(
+      this.pki,
+      Object.entries(this.queries)
+        .filter(([id]) => !id.endsWith('_trusted_authorities'))
+        .map(([, q]) => q),
+    );
+    const registrationCertificate = await this.registration;
+    const count = Math.max(options.count ?? 1, options.fault === 'request.nonce-reused' || options.fault === 'request.enc-key-reused' ? 2 : 1);
+    const captured = [];
+    let first: Awaited<ReturnType<typeof buildRequest>> | undefined;
+    for (let i = 0; i < count; i++) {
+      const repeat = i === 1 && first;
+      const built = await buildRequest({
+        pki: this.pki,
+        flow,
+        query: this.queries[query],
+        registrationCertificate,
+        baseUrl: 'https://rp.rp-test',
+        ...(repeat && options.fault === 'request.nonce-reused' ? { nonce: first?.nonce } : {}),
+        ...(repeat && options.fault === 'request.enc-key-reused' ? { encryptionJwk: first?.encryptionJwk } : {}),
+        ...(i === 0 && options.fault && !['request.nonce-reused', 'request.enc-key-reused'].includes(options.fault) ? { fault: options.fault } : {}),
+      });
+      first ??= built;
+      captured.push(built.captured);
+    }
+    return validateRequests(captured, {
+      accessCertificateAnchors: [this.pki.entities['AC-A'].anchors.issuance.certificate],
+      registrationCertificateAnchors: [this.pki.entities['RC-A'].anchors.issuance.certificate],
+      trustedAuthorityKeyIds: requestAnchorKeyIds(this.pki),
+      requireTrustedAuthorities: query.endsWith('_trusted_authorities'),
+    });
   }
 
   async transaction(): Promise<Transaction> {

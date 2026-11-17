@@ -1,4 +1,5 @@
 import type { CredentialCategory, DefaultQueryId } from './adapter';
+import type { RequestCheck } from './checks';
 import { type FaultId, faultInfo } from './faults';
 
 /** Presentation flows of the Relying Party SUT. */
@@ -180,16 +181,28 @@ export interface TrustListAction {
   faults?: FaultId[];
 }
 
-export type StepAction = PresentationAction | StartAction | TrustListAction;
+/**
+ * Start `count` presentations for a default query and capture their requests at the Conformance Wallet, without
+ * answering them (catalogue scenario SCN-Q). The step's `CONF` expectation names the request checks they must pass.
+ */
+export interface RequestAction {
+  kind: 'request';
+  query: DefaultQueryId;
+  /** Number of requests; default 1. Freshness checks compare them with each other. */
+  count?: number;
+}
+
+export type StepAction = PresentationAction | StartAction | TrustListAction | RequestAction;
 
 /**
  * Expected-result codes of the catalogue (harness design section 5). `LIST_RETRIEVED`: the Test Trust Infrastructure
  * logged a retrieval of the list version the step published. `ENC_KEY`: the request carries an encryption key in its
  * `client_metadata`. `REJ_OR_ACC`: the Relying Party rejects the presentation, or accepts it and releases exactly the
  * requested attributes with their issuer-signed values (DeviceBinding_011: a device-signed element is ignored).
- * `STALE`: the verification result signals that a trust list it depends on is stale (`trust-list-stale`).
+ * `STALE`: the verification result signals that a trust list it depends on is stale (`trust-list-stale`). `CONF`: the
+ * captured requests pass the request checks the expectation names.
  */
-export type ExpectationCode = 'ACC' | 'REJ' | 'REJ_OR_ACC' | 'NOSTAT' | 'NOFETCH' | 'FETCHED' | 'POLICY' | 'LIST_RETRIEVED' | 'ENC_KEY' | 'STALE';
+export type ExpectationCode = 'ACC' | 'REJ' | 'REJ_OR_ACC' | 'NOSTAT' | 'NOFETCH' | 'FETCHED' | 'POLICY' | 'LIST_RETRIEVED' | 'ENC_KEY' | 'STALE' | 'CONF';
 
 /** The ICS declaration a `POLICY` expectation is compared with. */
 export interface PolicyReference {
@@ -204,6 +217,8 @@ export interface Expectation {
   text: string;
   /** For `POLICY`: the ICS item that decides between accepting and rejecting. */
   policy?: PolicyReference;
+  /** For `CONF`: the request checks the captured requests must pass. */
+  checks?: RequestCheck[];
 }
 
 /** One line of `Test Scenario` with its line of `Expected results`, and what the harness executes for it. */

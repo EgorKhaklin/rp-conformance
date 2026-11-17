@@ -6,3 +6,4 @@ export * from './sd-jwt-vc';
 export * from './status-list';
 export * from './trust';
 export * from './x509-path';
+export * from './request';
