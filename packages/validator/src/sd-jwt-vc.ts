@@ -18,6 +18,8 @@ export interface SdJwtVcValidation extends ValidationResult {
   issuer?: string;
   /** Whether the validator retrieved the status list. */
   statusListFetched: boolean;
+  /** Whether the issuer matched a trust list that is used within its grace period (`trust-list-stale`). */
+  trustListStale: boolean;
 }
 
 export interface SdJwtVcValidationOptions {
@@ -74,6 +76,7 @@ export async function validateSdJwtVcPresentation(presentation: string, options:
   let claims: Record<string, unknown> | undefined;
   let reference: { idx: number; uri: string } | undefined;
   let statusListFetched = false;
+  let trustListStale = false;
   const issuerJwt = presentation.split('~')[0] ?? '';
 
   const result = await recorder.collect(async () => {
@@ -100,7 +103,8 @@ export async function validateSdJwtVcPresentation(presentation: string, options:
       if (!match.ok) fail(match.reason);
       if (match.ok) {
         issuer = { name: match.entity.name, statusAnchors: options.trustRule.statusAnchors(match.entity, match.service) };
-        return `${match.entity.name} under ${match.anchor.subject.commonName} (${match.list.id})`;
+        trustListStale = match.stale;
+        return `${match.entity.name} under ${match.anchor.subject.commonName} (${match.list.id}${match.stale ? ', stale within the grace period' : ''})`;
       }
     });
 
@@ -197,5 +201,5 @@ export async function validateSdJwtVcPresentation(presentation: string, options:
       },
     });
   });
-  return { ...result, claims: result.failures.includes('disclosures') ? undefined : claims, issuer: issuer?.name, statusListFetched };
+  return { ...result, claims: result.failures.includes('disclosures') ? undefined : claims, issuer: issuer?.name, statusListFetched, trustListStale };
 }

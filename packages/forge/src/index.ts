@@ -15,4 +15,5 @@ export * from './registration';
 export * from './status-list';
 export * from './signers';
 export * from './step';
+export * from './trust-list-version';
 export * from './trusted-list';

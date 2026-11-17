@@ -48,6 +48,8 @@ export interface ReferenceRpOptions extends ServerOptions {
   validStatuses?: number[];
   /** Lets the OpenID4VP library use `http` URLs, for runs on localhost. */
   allowInsecureUrls?: boolean;
+  /** The grace period `G` after the `NextUpdate` of a trust list (ICS RP.T.2), milliseconds; default 0. */
+  graceMs?: number;
 }
 
 export type TransactionStatus = 'pending' | 'success' | 'failure';
@@ -66,6 +68,8 @@ interface Transaction {
   encryptionKey: CryptoKey;
   encryptionJwk: Jwk;
   attributes?: Record<string, unknown>;
+  /** Conditions the result signals, for example `trust-list-stale`. */
+  flags?: string[];
   error?: string;
   response?: CheckResult[];
   validations?: (SdJwtVcValidation | MdocValidation)[];
@@ -77,6 +81,8 @@ export interface ReferenceRpResult {
   status: TransactionStatus;
   /** Released attributes by claim path joined with `.`. */
   attributes?: Record<string, unknown>;
+  /** Conditions the result signals: `trust-list-stale` when a trust list it relied on is used within its grace period. */
+  flags?: string[];
   error?: string;
   /** The checks of the Authorization Response. */
   response?: CheckResult[];
@@ -117,7 +123,7 @@ export class ReferenceRelyingParty {
       lotes: options.trustLists,
       listOfTrustedLists: options.listOfTrustedLists,
       rulebooks: options.rulebooks,
-    });
+    }, fetch, { graceMs: options.graceMs ?? 0 });
     this.clientId = x509HashClientId(options.accessCertificate.certificate);
   }
 
@@ -163,6 +169,7 @@ export class ReferenceRelyingParty {
         transactionId: tx.id,
         status: tx.status,
         attributes: tx.attributes,
+        ...(tx.flags?.length ? { flags: tx.flags } : {}),
         error: tx.error,
         response: tx.response,
         validations: tx.validations,
@@ -371,6 +378,7 @@ export class ReferenceRelyingParty {
     }
     tx.status = 'success';
     tx.attributes = attributes;
+    if (validations.some((v) => v.trustListStale)) tx.flags = ['trust-list-stale'];
     return undefined;
   }
 }

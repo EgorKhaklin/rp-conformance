@@ -29,6 +29,11 @@ export const ics = {
   usesTrustedAuthorities: { item: 'RP.P.3', text: 'Relying Party uses `trusted_authorities` in DCQL queries.', equals: 'Yes' },
   appliesClockTolerance: { item: 'RP.P.5', text: 'Relying Party applies a clock tolerance greater than zero.', equals: 'Yes' },
   checksPidRevocation: { item: 'RP.R.1', text: 'Relying Party checks the revocation status of PIDs.', equals: 'Yes' },
+  appliesGracePeriod: {
+    item: 'RP.T.3',
+    text: 'Relying Party keeps using a trust list for a grace period greater than zero after its `NextUpdate`.',
+    equals: 'Yes',
+  },
 } as const satisfies Record<string, IcsCondition>;
 
 /** The ICS items that declare support for a flow. */
@@ -154,12 +159,25 @@ export interface StartAction {
   query: DefaultQueryId;
 }
 
-/** Publish a new version of a trust list and wait until the Relying Party retrieved it (TrustMechanisms_007, _008). */
+/** The trust lists a step can publish a new version of: the PID Provider LoTE and the Trusted List of QTSPs. */
+export type PublishableList = 'TL-PID' | 'TL-QEAA';
+
+/**
+ * Publish a new version of a trust list and wait until the Relying Party retrieved it (TrustMechanisms_007, _008,
+ * RP_Inf_SM_TrustMechanisms). The version differs from the current one in the entities it removes or adds, the
+ * withdrawn PID/Issuance services it lists again, the QTSP services it grants, and at most one trust-list fault.
+ */
 export interface TrustListAction {
   kind: 'trust-list';
-  list: 'TL-PID';
+  list: PublishableList;
   remove?: string[];
   add?: string[];
+  /** `TL-PID`: entities whose withdrawn PID/Issuance service the version lists again (`PP-W`, RP_Inf_005). */
+  restoreIssuance?: string[];
+  /** `TL-QEAA`: entities whose service the version lists as a granted qualified service (`QP-N`, RP_Inf_009). */
+  grantQualified?: string[];
+  /** Named trust-list faults (at most one); empty or left out for a valid version. */
+  faults?: FaultId[];
 }
 
 export type StepAction = PresentationAction | StartAction | TrustListAction;
@@ -169,8 +187,9 @@ export type StepAction = PresentationAction | StartAction | TrustListAction;
  * logged a retrieval of the list version the step published. `ENC_KEY`: the request carries an encryption key in its
  * `client_metadata`. `REJ_OR_ACC`: the Relying Party rejects the presentation, or accepts it and releases exactly the
  * requested attributes with their issuer-signed values (DeviceBinding_011: a device-signed element is ignored).
+ * `STALE`: the verification result signals that a trust list it depends on is stale (`trust-list-stale`).
  */
-export type ExpectationCode = 'ACC' | 'REJ' | 'REJ_OR_ACC' | 'NOSTAT' | 'NOFETCH' | 'FETCHED' | 'POLICY' | 'LIST_RETRIEVED' | 'ENC_KEY';
+export type ExpectationCode = 'ACC' | 'REJ' | 'REJ_OR_ACC' | 'NOSTAT' | 'NOFETCH' | 'FETCHED' | 'POLICY' | 'LIST_RETRIEVED' | 'ENC_KEY' | 'STALE';
 
 /** The ICS declaration a `POLICY` expectation is compared with. */
 export interface PolicyReference {
@@ -339,6 +358,7 @@ export function holderCurveOf(action: StepAction): 'P-256' | 'secp256k1' {
 
 /** Every fault of a presentation. */
 export function faultsOf(action: StepAction): FaultId[] {
+  if (action.kind === 'trust-list') return action.faults ?? [];
   if (action.kind !== 'presentation') return [];
   return [
     ...action.credential.faults,
@@ -444,3 +464,11 @@ export const identifierListToken = {
     return { format: 'cwt', contains: options.contains, faults: options.faults ?? [] };
   },
 };
+/** ISO 8601 duration (`PT1H`, `PT5M`, `PT30S`) in milliseconds. */
+export function durationMs(value: string | undefined): number | undefined {
+  const match = value && /^P(?:(\d+)D)?(?:T(?:(\d+)H)?(?:(\d+)M)?(?:(\d+(?:\.\d+)?)S)?)?$/.exec(value);
+  if (!match) return undefined;
+  const [, d = '0', h = '0', m = '0', s = '0'] = match;
+  return ((Number(d) * 24 + Number(h)) * 60 + Number(m)) * 60_000 + Number(s) * 1000;
+}
+

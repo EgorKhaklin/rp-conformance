@@ -1,0 +1,3 @@
+# Relying Party - Trust Infrastructure interface
+
+The `(rp_inf)` test class covers the interface between the Relying Party and the trust infrastructure: retrieving the lists of trusted entities ([ETSI TS 119 602]) and the Trusted Lists ([ETSI TS 119 612]) that `default_trust_configuration_rp` publishes, validating their seal or signature, signer, type, freshness and sequence, and using their anchors. The test cases publish a new version of `TL-PID` or `TL-QEAA` in the Test Trust Infrastructure and then present a credential whose acceptance depends on that version. They present the credentials in one format, which does not affect the outcome, and run once for each presentation flow the Relying Party supports.

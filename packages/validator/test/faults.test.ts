@@ -8,11 +8,13 @@ import {
   presentation,
   RESPONSE_CHECKS,
   statusListToken,
+  type TrustListAction,
 } from '@rp-conformance/core';
 import { createPublicKey, verify } from 'node:crypto';
+import { defaultEntitiesOf, trustedListEntitiesOf } from '@rp-conformance/forge';
 import { base64url, type CborMap, decodeCbor, decodeEmbedded, embedded, encodeCbor, jwkThumbprint as jwkThumbprintOf, readCose, sigStructure } from '@rp-conformance/forge';
 import { beforeAll, describe, expect, it } from 'vitest';
-import { MDOC_IDENTIFIER_LIST_CHECKS, MDOC_STATUS_LIST_CHECKS, openid4vpSessionTranscript, SD_JWT_VC_CHECKS } from '../src/index';
+import { MDOC_IDENTIFIER_LIST_CHECKS, MDOC_STATUS_LIST_CHECKS, openid4vpSessionTranscript, SD_JWT_VC_CHECKS, TRUST_RULES } from '../src/index';
 import { AUDIENCE, Fixture, RESPONSE_URI } from './fixture';
 
 // Harness design section 7, steps 1 and 2: the valid artifacts pass every check of the reference validator, and every
@@ -188,12 +190,45 @@ describe('fault self-validation', () => {
     },
   );
 
-  it.each(FAULT_IDS)('%s fails exactly its target check', async (fault) => {
+  it.each(FAULT_IDS.filter((fault) => faultInfo(fault).point !== 'trust-list'))('%s fails exactly its target check', async (fault) => {
     const result = await fixture.validate(actionWith(fault), { other: await otherFor(fault) });
     const target = faultInfo(fault).target;
     expect(result.failures).toEqual(target ? [target] : []);
     if (BINDING_REASONS[fault] && target) expect(reasonOf(result, target)).toMatch(BINDING_REASONS[fault]);
     if (ISSUER_REASONS[fault] && target) expect(reasonOf(result, target)).toMatch(ISSUER_REASONS[fault]);
+  });
+
+  // A new version of TL-PID or TL-QEAA that adds an entity (PP-C, or a granted service of QP-N), with the fault: the
+  // reference validator refuses it for exactly the fault's target check, and keeps the version in use, so the added
+  // entity stays untrusted. A version within its grace period is used and reported stale.
+  it.each(FAULT_IDS.filter((fault) => faultInfo(fault).point === 'trust-list'))('%s fails exactly its target check', async (fault) => {
+    const qeaa = faultInfo(fault).format === 'trusted-list';
+    const list = qeaa ? 'TL-QEAA' : 'TL-PID';
+    // A rollback undercuts a version the store has loaded before.
+    if (fault === 'trust-list.rollback') await fixture.publishVersion({ kind: 'trust-list', list }, defaultEntitiesOf(fixture.pki, 'TL-PID'));
+    const entities = qeaa ? trustedListEntitiesOf(fixture.pki) : [...defaultEntitiesOf(fixture.pki, 'TL-PID'), 'PP-C'];
+    const action: TrustListAction = {
+      kind: 'trust-list',
+      list,
+      faults: [fault],
+      ...(qeaa ? { grantQualified: ['QP-N'] } : fault === 'trust-list.rollback' ? { restoreIssuance: ['PP-W'] } : {}),
+    };
+    try {
+      const refused = await fixture.publishVersion(action, entities);
+      const target = faultInfo(fault).target;
+      expect(refused.map((r) => r.failed ?? r.error)).toEqual(target ? [target] : []);
+      const added = qeaa ? 'QP-N' : fault === 'trust-list.rollback' ? 'PP-W' : 'PP-C';
+      const chain = [Buffer.from(fixture.pki.entities[added].signers.issuance.certificate.der).toString('base64')];
+      const match = await fixture.trust.match(qeaa ? TRUST_RULES.qeaa : TRUST_RULES.pid, chain);
+      expect(match.ok, `${added} trusted`).toBe(!target);
+      if (match.ok) expect(match.stale).toBe(fault === 'trust-list.stale-within-grace');
+      // The version in use stays: PP-A and QP-A remain trusted.
+      const kept = qeaa ? 'QP-A' : 'PP-A';
+      const keptChain = [Buffer.from(fixture.pki.entities[kept].signers.issuance.certificate.der).toString('base64')];
+      expect((await fixture.trust.match(qeaa ? TRUST_RULES.qeaa : TRUST_RULES.pid, keptChain)).ok, `${kept} trusted`).toBe(true);
+    } finally {
+      await fixture.restore();
+    }
   });
 
   it('every fault that fails key-binding or kb-freshness has its own expected reason', () => {

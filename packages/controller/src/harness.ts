@@ -1,6 +1,8 @@
-import type { Ics, PublishedTrustList, TestEnvironment } from '@rp-conformance/core';
+import { durationMs, type Ics, type PublishableList, type PublishedTrustList, type TestEnvironment, type TrustListAction } from '@rp-conformance/core';
 import {
   buildSealedLote,
+  buildTrustListVersion,
+  trustedListEntitiesOf,
   buildTrustedLists,
   TRUSTED_LIST_MEDIA_TYPE,
   type TrustedListId,
@@ -36,8 +38,13 @@ export interface Harness {
   trust: TrustInfrastructure;
   env: TestEnvironment;
   namespace: string;
-  /** Publishes a new version of a list with the given entities (default: `default_trust_configuration_rp`). */
-  publishList(list: LoteListId, entities?: string[]): Promise<{ version: number; publishedAt: Date }>;
+  /**
+   * Publishes a new version of `TL-PID` or `TL-QEAA` with the given entities (default: `default_trust_configuration_rp`)
+   * and the changes and fault of a trust-list step, if any.
+   */
+  publishList(list: PublishableList, entities?: string[], action?: TrustListAction): Promise<{ version: number; publishedAt: Date }>;
+  /** The path of a list below the namespace, as the Test Trust Infrastructure logs its retrievals. */
+  pathOf(list: PublishableList): string;
   stop(): Promise<void>;
 }
 
@@ -55,17 +62,44 @@ export async function startHarness(options: HarnessOptions): Promise<Harness> {
   const trust = await new TrustInfrastructure().start({ host: bind, port: options.trustPort ?? 0, publicHost: options.harnessHost });
 
   const trustLists: PublishedTrustList[] = [];
+  const locations = {
+    LOTL: trust.urlOf(options.namespace, TRUSTED_LIST_PATHS.LOTL),
+    'TL-QEAA': trust.urlOf(options.namespace, TRUSTED_LIST_PATHS['TL-QEAA']),
+  };
+  // Sequence numbers count up across the lists of a run; each list remembers the one of its latest version.
   let sequenceNumber = 1;
-  const publishList = async (list: LoteListId, entities = defaultEntitiesOf(pki, list)) => {
+  const latest = new Map<string, number>();
+  const pathOf = (list: PublishableList) => (list === 'TL-QEAA' ? TRUSTED_LIST_PATHS['TL-QEAA'] : list);
+  const graceMs = durationMs(String(options.ics.items['RP.T.2'] ?? '')) ?? 0;
+  const publishLote = async (list: LoteListId, entities = defaultEntitiesOf(pki, list)) => {
     const url = trust.urlOf(options.namespace, list);
-    const { jws } = await buildSealedLote({ list, pki, entities, distributionPoint: url, sequenceNumber: sequenceNumber++ });
+    const { jws } = await buildSealedLote({ list, pki, entities, distributionPoint: url, sequenceNumber });
+    latest.set(list, sequenceNumber++);
     const publishedAt = new Date();
     const { version } = trust.publish(options.namespace, list, jws);
     return { version, publishedAt };
   };
+  const publishList = async (list: PublishableList, entities?: string[], action?: TrustListAction) => {
+    if (!action && list !== 'TL-QEAA') return publishLote(list, entities);
+    const built = await buildTrustListVersion(action ?? { kind: 'trust-list', list }, {
+      pki,
+      entities: entities ?? (list === 'TL-QEAA' ? trustedListEntitiesOf(pki) : defaultEntitiesOf(pki, list)),
+      sequenceNumber,
+      previousSequenceNumber: latest.get(list) ?? 1,
+      location: trust.urlOf(options.namespace, list),
+      locations,
+      graceMs,
+    });
+    sequenceNumber++;
+    // A rolled back version does not become the latest one; the next version counts on from the one before it.
+    if (!action?.faults?.includes('trust-list.rollback')) latest.set(list, built.sequenceNumber);
+    const publishedAt = new Date();
+    const { version } = trust.publish(options.namespace, pathOf(list), built.body, built.contentType);
+    return { version, publishedAt };
+  };
   for (const list of LISTS) {
     const url = trust.urlOf(options.namespace, list);
-    await publishList(list);
+    await publishLote(list);
     trustLists.push({
       id: list,
       loteType: LIST_PROFILES[list].loteType,
@@ -73,11 +107,8 @@ export async function startHarness(options: HarnessOptions): Promise<Harness> {
       schemeOperatorCertificatePem: pki.schemeOperators[list].certificate.pem,
     });
   }
-  const locations = {
-    LOTL: trust.urlOf(options.namespace, TRUSTED_LIST_PATHS.LOTL),
-    'TL-QEAA': trust.urlOf(options.namespace, TRUSTED_LIST_PATHS['TL-QEAA']),
-  };
-  const trustedLists = await buildTrustedLists({ pki, locations });
+  const trustedLists = await buildTrustedLists({ pki, locations, sequenceNumber: sequenceNumber++ });
+  latest.set('TL-QEAA', sequenceNumber - 1);
   for (const list of ['LOTL', 'TL-QEAA'] as TrustedListId[]) {
     trust.publish(options.namespace, TRUSTED_LIST_PATHS[list], trustedLists[list], TRUSTED_LIST_MEDIA_TYPE);
   }
@@ -117,6 +148,7 @@ export async function startHarness(options: HarnessOptions): Promise<Harness> {
     env,
     namespace: options.namespace,
     publishList,
+    pathOf,
     async stop() {
       await status.stop();
       await trust.stop();

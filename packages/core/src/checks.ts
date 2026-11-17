@@ -66,11 +66,20 @@ export const RESPONSE_CHECKS = [
   'response-payload',
 ] as const;
 
+/**
+ * Checks of a new version of a trust list (ETSI TS 119 602 for a LoTE, ETSI TS 119 612 for a Trusted List), before the
+ * Relying Party uses it: the seal or signature verifies, its signer is the configured scheme operator (or the LOTL
+ * pointer's certificate), the list type is the configured one, `NextUpdate` has not passed by more than the grace period
+ * `G`, and its sequence number is not lower than that of the version in use.
+ */
+export const TRUST_LIST_CHECKS = ['trust-list-signer', 'trust-list-signature', 'trust-list-type', 'trust-list-freshness', 'trust-list-sequence'] as const;
+
 export type CredentialCheck = (typeof CREDENTIAL_CHECKS)[number];
 export type StatusListCheck = (typeof STATUS_LIST_CHECKS)[number];
 export type IdentifierListCheck = (typeof IDENTIFIER_LIST_CHECKS)[number];
 export type ResponseCheck = (typeof RESPONSE_CHECKS)[number];
-export type CheckId = CredentialCheck | StatusListCheck | IdentifierListCheck | ResponseCheck;
+export type TrustListCheck = (typeof TRUST_LIST_CHECKS)[number];
+export type CheckId = CredentialCheck | StatusListCheck | IdentifierListCheck | ResponseCheck | TrustListCheck;
 
 /** `pass`; `fail`; `skip` when a check could not be evaluated because a check it depends on did not pass, or does not apply. */
 export type CheckStatus = 'pass' | 'fail' | 'skip';

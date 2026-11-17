@@ -48,3 +48,4 @@ Items with the ID `N/A` are surrogate ICS items that select test cases through t
 | --- | --- | --- | --- |
 | RP.T.1 | Trust list refresh interval `T_refresh`. | Duration | [ARF] Annex 2, OIA_15a. |
 | RP.T.2 | Grace period `G` after the `NextUpdate` of a trust list. | Duration | During `G` the Relying Party keeps using the list and signals that it is stale; afterwards it rejects presentations that depend on it. |
+| RP.T.3 | Relying Party keeps using a trust list for a grace period greater than zero after its `NextUpdate`. | Yes/No | Yes when RP.T.2 is longer than zero. |

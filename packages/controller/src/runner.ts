@@ -11,6 +11,7 @@ import {
   type Ics,
   isExecutable,
   type PresentationAction,
+  type PublishableList,
   type RelyingPartyAdapter,
   type RelyingPartyResult,
   type StartAction,
@@ -19,8 +20,9 @@ import {
   type TrustListAction,
   type Verdict,
   controlsOf,
+  durationMs,
 } from '@rp-conformance/core';
-import { base64url, defaultEntitiesOf, forgePresentation } from '@rp-conformance/forge';
+import { base64url, defaultEntitiesOf, forgePresentation, trustedListEntitiesOf } from '@rp-conformance/forge';
 import { DcApiShim, type DcApiOutcome, type DcApiRun } from '@rp-conformance/dc-api-shim';
 import { ConformanceWallet, type DcApiAnswer, type HeldCredential, type PresentationEvidence } from '@rp-conformance/wallet';
 import { evaluate, worst } from './evaluate';
@@ -149,13 +151,7 @@ export function selectTestCases(all: TestCaseDefinition[], only?: string[]): Tes
   return [...selected.filter((d) => !d.control), ...selected.filter((d) => d.control)];
 }
 
-/** ISO 8601 duration (`PT1H`, `PT5M`, `PT30S`) in milliseconds. */
-export function durationMs(value: string | undefined): number | undefined {
-  const match = value && /^P(?:(\d+)D)?(?:T(?:(\d+)H)?(?:(\d+)M)?(?:(\d+(?:\.\d+)?)S)?)?$/.exec(value);
-  if (!match) return undefined;
-  const [, d = '0', h = '0', m = '0', s = '0'] = match;
-  return ((Number(d) * 24 + Number(h)) * 60 + Number(m)) * 60_000 + Number(s) * 1000;
-}
+export { durationMs };
 
 export async function runConformance(options: RunOptions): Promise<{ report: RunReport; reportPath: string }> {
   const log = options.log ?? (() => {});
@@ -263,11 +259,11 @@ interface TestCaseState {
   /** The `vp_token` entry the Conformance Wallet presented in each step, for `presentation.replay`. */
   presentations: Map<number, string>;
   /** Lists the test case changed, restored afterwards. */
-  changedLists: Set<'TL-PID'>;
+  changedLists: Set<PublishableList>;
   /** The current entities of each changed list. */
-  entities: Map<'TL-PID', string[]>;
+  entities: Map<PublishableList, string[]>;
   /** A list retrieval still awaited, checked again after the next step. */
-  pendingRetrieval?: { record: StepRecord; list: 'TL-PID'; version: number; publishedAt: Date; checks: number };
+  pendingRetrieval?: { record: StepRecord; list: PublishableList; version: number; publishedAt: Date; checks: number };
   /** Whether the Relying Party answered a request of this test case (a started presentation). */
   rpReached: boolean;
 }
@@ -585,12 +581,13 @@ async function runStart(action: StartAction, flow: Flow, index: number, record: 
  * next step, so a retrieval missing at the end of the wait is checked again after that step.
  */
 async function runTrustList(action: TrustListAction, record: StepRecord, ctx: Context, state: TestCaseState) {
-  const current = state.entities.get(action.list) ?? defaultEntitiesOf(ctx.harness.pki, action.list);
+  const current = state.entities.get(action.list) ?? (action.list === 'TL-QEAA' ? trustedListEntitiesOf(ctx.harness.pki) : defaultEntitiesOf(ctx.harness.pki, action.list));
   const entities = [...current.filter((e) => !action.remove?.includes(e)), ...(action.add ?? []).filter((e) => !current.includes(e))];
-  state.entities.set(action.list, entities);
+  // A version the Relying Party must not use leaves the entities of the version in use unchanged.
+  if (!action.faults?.length) state.entities.set(action.list, entities);
   state.changedLists.add(action.list);
-  const { version, publishedAt } = await ctx.harness.publishList(action.list, entities);
-  record.reason = `published version ${version} of ${action.list} with ${entities.join(', ')}`;
+  const { version, publishedAt } = await ctx.harness.publishList(action.list, entities, action);
+  record.reason = `published version ${version} of ${action.list} with ${entities.join(', ')}${action.faults?.length ? `, with the fault ${action.faults.join(', ')}` : ''}`;
   await ctx.adapter.refreshTrust?.(ctx.harness.namespace);
   const refreshMs = durationMs(String(ctx.ics.items['RP.T.1'] ?? '')) ?? 60_000;
   const waitMs = ctx.trustRefreshWaitMs ?? (ctx.adapter.refreshTrust ? 10_000 : refreshMs);
@@ -606,7 +603,7 @@ function retrievals(state: TestCaseState, ctx: Context) {
   const pending = state.pendingRetrieval;
   if (!pending) return [];
   return ctx.harness.trust
-    .retrievalsOf(ctx.harness.namespace, pending.list, pending.publishedAt)
+    .retrievalsOf(ctx.harness.namespace, ctx.harness.pathOf(pending.list), pending.publishedAt)
     .filter((entry) => entry.status === 200 && (entry.version ?? 0) >= pending.version);
 }
 

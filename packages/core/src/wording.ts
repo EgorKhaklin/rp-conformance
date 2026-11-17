@@ -197,6 +197,12 @@ export const listRetrieved = (list: string): Expectation => ({
   text: `The Test Trust Infrastructure logs a retrieval of the new version of \`${list}\` by the Relying Party.`,
 });
 
+/** `STALE`: the verification result signals that a trust list it relies on is stale. */
+export const stale = (list: string): Expectation => ({
+  codes: ['STALE'],
+  text: `Its verification result signals that \`${list}\` is stale (\`trust-list-stale\`).`,
+});
+
 /** `ENC_KEY`: the request of a transaction carries an encryption key. */
 export const encryptionKeyOf = (transaction: string): Expectation => ({
   codes: ['ENC_KEY'],

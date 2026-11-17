@@ -103,8 +103,8 @@ function pointer(target: TrustedListPointer): string {
  * qualified service withdrawn ten days ago, with its granted status in the service history. The current status starts
  * before the attestations the harness issues (an mdoc is signed two days in the past).
  */
-function qeaaService(entity: TestEntity, now: Date): string {
-  const service = entity.spec.qeaaService ?? 'granted';
+function qeaaService(entity: TestEntity, now: Date, granted = false): string {
+  const service = granted ? 'granted' : (entity.spec.qeaaService ?? 'granted');
   const anchor = entity.anchors.issuance;
   const since = new Date(now.getTime() - 30 * DAY);
   const type = service === 'not-qualified' ? EAA_SERVICE_TYPE.notQualified : EAA_SERVICE_TYPE.qualified;
@@ -126,14 +126,14 @@ function qeaaService(entity: TestEntity, now: Date): string {
 }
 
 /** A `TrustServiceProvider` (clause 5.4). */
-function provider(entity: TestEntity, index: number, now: Date): string {
+function provider(entity: TestEntity, index: number, now: Date, granted = false): string {
   const territory = TRUSTED_LIST_OPERATORS['TL-QEAA'].territory;
   return (
     `<TrustServiceProvider><TSPInformation>${name('TSPName', entity.spec.id)}` +
     // The trade name carries an official registration identifier (clause 5.4.2); these are made up for the test.
     `${name('TSPTradeName', `VAT${territory}-${String(100000001 + index)}`)}${address('TSPAddress', entity.spec.host, territory)}` +
     `${uris('TSPInformationURI', [`https://${entity.spec.host}/`])}</TSPInformation>` +
-    `<TSPServices>${qeaaService(entity, now)}</TSPServices></TrustServiceProvider>`
+    `<TSPServices>${qeaaService(entity, now, granted)}</TSPServices></TrustServiceProvider>`
   );
 }
 
@@ -146,6 +146,8 @@ export interface TrustedListBuildOptions {
   pointers: TrustedListPointer[];
   /** For `TL-QEAA`: the QTSPs on the list; default every entity of `default_trust_configuration_rp` on it. */
   entities?: string[];
+  /** For `TL-QEAA`: QTSPs whose service the list carries as a granted qualified service (`QP-N`, RP_Inf_SM_TrustMechanisms_009). */
+  grantQualified?: string[];
   sequenceNumber?: number;
   now?: Date;
 }
@@ -185,7 +187,7 @@ export function buildTrustedListXml(options: TrustedListBuildOptions): string {
     `<ListIssueDateTime>${dateTime(now)}</ListIssueDateTime><NextUpdate><dateTime>${dateTime(new Date(now.getTime() + 30 * DAY))}</dateTime></NextUpdate>` +
     `<DistributionPoints><URI>${escape(options.location)}</URI></DistributionPoints></SchemeInformation>` +
     (entities.length
-      ? `<TrustServiceProviderList>${entities.map((id, i) => provider(options.pki.entities[id], i, now)).join('')}</TrustServiceProviderList>`
+      ? `<TrustServiceProviderList>${entities.map((id, i) => provider(options.pki.entities[id], i, now, options.grantQualified?.includes(id))).join('')}</TrustServiceProviderList>`
       : '') +
     '</TrustServiceStatusList>\n'
   );
@@ -243,6 +245,9 @@ export async function buildTrustedLists(options: {
   pki: TestPki;
   locations: Record<TrustedListId, string>;
   entities?: string[];
+  grantQualified?: string[];
+  /** The certificate that signs `TL-QEAA`; default its scheme operator's, which the LOTL pointer names. */
+  qeaaSigner?: CertifiedKey;
   sequenceNumber?: number;
   now?: Date;
 }): Promise<Record<TrustedListId, string>> {
@@ -252,12 +257,17 @@ export async function buildTrustedLists(options: {
   const common = { pki, sequenceNumber: options.sequenceNumber, now: options.now };
   return {
     LOTL: await buildSignedTrustedList({ ...common, list: 'LOTL', location: locations.LOTL, pointers: [qeaaPointer, lotlPointer] }),
-    'TL-QEAA': await buildSignedTrustedList({
-      ...common,
-      list: 'TL-QEAA',
-      location: locations['TL-QEAA'],
-      pointers: [lotlPointer],
-      entities: options.entities,
-    }),
+    'TL-QEAA': await signTrustedList(
+      buildTrustedListXml({
+        ...common,
+        list: 'TL-QEAA',
+        location: locations['TL-QEAA'],
+        pointers: [lotlPointer],
+        entities: options.entities,
+        grantQualified: options.grantQualified,
+      }),
+      options.qeaaSigner ?? pki.trustedListOperators['TL-QEAA'],
+      options.now,
+    ),
   };
 }

@@ -79,7 +79,7 @@ const PUB_EAA_NOTIFIED = 'http://uri.etsi.org/19602/PubEAAProvidersList/SvcStatu
 
 const der = (key: CertifiedKey) => Buffer.from(key.certificate.der).toString('base64');
 
-function buildEntity(entity: TestEntity, profile: ListProfile) {
+function buildEntity(entity: TestEntity, profile: ListProfile, restoreIssuance = false) {
   const informationUri = `${profile.informationUriPrefix}DE`;
   const builder = trustedEntity()
     .name(entity.spec.id)
@@ -88,7 +88,7 @@ function buildEntity(entity: TestEntity, profile: ListProfile) {
     .infoUri(informationUri);
   // A withdrawn issuance service is left out: TS 119 602 Annex D has no ServiceStatus for it (PP-W).
   const services: [string, CertifiedKey][] = [
-    ...(entity.spec.issuanceWithdrawn ? [] : [[profile.issuanceServiceType, entity.anchors.issuance] as [string, CertifiedKey]]),
+    ...(entity.spec.issuanceWithdrawn && !restoreIssuance ? [] : [[profile.issuanceServiceType, entity.anchors.issuance] as [string, CertifiedKey]]),
     [profile.revocationServiceType, entity.anchors.revocation],
   ];
   for (const [type, anchor] of services) {
@@ -108,6 +108,14 @@ export interface LoteBuildOptions {
   now?: Date;
   /** Where the list is published (`DistributionPoints`). */
   distributionPoint?: string;
+  /** Entities whose withdrawn issuance service the list carries again (`PP-W`, RP_Inf_SM_TrustMechanisms_005). */
+  restoreIssuance?: string[];
+  /** `ListIssueDateTime`; default `now`. */
+  issued?: Date;
+  /** `NextUpdate`; default one month after `ListIssueDateTime`. */
+  nextUpdate?: Date;
+  /** `LoTEType` instead of the one of `list` (RP_Inf_SM_TrustMechanisms_006). */
+  loteType?: string;
 }
 
 /** The entities of `default_trust_configuration_rp` that are on a list. */
@@ -121,12 +129,13 @@ export function defaultEntitiesOf(pki: TestPki, list: LoteListId): string[] {
 export function buildLoteDocument(options: LoteBuildOptions) {
   const profile = LIST_PROFILES[options.list];
   const now = options.now ?? new Date();
+  const issued = options.issued ?? now;
   const ids = options.entities ?? defaultEntitiesOf(options.pki, options.list);
   return createLoTE(
     {
       LoTEVersionIdentifier: 1,
       LoTESequenceNumber: options.sequenceNumber ?? 1,
-      LoTEType: profile.loteType,
+      LoTEType: options.loteType ?? profile.loteType,
       SchemeOperatorName: [{ lang: 'en', value: `${options.list} scheme operator` }],
       SchemeOperatorAddress: {
         SchemeOperatorPostalAddress: [
@@ -141,11 +150,11 @@ export function buildLoteDocument(options: LoteBuildOptions) {
       SchemeTerritory: 'EU',
       PolicyOrLegalNotice: [{ LoTELegalNotice: 'Test list of the RP conformance harness. Not for production use.', lang: 'en' }],
       ...(profile.pubEaa ? { HistoricalInformationPeriod: 65535 } : {}),
-      ListIssueDateTime: now.toISOString(),
-      NextUpdate: new Date(now.getTime() + MONTH).toISOString(),
+      ListIssueDateTime: issued.toISOString(),
+      NextUpdate: (options.nextUpdate ?? new Date(issued.getTime() + MONTH)).toISOString(),
       ...(options.distributionPoint ? { DistributionPoints: [options.distributionPoint] } : {}),
     } as never,
-    ids.map((id) => buildEntity(options.pki.entities[id], profile)),
+    ids.map((id) => buildEntity(options.pki.entities[id], profile, options.restoreIssuance?.includes(id))),
   );
 }
 
@@ -156,7 +165,7 @@ export function buildLoteDocument(options: LoteBuildOptions) {
 export async function sealLote(document: unknown, operator: CertifiedKey, now = new Date()): Promise<string> {
   const token = new Token(document as Record<string, unknown>)
     .setProtectedHeader({ alg: 'ES256', typ: 'trustlist+jwt' })
-    .setX5c([der(operator)])
+    .setX5c(operator.chain.length ? operator.chain.map((c) => Buffer.from(c.der).toString('base64')) : [der(operator)])
     .setSigningTime(now);
   await token.sign(async (signingInput: string) => base64url.encode(await signEs256(operator.key.privateKey, signingInput)));
   return token.toString();

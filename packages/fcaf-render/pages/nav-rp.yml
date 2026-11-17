@@ -9,3 +9,7 @@
                   - Overview: suts/relying_party/pid_provider/rp_pp.md
                   - Baseline tests: suts/relying_party/pid_provider/baseline-tests.md
                   - Test cases: suts/relying_party/pid_provider/test-cases.md
+              - (rp_inf) Trust Infrastructure:
+                  - Overview: suts/relying_party/trust_infrastructure/rp_inf.md
+                  - Baseline tests: suts/relying_party/trust_infrastructure/baseline-tests.md
+                  - Test cases: suts/relying_party/trust_infrastructure/test-cases.md

@@ -9,10 +9,10 @@ import type { Flow } from './definition';
  * Where a fault is applied: the issued credential, the status list or identifier list the Test Status Provider serves,
  * the presentation the Conformance Wallet builds for the request (KB-JWT, DeviceAuth), or the Authorization Response.
  */
-export type FaultPoint = 'credential' | 'status-list' | 'identifier-list' | 'presentation' | 'response';
+export type FaultPoint = 'credential' | 'status-list' | 'identifier-list' | 'presentation' | 'response' | 'trust-list';
 
 /** The artifact format a fault applies to: a credential format, or the format of a status or identifier list. */
-export type FaultFormat = 'dc+sd-jwt' | 'mso_mdoc' | 'jwt' | 'cwt';
+export type FaultFormat = 'dc+sd-jwt' | 'mso_mdoc' | 'jwt' | 'cwt' | 'lote' | 'trusted-list';
 
 export interface FaultInfo {
   point: FaultPoint;
@@ -41,6 +41,8 @@ const statusList = (target: CheckId | null, text: string): FaultInfo => ({ point
 const statusListCwt = (target: CheckId | null, text: string): FaultInfo => ({ point: 'status-list', format: 'cwt', target, text });
 const identifierList = (target: CheckId | null, text: string): FaultInfo => ({ point: 'identifier-list', format: 'cwt', target, text });
 const response = (target: CheckId | null, text: string, flow?: Flow): FaultInfo => ({ point: 'response', target, text, ...(flow ? { flow } : {}) });
+const lote = (target: CheckId | null, text: string): FaultInfo => ({ point: 'trust-list', format: 'lote', target, text });
+const trustedList = (target: CheckId | null, text: string): FaultInfo => ({ point: 'trust-list', format: 'trusted-list', target, text });
 const kbJwt = (target: CheckId, text: string, flow?: Flow): FaultInfo => ({ point: 'presentation', format: 'dc+sd-jwt', target, text, ...(flow ? { flow } : {}) });
 const deviceAuth = (target: CheckId, text: string, flow?: Flow): FaultInfo => ({ point: 'presentation', format: 'mso_mdoc', target, text, ...(flow ? { flow } : {}) });
 
@@ -413,6 +415,34 @@ export const FAULTS = {
     target: 'key-binding',
     text: 'its `vp_token` carries, unchanged, the presentation the Conformance Wallet sent in T1, while the Authorization Response itself is encrypted to the encryption key of T2',
   },
+
+  // Trust list: a new version of a LoTE or of a Trusted List that the Test Trust Infrastructure publishes, with one
+  // property that makes it unusable, or (stale-within-grace) usable only as stale.
+  'trust-list.seal-bitflip': lote('trust-list-signature', 'one bit of the signature value of its JAdES seal is flipped'),
+  'trust-list.sealed-by-ca-x': lote(
+    'trust-list-signer',
+    'it is sealed by a certificate issued by `CA-X`, which its `x5c` header carries, instead of the scheme operator certificate',
+  ),
+  'trust-list.wrong-type': lote(
+    'trust-list-type',
+    'its `LoTEType` is that of a Wallet Providers list (`http://uri.etsi.org/19602/LoTEType/EUWalletProvidersList`), while it is published at the location of `TL-PID` and sealed by its scheme operator',
+  ),
+  'trust-list.stale-within-grace': lote(
+    null,
+    'its `NextUpdate` lies half of the grace period `G` in the past, and its `ListIssueDateTime` one month before that',
+  ),
+  'trust-list.stale-after-grace': lote(
+    'trust-list-freshness',
+    'its `NextUpdate` lies the grace period `G` plus one hour in the past, and its `ListIssueDateTime` one month before that',
+  ),
+  'trust-list.rollback': lote(
+    'trust-list-sequence',
+    'its `LoTESequenceNumber` is one lower than that of the version the Relying Party retrieved before, and its `ListIssueDateTime` one day earlier',
+  ),
+  'trusted-list.signer-ca-x': trustedList(
+    'trust-list-signer',
+    'it is signed by a certificate issued by `CA-X`, which is not the certificate the LOTL names in its pointer to `TL-QEAA`',
+  ),
 
   // Authorization Response (direct_post.jwt via redirects, dc_api.jwt via the W3C Digital Credentials API): built from
   // the valid payload and the Relying Party's encryption key. Only the unencrypted response differs between the flows.

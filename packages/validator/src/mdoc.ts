@@ -39,6 +39,8 @@ export interface MdocValidation extends ValidationResult {
   issuer?: string;
   statusListFetched: boolean;
   identifierListFetched: boolean;
+  /** Whether the issuer matched a trust list that is used within its grace period (`trust-list-stale`). */
+  trustListStale: boolean;
 }
 
 export interface MdocValidationOptions {
@@ -127,6 +129,7 @@ export async function validateMdocPresentation(presentation: string, options: Md
   let statusListReference: { uri: string; idx: number } | undefined;
   let identifierListReference: { uri: string; id: Uint8Array } | undefined;
   let statusListFetched = false;
+  let trustListStale = false;
   let identifierListFetched = false;
 
   const result = await recorder.collect(async () => {
@@ -170,7 +173,8 @@ export async function validateMdocPresentation(presentation: string, options: Md
           fail(`the MSO was signed (${signed.toISOString()}) outside the validity period of the document signer certificate`);
         }
         issuer = { name: match.entity.name, statusAnchors: options.trustRule.statusAnchors(match.entity, match.service) };
-        return `${match.entity.name} under ${match.anchor.subject.commonName} (${match.list.id})`;
+        trustListStale = match.stale;
+        return `${match.entity.name} under ${match.anchor.subject.commonName} (${match.list.id}${match.stale ? ', stale within the grace period' : ''})`;
       }
     });
 
@@ -325,5 +329,6 @@ export async function validateMdocPresentation(presentation: string, options: Md
     issuer: issuer?.name,
     statusListFetched,
     identifierListFetched,
+    trustListStale,
   };
 }

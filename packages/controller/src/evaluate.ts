@@ -159,6 +159,10 @@ export function evaluate(expectation: Expectation, args: EvaluationInput): Evalu
         return args.statusRequests > 0
           ? { verdict: 'PASS', reason: `the status list was retrieved ${args.statusRequests} time(s)` }
           : { verdict: 'FAIL', reason: 'the Relying Party did not retrieve the status list' };
+      case 'STALE':
+        return args.result.flags?.includes('trust-list-stale')
+          ? { verdict: 'PASS', reason: 'the verification result signals trust-list-stale' }
+          : { verdict: 'FAIL', reason: 'the verification result does not signal trust-list-stale' };
       default:
         return { verdict: 'INCONCLUSIVE', reason: `expected result ${code} does not apply to a presentation step` };
     }
