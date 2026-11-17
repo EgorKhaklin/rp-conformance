@@ -64,10 +64,15 @@ function insertAfter(text: string, anchor: string, insertion: string, where: 'be
 }
 
 /**
- * Renders the overlay as a map from path below `docs/fcaf` to file content. Test cases appear in the baseline lists in
- * the order of `definitions`.
+ * Renders the overlay as a map from path below `docs/fcaf` to file content. Every definition is a test case page; the
+ * baseline lists name those in `baseline` (default: all), in the order of `definitions`.
  */
-export function renderOverlay(definitions: TestCaseDefinition[], upstream: UpstreamPages, pages: SharedPages): Map<string, string> {
+export function renderOverlay(
+  definitions: TestCaseDefinition[],
+  upstream: UpstreamPages,
+  pages: SharedPages,
+  baseline: ReadonlySet<string> = new Set(definitions.map((d) => d.id)),
+): Map<string, string> {
   const files = new Map<string, string>();
   const write = (path: string, text: string) => {
     if (files.has(path)) throw new Error(`${path} is rendered twice`);
@@ -86,10 +91,11 @@ export function renderOverlay(definitions: TestCaseDefinition[], upstream: Upstr
   for (const [sutClass, classDir] of Object.entries(CLASS_DIR)) {
     const mine = definitions.filter((d) => parseTestCaseId(d.id).sutClass === sutClass);
     write(`${rp}/${classDir}/test-cases.md`, testCasesPage(CLASS_TITLE[sutClass]));
-    const list = mine.map((d) => `- [${d.id}](${testCasePathInSut(d.id).slice(classDir.length + 1)})`).join('\n');
+    const inBaseline = mine.filter((d) => baseline.has(d.id));
+    const list = inBaseline.map((d) => `- [${d.id}](${testCasePathInSut(d.id).slice(classDir.length + 1)})`).join('\n');
     write(
       `${rp}/${classDir}/baseline-tests.md`,
-      [`# ${CLASS_TITLE[sutClass]} baseline tests`, `The following ${mine.length} test cases form the baseline test set.`, list].join('\n\n'),
+      [`# ${CLASS_TITLE[sutClass]} baseline tests`, `The following ${inBaseline.length} test cases form the baseline test set.`, list].join('\n\n'),
     );
     const layers = [...new Set(mine.map((d) => parseTestCaseId(d.id).layer))].sort();
     for (const layer of layers) {

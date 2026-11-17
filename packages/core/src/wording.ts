@@ -147,6 +147,15 @@ export const acc = (options: { credential?: string; query?: string } = {}): Expe
 export const rej = (): Expectation => ({ codes: ['REJ'], text: REJ_TEXT });
 
 /**
+ * `REJ_OR_ACC`: the Relying Party rejects the presentation, or accepts it with the issuer-signed values only; `extra`
+ * names what it must never release.
+ */
+export const rejOrAcc = (options: { credential?: string; query?: string; extra?: string } = {}): Expectation => ({
+  codes: ['REJ_OR_ACC'],
+  text: `Either the Relying Party rejects the presentation (its verification result reports a failure and releases no attribute value from the presentation, and the endpoint receiving the Authorization Response does not answer with HTTP status 5xx), or it accepts the presentation and releases exactly the attributes requested in ${options.query ?? QUERY_PID}, with the issuer-signed values of ${options.credential ?? 'the presented credential'}.${options.extra ? ` ${options.extra}` : ''}`,
+});
+
+/**
  * `NOSTAT`: no reliable revocation status. A PID is rejected, so the text is that of `REJ`; for other categories the
  * controller applies the policy of the ICS. Pair it with `comments.nostat`.
  */
@@ -211,6 +220,9 @@ export const scenario = {
     `Perform a presentation for ${QUERY_PID} in which the Conformance Wallet presents ${PID} in a valid Authorization Response, while the Test Status Provider serves, for the status list referenced by the credential, a Status List Token that holds the value 0x00 at the credential's index and is valid in every other respect, except that ${difference}.`,
   encryption: (flow: Flow, difference: string) =>
     `Perform a presentation for ${QUERY_PID} ${flows[flow].via} in which the Conformance Wallet presents ${PID} in an Authorization Response that is valid except that ${difference}.`,
+  /** A presentation whose KB-JWT or DeviceAuth differs; `flow` is named when the test case is for one flow only. */
+  presentation: (difference: string, options: { flow?: Flow } = {}) =>
+    `Perform a presentation for ${QUERY_PID}${options.flow ? ` ${flows[options.flow].via}` : ''} in which the Conformance Wallet presents ${PID} in an Authorization Response that is valid except that ${difference}.`,
 };
 
 /** A step's scenario text together with what the harness executes for it. */
@@ -297,6 +309,20 @@ export const presentationStep = {
     return {
       text: `Perform a presentation for ${QUERY_PID} in which the Conformance Wallet presents ${PID} in a valid Authorization Response, while ${faultInfo(fault).text}.`,
       run: run({ credential: pid.mdoc(), identifierList: identifierListToken.cwt({ contains: false, faults: [fault] }) }),
+    };
+  },
+  /**
+   * A presentation of `default_credential_pid` whose KB-JWT or DeviceAuth has a fault, in the format the fault applies
+   * to (`format` for a fault of either format); `flow` is named in the text and must be the fault's own, if it has one.
+   */
+  presentationFault(fault: FaultId, options: { flow?: Flow; format?: CredentialFormat } = {}): ScenarioStep {
+    const info = faultInfo(fault);
+    if (info.point !== 'presentation') throw new Error(`fault ${fault} does not apply to the presentation`);
+    if (info.flow && info.flow !== options.flow) throw new Error(`fault ${fault} applies to the ${info.flow} flow, which the step must name`);
+    const format = info.format === 'mso_mdoc' || info.format === 'dc+sd-jwt' ? info.format : (options.format ?? 'dc+sd-jwt');
+    return {
+      text: scenario.presentation(info.text, { flow: options.flow }),
+      run: run({ credential: pid.of(format), response: { faults: [fault] } }),
     };
   },
   /** A presentation via `flow` whose Authorization Response has a fault; refuses a fault of the other flow. */

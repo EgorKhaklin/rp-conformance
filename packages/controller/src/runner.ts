@@ -260,6 +260,8 @@ interface Context extends RunOptions {
 interface TestCaseState {
   /** The encryption key each step's request carried, by step number. */
   encryptionKeys: Map<number, NonNullable<PresentationEvidence['encryptionKey']>>;
+  /** The `vp_token` entry the Conformance Wallet presented in each step, for `presentation.replay`. */
+  presentations: Map<number, string>;
   /** Lists the test case changed, restored afterwards. */
   changedLists: Set<'TL-PID'>;
   /** The current entities of each changed list. */
@@ -285,7 +287,7 @@ async function runTestCase(definition: TestCaseDefinition, flow: Flow, flowSuppo
   if (control && control.verdict !== 'PASS') {
     return end('INCONCLUSIVE', `positive control ${outcomes.map((o) => o.id).join(' or ')} did not pass`);
   }
-  const state: TestCaseState = { encryptionKeys: new Map(), changedLists: new Set(), entities: new Map(), rpReached: false };
+  const state: TestCaseState = { encryptionKeys: new Map(), presentations: new Map(), changedLists: new Set(), entities: new Map(), rpReached: false };
   const steps: StepRecord[] = [];
   let restoreError: string | undefined;
   try {
@@ -445,10 +447,12 @@ async function runPresentation(
   state: TestCaseState,
 ) {
   const skewSeconds = Number(ctx.ics.items['RP.P.4'] ?? 0);
+  const kbMaxAgeSeconds = Number(ctx.ics.items['RP.P.6'] ?? 300);
   // Every credential gets a unique status URL (harness design section 4.6).
   const forged = await forgePresentation(action, {
     pki: ctx.harness.pki,
     holderPublicJwk: ctx.wallet.holderKey.publicJwk,
+    holderSecp256k1PublicJwk: ctx.wallet.secp256k1Key.publicJwk,
     allocateStatusUri: () => ctx.harness.status.allocate(ctx.harness.env.runId),
     skewSeconds,
   });
@@ -477,7 +481,16 @@ async function runPresentation(
   const held: HeldCredential = mdoc
     ? { format: 'mso_mdoc', value: forged.credential as Uint8Array }
     : { format: 'dc+sd-jwt', value: forged.credential as string };
-  const responseOptions = { enc: action.response.enc, fault: action.response.faults[0], otherTransactionKey: otherKey };
+  const replayed = action.response.presentationOfStep ? state.presentations.get(action.response.presentationOfStep) : undefined;
+  if (action.response.presentationOfStep && !replayed) throw new Error(`step ${action.response.presentationOfStep} recorded no presentation`);
+  const responseOptions = {
+    enc: action.response.enc,
+    fault: action.response.faults[0],
+    otherTransactionKey: otherKey,
+    replayedPresentation: replayed,
+    skewSeconds,
+    kbMaxAgeSeconds,
+  };
 
   let evidence: PresentationEvidence;
   /** Whether the Authorization Response reached the Relying Party: posted to `response_uri`, or returned to its page. */
@@ -509,6 +522,7 @@ async function runPresentation(
     }
   }
   if (evidence.encryptionKey) state.encryptionKeys.set(record.step, evidence.encryptionKey);
+  if (evidence.presentation) state.presentations.set(record.step, evidence.presentation);
   await save(mdoc ? 'presentation.device-response.cbor' : 'presentation.sd-jwt', mdoc && evidence.presentation ? base64url.decode(evidence.presentation) : evidence.presentation);
   await save('wallet-evidence.json', JSON.stringify(evidence, null, 2));
   record.wallet = walletRecord(evidence);

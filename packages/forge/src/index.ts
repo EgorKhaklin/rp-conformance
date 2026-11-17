@@ -9,6 +9,7 @@ export * from './mdoc';
 export * from './mdoc-context';
 export * from './pid';
 export * from './pki';
+export * from './presentation';
 export * from './queries';
 export * from './registration';
 export * from './status-list';

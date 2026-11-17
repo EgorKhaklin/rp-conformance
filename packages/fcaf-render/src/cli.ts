@@ -2,12 +2,12 @@
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
-import { definitions } from '@rp-conformance/definitions';
+import { baselineDefinitions, definitions } from '@rp-conformance/definitions';
 import { compareOverlay, renderBaseline, writeOverlay } from './write';
 
 const { values } = parseArgs({ options: { check: { type: 'boolean' }, out: { type: 'string' } } });
 const out = resolve(values.out ?? fileURLToPath(new URL('../../../fcaf-overlay/docs/fcaf', import.meta.url)));
-const files = await renderBaseline(definitions);
+const files = await renderBaseline(definitions, baselineDefinitions);
 if (values.check) {
   const differences = await compareOverlay(files, out);
   for (const { path, problem } of differences) process.stderr.write(`${problem}: ${path}\n`);

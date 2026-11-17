@@ -1,7 +1,7 @@
 import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { ics } from '@rp-conformance/core';
-import { definitions } from '@rp-conformance/definitions';
+import { baselineDefinitions, definitions } from '@rp-conformance/definitions';
 import { describe, expect, it } from 'vitest';
 import { compareOverlay, renderBaseline, renderTestCase, testCasePath } from '../src/index';
 
@@ -9,8 +9,10 @@ const overlay = fileURLToPath(new URL('../../../fcaf-overlay/docs/fcaf/', import
 
 // The executable definitions are the source of truth: the committed overlay is exactly what they render to.
 describe('FCAF rendering', () => {
-  it('there are 121 baseline test cases', () => {
-    expect(definitions).toHaveLength(121);
+  it('there are 121 baseline test cases and 25 test cases of the remaining catalogue areas', () => {
+    expect(baselineDefinitions).toHaveLength(121);
+    expect(definitions).toHaveLength(146);
+    expect(definitions.slice(0, 121)).toEqual(baselineDefinitions);
   });
 
   it.each(definitions.map((d) => [d.id, d] as const))('%s renders to the committed FCAF test case', async (_id, definition) => {
@@ -19,7 +21,7 @@ describe('FCAF rendering', () => {
   });
 
   it('the whole overlay, shared pages included, equals the committed fcaf-overlay/docs/fcaf byte for byte', async () => {
-    const files = await renderBaseline(definitions);
+    const files = await renderBaseline(definitions, baselineDefinitions);
     expect(await compareOverlay(files, overlay)).toEqual([]);
   });
 

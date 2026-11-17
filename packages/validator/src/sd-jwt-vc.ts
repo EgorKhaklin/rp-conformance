@@ -89,10 +89,12 @@ export async function validateSdJwtVcPresentation(presentation: string, options:
       x5c = header.x5c as string[];
       if (!options.expectedVct.includes(String(payload.vct))) fail(`vct ${String(payload.vct)} was not requested`);
       if (payload._sd_alg !== undefined && payload._sd_alg !== 'sha-256') fail(`_sd_alg ${String(payload._sd_alg)} is not supported`);
+      // A missing KB-JWT is a failure of key-binding, not of the format (RFC 9901 section 7.3).
       kbJwt = parts[parts.length - 1] ?? '';
-      if (!kbJwt) fail('the presentation has no KB-JWT');
-      kbHeader = decodeSegment(kbJwt.split('.')[0], 'the KB-JWT header');
-      kbPayload = decodeSegment(kbJwt.split('.')[1], 'the KB-JWT payload');
+      if (kbJwt) {
+        kbHeader = decodeSegment(kbJwt.split('.')[0], 'the KB-JWT header');
+        kbPayload = decodeSegment(kbJwt.split('.')[1], 'the KB-JWT payload');
+      }
     });
 
     await recorder.run('issuer-trust', ['format'], async () => {
@@ -143,20 +145,24 @@ export async function validateSdJwtVcPresentation(presentation: string, options:
       if (typeof payload.iat === 'number' && payload.iat > nowSeconds + skew) return `iat ${payload.iat} lies in the future (informative)`;
     });
 
+    // Device binding and session binding (RFC 9901 section 7.3, OpenID4VP section 14.1.2): the KB-JWT is present,
+    // typed, signed with ES256 by the key in cnf.jwk, over this presentation, for this request.
     await recorder.run('key-binding', ['format'], async () => {
+      if (!kbJwt) fail('the presentation has no KB-JWT');
       if (kbHeader.typ !== 'kb+jwt') fail(`KB-JWT typ is ${String(kbHeader.typ)}`);
       if (kbHeader.alg !== 'ES256') fail(`KB-JWT alg ${String(kbHeader.alg)} is not supported`);
       const jwk = (payload.cnf as { jwk?: JsonWebKey } | undefined)?.jwk;
-      if (!jwk) fail('the credential has no cnf.jwk');
+      if (!jwk) fail('the credential has no cnf.jwk, so it is bound to no key');
+      if (jwk?.kty !== 'EC' || jwk.crv !== 'P-256') fail(`cnf.jwk is not a P-256 key (${String(jwk?.crv)})`);
       const [h, p, s] = kbJwt.split('.');
-      if (!(await verifyEs256(jwk as JsonWebKey, `${h}.${p}`, base64url.decode(s ?? '')))) fail('the KB-JWT signature does not verify');
-      if (kbPayload.aud !== options.audience) fail(`KB-JWT aud ${String(kbPayload.aud)} is not ${options.audience}`);
-      if (kbPayload.nonce !== options.nonce) fail('KB-JWT nonce does not match the request');
+      if (!(await verifyEs256(jwk as JsonWebKey, `${h}.${p}`, base64url.decode(s ?? '')))) fail('the KB-JWT signature does not verify with cnf.jwk');
       const sdHash = base64url.encode(sha256(presentation.slice(0, presentation.length - kbJwt.length)));
       if (kbPayload.sd_hash !== sdHash) fail('KB-JWT sd_hash does not match the presentation');
+      if (kbPayload.aud !== options.audience) fail(`KB-JWT aud ${String(kbPayload.aud)} is not ${options.audience}`);
+      if (kbPayload.nonce !== options.nonce) fail('KB-JWT nonce does not match the request');
     });
 
-    await recorder.run('kb-freshness', ['format'], () => {
+    await recorder.run('kb-freshness', ['format', 'key-binding'], () => {
       if (typeof kbPayload.iat !== 'number') fail('KB-JWT has no iat');
       const iat = kbPayload.iat as number;
       if (nowSeconds - iat > options.kbMaxAgeSeconds + skew) fail(`KB-JWT iat ${iat} is older than T_kb ${options.kbMaxAgeSeconds} s`);

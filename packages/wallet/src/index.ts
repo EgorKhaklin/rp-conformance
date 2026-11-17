@@ -4,19 +4,20 @@
 import { createHash, X509Certificate } from 'node:crypto';
 import { type CallbackContext, type Jwk, setGlobalConfig } from '@openid4vc/oauth2';
 import { Openid4vpClient } from '@openid4vc/openid4vp';
-import type { CredentialFormat, FaultId } from '@rp-conformance/core';
+import { type CredentialFormat, type FaultId, faultInfo } from '@rp-conformance/core';
 import {
   base64url,
   buildAuthorizationResponse,
   buildDcApiResponse,
+  buildPresentation,
   type EcKeyPair,
-  encodeDeviceResponse,
   generateEcKeyPair,
+  generateSecp256k1KeyPair,
+  type HeldCredential,
   jwkThumbprint,
   type Oid4vpHandover,
-  presentMdoc,
-  presentSdJwtVc,
   requestedElements,
+  type Secp256k1KeyPair,
   verifyEs256,
 } from '@rp-conformance/forge';
 import { validatePath } from '@rp-conformance/validator';
@@ -76,15 +77,20 @@ const hash: CallbackContext['hash'] = (data, alg) => createHash(alg.replace('-',
 
 const SUPPORTED_ENC = ['A128GCM', 'A256GCM'];
 
-/** A credential the Conformance Wallet holds: an SD-JWT VC (compact, without KB-JWT) or an mdoc's `IssuerSigned` (CBOR). */
-export type HeldCredential = { format: 'dc+sd-jwt'; value: string } | { format: 'mso_mdoc'; value: Uint8Array };
+export type { HeldCredential };
 
-/** How the Conformance Wallet answers: the content encryption to use and the fault of the response, if any. */
+/** How the Conformance Wallet answers: the content encryption to use and the fault of the response or presentation, if any. */
 export interface ResponseOptions {
   enc?: string;
+  /** A fault at the point `response` or `presentation`. */
   fault?: FaultId;
   /** For `response.other-transaction-key`: the encryption key recorded for another transaction. */
   otherTransactionKey?: JWK;
+  /** For `presentation.replay`: the `vp_token` entry the wallet presented in another transaction. */
+  replayedPresentation?: string;
+  /** `T_skew` and `T_kb`, seconds, for the KB-JWT time faults; default 0 and 300. */
+  skewSeconds?: number;
+  kbMaxAgeSeconds?: number;
 }
 
 type Finding = (severity: WalletFinding['severity'], code: string, message: string) => void;
@@ -112,13 +118,18 @@ export interface DcApiAnswer {
 /** The OpenID4VP protocol identifiers of the DC API (OpenID4VP 1.0 Appendix A.1), all of which HAIP 1.0 section 5.2 requires of a Wallet. */
 export const DC_API_PROTOCOLS = ['openid4vp-v1-signed', 'openid4vp-v1-multisigned', 'openid4vp-v1-unsigned'] as const;
 
-type RequestBinding = { audience: string; handover: Oid4vpHandover; state?: string };
+type RequestBinding = { audience: string; clientId?: string; handover: Oid4vpHandover; state?: string };
 
 const decodeSegment = (segment: unknown) => base64url.decodeJson<Record<string, unknown>>(String(segment ?? ''));
+
+/** The fault of the Authorization Response itself; a presentation fault leaves the response valid. */
+const responseFaultOf = (options: ResponseOptions) => (options.fault && faultInfo(options.fault).point === 'response' ? options.fault : undefined);
 
 export class ConformanceWallet {
   private constructor(
     readonly holderKey: EcKeyPair,
+    /** The key a credential is bound to for the `ES256K` device authentication faults. */
+    readonly secp256k1Key: Secp256k1KeyPair,
     private readonly options: ConformanceWalletOptions,
     private readonly anchors: Certificate[],
   ) {}
@@ -126,7 +137,7 @@ export class ConformanceWallet {
   static async create(options: ConformanceWalletOptions): Promise<ConformanceWallet> {
     if (options.allowInsecureUrls) setGlobalConfig({ allowInsecureUrls: true });
     const anchors = options.accessCertificateAnchors.map((a) => (typeof a === 'string' ? parseCertificate(a) : a));
-    return new ConformanceWallet(await generateEcKeyPair(), options, anchors);
+    return new ConformanceWallet(await generateEcKeyPair(), generateSecp256k1KeyPair(), options, anchors);
   }
 
   /**
@@ -156,11 +167,12 @@ export class ConformanceWallet {
       const request = await this.resolve(invocationUri, evidence);
       const binding: RequestBinding = {
         audience: request.client_id as string,
+        clientId: request.client_id as string,
         handover: { flow: 'redirect', clientId: request.client_id as string, responseUri: request.response_uri as string },
         state: request.state as string | undefined,
       };
       const input = await this.responseInput(request, credential, binding, evidence, options);
-      const form = await buildAuthorizationResponse(input, options.fault);
+      const form = await buildAuthorizationResponse(input, responseFaultOf(options));
       evidence.responseForm = form;
       evidence.responseJwe = form.response;
 
@@ -226,9 +238,13 @@ export class ConformanceWallet {
     const evidence: PresentationEvidence = { invocationUri: call.pageUrl, dcApi: { origin: call.origin, requests: call.requests }, findings: [] };
     try {
       const { request, protocol } = await this.resolveDcApi(call, evidence);
-      const binding: RequestBinding = { audience: `origin:${call.origin}`, handover: { flow: 'dc-api', origin: call.origin } };
+      const binding: RequestBinding = {
+        audience: `origin:${call.origin}`,
+        clientId: request.client_id as string | undefined,
+        handover: { flow: 'dc-api', origin: call.origin },
+      };
       const input = await this.responseInput(request, credential, binding, evidence, options);
-      const data = await buildDcApiResponse(input, options.fault);
+      const data = await buildDcApiResponse(input, responseFaultOf(options));
       evidence.responseData = data;
       if (typeof data.response === 'string') evidence.responseJwe = data.response;
       return { evidence, answer: { protocol, data } };
@@ -238,7 +254,10 @@ export class ConformanceWallet {
     }
   }
 
-  /** Builds the presentation bound to the request and the payload of the response, before encryption. */
+  /**
+   * Builds the presentation bound to the request, with the step's presentation fault, or replays the presentation of
+   * another transaction (`presentation.replay`), and the payload of the response, before encryption.
+   */
   private async responseInput(
     request: Record<string, unknown>,
     credential: HeldCredential,
@@ -250,22 +269,30 @@ export class ConformanceWallet {
     const credentialQuery = query.credentials.find((c) => c.format === credential.format);
     if (!credentialQuery) throw new Error(`the request asks for no credential in ${credential.format} format`);
     if (!evidence.encryptionKey) throw new Error('client_metadata has no encryption key');
-    if (credential.format === 'mso_mdoc') {
-      const deviceResponse = await presentMdoc(credential.value, {
-        holderPrivateKey: this.holderKey.privateKey,
-        handover: binding.handover,
-        nonce: request.nonce as string,
-        jwkThumbprint: await jwkThumbprint(evidence.encryptionKey as JsonWebKey),
-        elements: requestedElements(credentialQuery.claims),
-      });
-      evidence.presentation = encodeDeviceResponse(deviceResponse);
+    if (options.fault === 'presentation.replay') {
+      if (!options.replayedPresentation) throw new Error('presentation.replay needs the presentation of another transaction');
+      evidence.presentation = options.replayedPresentation;
     } else {
-      evidence.presentation = await presentSdJwtVc(credential.value, {
-        holderPrivateKey: this.holderKey.privateKey,
-        disclose: [...new Set((credentialQuery.claims ?? []).map((claim) => String(claim.path[0])))],
-        audience: binding.audience,
-        nonce: request.nonce as string,
-      });
+      evidence.presentation = await buildPresentation(
+        credential,
+        {
+          disclose: [...new Set((credentialQuery.claims ?? []).map((claim) => String(claim.path[0])))],
+          elements: requestedElements(credentialQuery.claims),
+        },
+        {
+          audience: binding.audience,
+          clientId: binding.clientId,
+          nonce: request.nonce as string,
+          handover: binding.handover,
+          jwkThumbprint: await jwkThumbprint(evidence.encryptionKey as JsonWebKey),
+        },
+        { holder: this.holderKey, secp256k1: this.secp256k1Key },
+        {
+          fault: options.fault && faultInfo(options.fault).point === 'presentation' ? options.fault : undefined,
+          skewSeconds: options.skewSeconds ?? 0,
+          kbMaxAgeSeconds: options.kbMaxAgeSeconds ?? 300,
+        },
+      );
     }
     const metadata = request.client_metadata as { encrypted_response_enc_values_supported?: string[] };
     const enc = options.enc ?? metadata.encrypted_response_enc_values_supported?.find((e) => SUPPORTED_ENC.includes(e)) ?? 'A128GCM';

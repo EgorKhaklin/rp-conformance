@@ -75,6 +75,17 @@ export function evaluateReject(result: RelyingPartyResult, responseStatus: numbe
 }
 
 /**
+ * `REJ_OR_ACC`: a rejection passes as for `REJ`; an acceptance passes as for `ACC`, so it must release exactly the
+ * requested attributes with the issued values (DeviceBinding_011: a device-signed value released instead fails).
+ */
+export function evaluateRejectOrAccept(args: EvaluationInput): Evaluation {
+  const rejected = args.result.outcome === 'failure' || (args.responseStatus !== undefined && args.responseStatus >= 400 && args.responseStatus < 500);
+  return rejected
+    ? withPrefix('rejected', evaluateReject(args.result, args.responseStatus, args.delivered))
+    : withPrefix('not rejected', evaluateAccept(args.result, args.query, args.issuedClaims, args.responseStatus, args.delivered));
+}
+
+/**
  * `NOSTAT` (catalogue decision 2): no reliable revocation status. A PID is rejected. Another category follows the
  * policy the ICS declares in RP.R.2: `Reject`, or accepted with `status-unknown` in the result's flags.
  */
@@ -134,6 +145,8 @@ export function evaluate(expectation: Expectation, args: EvaluationInput): Evalu
         return evaluateAccept(args.result, args.query, args.issuedClaims, args.responseStatus, args.delivered);
       case 'REJ':
         return evaluateReject(args.result, args.responseStatus, args.delivered);
+      case 'REJ_OR_ACC':
+        return evaluateRejectOrAccept(args);
       case 'NOSTAT':
         return evaluateNoStatus(args);
       case 'POLICY':

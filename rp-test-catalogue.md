@@ -302,7 +302,7 @@ Columns: **Objective** says what is verified. **Stimulus** is the mutation or in
 
 | ID | Objective | Stimulus | Expected | References | Var | Rel |
 | --- | --- | --- | --- | --- | --- | --- |
-| `RP_WS_SM_SessionBinding_001_UF` | KB-JWT `nonce` different from the request `nonce` is rejected. | Other nonce | REJ (OIDF `invalid-kb-jwt-nonce`) | OID4VP §14.1.2, B.3.6; RFC 9901 §7.3 step 5f | SD × RD | G/R |
+| `RP_WS_SM_SessionBinding_001_UF` | KB-JWT `nonce` different from the request `nonce` is rejected. | Other nonce | REJ (OIDF `invalid-kb-jwt-nonce`) | OID4VP §14.1.2, B.3.6; RFC 9901 §7.3 step 5f | SD × RD, DC | G/R |
 | `RP_WS_SM_SessionBinding_002_UF` | KB-JWT `aud` other than the full Client Identifier is rejected. | (a) other verifier's `client_id`; (b) `client_id` without the `x509_hash:` prefix | REJ (OIDF `invalid-kb-jwt-aud` covers a) | OID4VP §14.1.2, §14.8, B.3.6 | SD × RD | G/R |
 | `RP_WS_SM_SessionBinding_003_UF` | KB-JWT `iat` older than `T_kb` is rejected. | `iat` = now − `T_kb` − 1 h | REJ (OIDF `kb-jwt-iat-in-past`) | RFC 9901 §7.3 step 5e | SD × RD, DC | G/R |
 | `RP_WS_SM_SessionBinding_004_UF` | KB-JWT `iat` in the future beyond `T_skew` is rejected. | `iat` = now + `T_skew` + 1 h | REJ (OIDF `kb-jwt-iat-in-future`) | RFC 9901 §7.3 step 5e | SD × RD, DC | G/R |
@@ -310,7 +310,7 @@ Columns: **Objective** says what is verified. **Stimulus** is the mutation or in
 | `RP_WS_SM_SessionBinding_006_UF` | DC API: KB-JWT `aud` equal to the `client_id` instead of `origin:<origin>` is rejected. | `aud` = `x509_hash:…` | REJ | OID4VP A.4 | SD × DC | G/R |
 | `RP_WS_SM_SessionBinding_007_UF` | DC API: KB-JWT `aud` naming another origin is rejected. | `aud` = `origin:https://other.example` | REJ | OID4VP A.4, A.5 | SD × DC | G/R |
 | `RP_WS_SM_SessionBinding_008_UF` | mdoc: DeviceAuth over a SessionTranscript with a wrong OpenID4VPHandover element is rejected. | Wrong (a) nonce, (b) client_id, (c) response_uri, (d) jwkThumbprint | REJ (OIDF `invalid-session-transcript` covers one element) | OID4VP B.2.6.1; ISO/IEC 18013-5 §9.1.3 | MD × RD | G/R |
-| `RP_WS_SM_SessionBinding_009_UF` | mdoc over DC API: handover with another origin or nonce is rejected. | Wrong (a) origin, (b) nonce | REJ | OID4VP B.2.6.2 | MD × DC | G/R |
+| `RP_WS_SM_SessionBinding_009_UF` | mdoc over DC API: handover with another origin, nonce or encryption key is rejected. | Wrong (a) origin, (b) nonce, (c) jwkThumbprint | REJ | OID4VP B.2.6.2 | MD × DC | G/R |
 | `RP_WS_SM_SessionBinding_010_UF` | Proximity: DeviceAuth computed over the SessionTranscript of another session is rejected. | Transcript with other DeviceEngagement / EReaderKey | REJ | ISO/IEC 18013-5 §9.1.3 | MD × PX | G/R |
 
 ##### RP_WS_SM_DeviceBinding (`P-DB`)
@@ -639,4 +639,4 @@ These objectives can reuse the OIDF `vp1finalverifier` modules as execution vehi
 1. Done (2026-11-06): the baseline covers the `SM_Validity`, `SM_Revocation`, `RP_PP_SM_Revocation`, `SM_TrustMechanisms` and `SM_SessionEncryption` objectives plus the positive controls `RP_WS_IA_MainInteraction_001a` and `_001b`: 121 test cases in the FCAF format, one file per test case, in [fcaf-overlay](fcaf-overlay/README.md). The README lists the objectives left out and why.
 2. Design the harness: draft in [harness-design.md](harness-design.md) (2026-11-06), with four decisions open in its §12.
 3. Contact the FCAF maintainers about adding the Relying Party SUT before opening a pull request.
-4. Write the remaining objectives as test cases, starting with `SM_SessionBinding`, `SM_DeviceBinding`, `SM_IssuerIntegrity` and `RP_Inf_SM_TrustMechanisms`.
+4. Write the remaining objectives as test cases, starting with `SM_SessionBinding`, `SM_DeviceBinding`, `SM_IssuerIntegrity` and `RP_Inf_SM_TrustMechanisms`. In progress: `SM_SessionBinding` and `SM_DeviceBinding` are written and executable since 2026-11-13 (25 test cases, see "Beyond the baseline" in the [overlay README](fcaf-overlay/README.md)), without the proximity objectives `SessionBinding_010` and `DeviceBinding_012`.
