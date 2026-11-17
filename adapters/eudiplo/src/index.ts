@@ -59,9 +59,9 @@ const derOf = (pem: string) => pem.replace(/-----(BEGIN|END) CERTIFICATE-----/g,
  * Adapter for EUDIPLO (harness design section 4.8). One tenant per namespace: `setUp` creates the tenant, imports the
  * access certificate with its key, and creates a presentation configuration per default query, carrying the
  * registration certificate and the root of trust of the query's category in `trusted_authorities` (`etsi_tl`): `TL-PID`
- * or `TL-PUB`, each pinned to its scheme operator certificate, or for non-qualified EAAs a trust list the tenant manages
- * with the anchor the rulebook defines. EUDIPLO reads no ETSI TS 119 612 Trusted List, so the QEAA queries are not
- * configured (its ICS declares RP.G.3 No). Presentations start with `POST /api/verifier/offer`, via redirects
+ * or `TL-PUB`, each pinned to its scheme operator certificate, for QEAAs the test LOTL as an ETSI TS 119 612 Trusted
+ * List (`format` `trusted-list`) pinned to its signing certificates, or for non-qualified EAAs a trust list the tenant
+ * manages with the anchor the rulebook defines. Presentations start with `POST /api/verifier/offer`, via redirects
  * (`response_type` `uri`) or the DC API (`dc-api`, answered on the adapter's own page); the result is
  * `GET /api/session/:id`.
  */
@@ -150,8 +150,16 @@ export class EudiploAdapter implements RelyingPartyAdapter {
     const authorities: Partial<Record<CredentialCategory, unknown[]>> = { pid: lote('TL-PID') };
     if (requested('pub-eaa')) authorities['pub-eaa'] = lote('TL-PUB');
     if (requested('eaa')) authorities.eaa = [{ trustListId: await this.createRulebookTrustList(env) }];
+    // QEAAs: the test LOTL pinned to its signing certificates; EUDIPLO takes TL-QEAA and its signer from the pointer.
+    // EUDIPLO reads TS 119 612 Trusted Lists since EUDIPLO/eudiplo#1513; 9.1.0 rejects `format` with HTTP 400.
     if (requested('qeaa')) {
-      throw new Error('EUDIPLO loads no ETSI TS 119 612 Trusted List, so it cannot be configured for QEAAs: declare RP.G.3 No');
+      authorities.qeaa = [
+        {
+          format: 'trusted-list',
+          url: env.listOfTrustedLists.url,
+          signingCertificates: env.listOfTrustedLists.signingCertificatesPem.map(derOf),
+        },
+      ];
     }
 
     for (const [id, query] of Object.entries(env.queries)) {
