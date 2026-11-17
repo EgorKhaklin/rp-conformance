@@ -1,6 +1,6 @@
 # Relying Party functional conformance tests: test catalogue
 
-Draft 0.2, 2026-11-05 (decisions on the open questions applied, see §8.1). Phase "Test Objectives" in FCAF terms: every test is defined with its objective, stimulus, expected result, references and applicability. The step-by-step write-up in the FCAF template (phase "Test Cases") and all tooling come later.
+Draft 0.3, 2026-11-17 (decisions on the open questions applied, see §8.1; stimuli of `RP_Inf_SM_TrustMechanisms` adjusted to the harness, see §8.2). Phase "Test Objectives" in FCAF terms: every test is defined with its objective, stimulus, expected result, references and applicability. The step-by-step write-up in the FCAF template (phase "Test Cases") and all tooling come later.
 
 ## 0. Summary
 
@@ -204,7 +204,7 @@ Columns: **Objective** says what is verified. **Stimulus** is the mutation or in
 | `RP_WS_MS_ProtocolMessages_003` | `nonce` is at least 16 random bytes, base64url, and fresh per request. | 20 consecutive requests | CONF, no repeats | OID4VP §5.2, §13.3 | RD, DC | G/R |
 | `RP_WS_MS_ProtocolMessages_004` | `state`, if used, is fresh and unguessable (≥ 128 bit). | 20 requests | CONF | OID4VP §13.3, §14.3.2 | RD | G/O |
 | `RP_WS_MS_ProtocolMessages_005` | DC API request uses protocol `openid4vp-v1-signed` or `openid4vp-v1-multisigned`, `response_mode=dc_api.jwt`, `expected_origins` present, no `response_uri`. | Capture DC API request | CONF | OID4VP A.2, A.3.2; HAIP 5.2; OIA_08, OIA_08a | DC | G/R |
-| `RP_WS_MS_ProtocolMessages_006` | 18013-7 Annex C request: DeviceRequest with ReaderAuth and registration certificate, EncryptionInfo with a fresh recipient key. | Capture request | CONF | OIA_08b; ISO/IEC 18013-7 Annex C; ETSI TS 119 472-2 | DCI | S/R |
+| `RP_WS_MS_ProtocolMessages_006` | 18013-7 Annex C request: DeviceRequest with ReaderAuth and registration certificate, EncryptionInfo with a fresh recipient key. *Not executable: the harness has no ISO/IEC 18013-7 Annex C flow.* | Capture request | CONF | OIA_08b; ISO/IEC 18013-7 Annex C; ETSI TS 119 472-2 | DCI | S/R |
 
 ##### RP_WS_MS_Metadata
 
@@ -276,10 +276,10 @@ Columns: **Objective** says what is verified. **Stimulus** is the mutation or in
 | `RP_WS_SM_RpIntegrity_005` | `verifier_info` carries exactly one registration certificate by value, valid and issued by `RC-A`, whose entity and service identifiers equal those of the access certificate. | Capture | CONF | RPRC_07a, RPRC_10, RPRC_19, RPRC_20; ETSI TS 119 475; ETSI TS 119 472-2 | RD, DC, PX | S/R |
 | `RP_WS_SM_RpIntegrity_006` | The RP never sends an unauthenticated request: no unsigned redirect request, no unsigned DC API request. | Capture all request variants the RP offers | CONF | RPA_01, RPA_03; HAIP 5.1 | RD, DC | S/R |
 | `RP_WS_SM_RpIntegrity_007` | DC API signed request: `expected_origins` contains the RP's own origin(s) only. | Capture | CONF | OID4VP A.3.2 | DC | G/R |
-| `RP_WS_SM_RpIntegrity_008` | A multi-service RP uses the access and registration certificate of the service the request is for. | Trigger for `S1` and `S2` | CONF | RPA_06 note a; RPRC_10; Reg_10a | RD, DC; `P-MS` | S/R |
-| `RP_WS_SM_RpIntegrity_009` | An intermediary includes its own access certificate (with the association to the intermediated RP) and the intermediated RP's registration certificate. | Capture | CONF | RPI_05, RPI_06; Reg_34a | RD, DC; `P-INT` | S/R |
-| `RP_WS_SM_RpIntegrity_010` | Proximity: reader authentication is performed in every session with the access certificate, and the registration certificate is included per the ETSI TS 119 472-2 extension. | Capture DeviceRequest | CONF | RPA_03; ProxId_01a; RPRC_19, RPRC_20; ISO/IEC 18013-5 §9.1.4 | PX | S/R |
-| `RP_WS_SM_RpIntegrity_011` | Proximity: the RP does not use server retrieval. | Capture engagement | CONF | ProxId_02 | PX | S/R |
+| `RP_WS_SM_RpIntegrity_008` | A multi-service RP uses the access and registration certificate of the service the request is for. *Not executable: no ICS item and no second service in the default configuration.* | Trigger for `S1` and `S2` | CONF | RPA_06 note a; RPRC_10; Reg_10a | RD, DC; `P-MS` | S/R |
+| `RP_WS_SM_RpIntegrity_009` | An intermediary includes its own access certificate (with the association to the intermediated RP) and the intermediated RP's registration certificate. *Not executable: the harness has no intermediary set-up.* | Capture | CONF | RPI_05, RPI_06; Reg_34a | RD, DC; `P-INT` | S/R |
+| `RP_WS_SM_RpIntegrity_010` | Proximity: reader authentication is performed in every session with the access certificate, and the registration certificate is included per the ETSI TS 119 472-2 extension. *Not executable: proximity, which the harness does not cover.* | Capture DeviceRequest | CONF | RPA_03; ProxId_01a; RPRC_19, RPRC_20; ISO/IEC 18013-5 §9.1.4 | PX | S/R |
+| `RP_WS_SM_RpIntegrity_011` | Proximity: the RP does not use server retrieval. *Not executable: proximity, which the harness does not cover.* | Capture engagement | CONF | ProxId_02 | PX | S/R |
 
 ##### RP_WS_SM_SessionEncryption (response encryption)
 
@@ -377,7 +377,7 @@ Certificate path, both formats:
 | `RP_WS_SM_IssuerIntegrity_032_UF` | Expired intermediate CA certificate is rejected. | Intermediate `notAfter` in the past | REJ | RFC 5280 §6.1.3 | SD, MD | G/R |
 | `RP_WS_SM_IssuerIntegrity_033_UF` | Incomplete chain is rejected. | Intermediate missing | REJ | RFC 5280 §6.1 | SD, MD | G/R |
 | `RP_WS_SM_IssuerIntegrity_034_UF` | Signing certificate issued by a non-CA certificate is rejected. | Issuer cert with `cA=false` | REJ | RFC 5280 §6.1.4 | SD, MD | G/R |
-| `RP_WS_SM_IssuerIntegrity_035_UF` | Revoked issuer signing certificate is rejected. | CRL marks DS / signing cert revoked | REJ | RFC 5280 §6.3; ICS-16 | SD, MD | G/O |
+| `RP_WS_SM_IssuerIntegrity_035_UF` | Revoked issuer signing certificate is rejected. *Not executable: optional check, the harness serves no CRLs.* | CRL marks DS / signing cert revoked | REJ | RFC 5280 §6.3; ICS-16 | SD, MD | G/O |
 | `RP_WS_SM_IssuerIntegrity_036_UF` | Key type or size outside ECCG ACM is rejected. | P-192, RSA-1024 | REJ | OIA_03 | SD, MD | S/R |
 | `RP_WS_SM_IssuerIntegrity_037_UF` | Unknown critical extension in the signing certificate is rejected. | Critical private extension | REJ | RFC 5280 §4.2 | SD, MD | G/R |
 
@@ -540,15 +540,15 @@ Every objective in this class also applies to class `RP_AP` with the same number
 | `RP_Inf_SM_TrustMechanisms_001` | The RP loads the PID Provider LoTE, validates its JAdES seal against the configured scheme operator certificate, and uses its anchors. | `SCN-T`, valid list | ACC for `CRED-PID` | OIA_15a, OIA_15b; ETSI TS 119 602; TLPub_05, TLPub_07 | — | S/R |
 | `RP_Inf_SM_TrustMechanisms_002_UF` | A LoTE with an invalid seal is not used. | Corrupt seal, list adds `PP-C` | `PP-C` credential REJ; the last valid list stays in use until its `NextUpdate` + `G` | OIA_15a; ETSI TS 119 602 | — | S/R |
 | `RP_Inf_SM_TrustMechanisms_003_UF` | A LoTE sealed by a key other than the scheme operator's is not used. | Sealed by `CA-X` | As `_002_UF` | ETSI TS 119 602 | — | S/R |
-| `RP_Inf_SM_TrustMechanisms_004` | Within the grace period after `NextUpdate`, a stale LoTE is still used and the RP signals it. | Serve the old list only; present at `NextUpdate` + `G`/2 | ACC, "trust list stale" signalled | ETSI TS 119 602; OIA_15a; ICS-11 | — | S/R |
-| `RP_Inf_SM_TrustMechanisms_012_UF` | After the grace period, anchors from a stale LoTE are no longer used. | Serve the old list only; present at `NextUpdate` + `G` + 1 h | REJ | ETSI TS 119 602; OIA_15a; ICS-11 | — | S/R |
+| `RP_Inf_SM_TrustMechanisms_004` | Within the grace period after `NextUpdate`, a stale LoTE is still used and the RP signals it. | New version adding `PP-C` whose `NextUpdate` lies `G`/2 in the past | `PP-C` credential ACC, "trust list stale" signalled | ETSI TS 119 602; OIA_15a; ICS-11 | `G` > 0 | S/R |
+| `RP_Inf_SM_TrustMechanisms_012_UF` | After the grace period, anchors from a stale LoTE are no longer used. | New version adding `PP-C` whose `NextUpdate` lies `G` + 1 h in the past | `PP-C` credential REJ | ETSI TS 119 602; OIA_15a; ICS-11 | — | S/R |
 | `RP_Inf_SM_TrustMechanisms_005_UF` | A rollback to an older list version is ignored. | Lower `LoTESequenceNumber` / older `ListIssueDateTime`, re-adding `PP-W` | `PP-W` credential stays REJ | ETSI TS 119 602 | — | S/R |
-| `RP_Inf_SM_TrustMechanisms_006_UF` | A list of the wrong LoTE type is not used for PID anchors. | Wallet Provider list served at the PID list location | PID from those anchors REJ | OIA_15 note; ETSI TS 119 602 (`LoTEType`) | — | S/R |
-| `RP_Inf_SM_TrustMechanisms_007` | Lists are refreshed at least by `NextUpdate` or `T_refresh`, and changes reach every RP Instance. | Change list; observe each instance | CONF | OIA_15a | — | S/R |
+| `RP_Inf_SM_TrustMechanisms_006_UF` | A list of the wrong LoTE type is not used for PID anchors. | List of `LoTEType` Wallet Providers list served at the PID list location, sealed by its scheme operator, adding `PP-C` | `PP-C` credential REJ | OIA_15 note; ETSI TS 119 602 (`LoTEType`) | — | S/R |
+| `RP_Inf_SM_TrustMechanisms_007` | Lists are refreshed at least by `NextUpdate` or `T_refresh`, and changes reach every RP Instance. *Not executable: needs several RP Instances; the harness observes one.* | Change list; observe each instance | CONF | OIA_15a | — | S/R |
 | `RP_Inf_SM_TrustMechanisms_008` | The RP navigates LOTL → national Trusted List, validates the TL with the LOTL pointer certificate, and extracts QEAA service anchors with type and status. | `SCN-T` | ACC for `CRED-Q` | OIA_13, OIA_15b; ETSI TS 119 612 | `P-Q` | S/R |
-| `RP_Inf_SM_TrustMechanisms_009_UF` | A national Trusted List signed with a certificate not in the LOTL pointer is not used. | Re-sign TL with `CA-X` | `CRED-Q` REJ | ETSI TS 119 612 | `P-Q` | S/R |
-| `RP_Inf_SM_TrustMechanisms_010` | Anchors keep their category (PID, QEAA, PuB-EAA, EAA, Access CA, Registration CA, Wallet Provider). | Covered by `RP_WS_SM_TrustMechanisms_002_UF`, `_003_UF`, `_013_UF` | CONF | OIA_15 note | — | S/R |
-| `RP_Inf_SM_TrustMechanisms_011` | Status list anchors (PID/Revocation service) are loaded and tied to their provider. | Covered by `RP_PP_SM_Revocation_009_UF`, `_010` | CONF | PPNot_05, PuBPNot_06 | — | S/R |
+| `RP_Inf_SM_TrustMechanisms_009_UF` | A national Trusted List signed with a certificate not in the LOTL pointer is not used. | New TL version, signed by `CA-X`, that grants `QP-N` a qualified service | `QP-N` credential REJ (the last valid TL stays in use, see `_002_UF`) | ETSI TS 119 612 | `P-Q` | S/R |
+| `RP_Inf_SM_TrustMechanisms_010` | Anchors keep their category (PID, QEAA, PuB-EAA, EAA, Access CA, Registration CA, Wallet Provider). *Not executable: aggregate of the test cases it names.* | Covered by `RP_WS_SM_TrustMechanisms_002_UF`, `_003_UF`, `_013_UF` | CONF | OIA_15 note | — | S/R |
+| `RP_Inf_SM_TrustMechanisms_011` | Status list anchors (PID/Revocation service) are loaded and tied to their provider. *Not executable: aggregate of the test cases it names.* | Covered by `RP_PP_SM_Revocation_009_UF`, `_010` | CONF | PPNot_05, PuBPNot_06 | — | S/R |
 
 ### 5.4 Class RP_TB: test book (inspection)
 
@@ -632,6 +632,8 @@ These objectives can reuse the OIDF `vp1finalverifier` modules as execution vehi
 - **Combined presentations.** No cryptographic binding scheme (ACP) is specified yet; `UC_Presentation_012_UF` stays a placeholder.
 - **Spec versions.** HAIP pins SD-JWT VC draft-13 and Token Status List draft-14; the FCAF pins draft-16 and draft-20. The catalogue follows the FCAF.
 - **ISO/IEC 18013-5 second edition** (status list and identifier list for mdoc) is not published; section references for `MD` revocation tests follow the draft.
+- **Stale trust lists.** A test cannot move the RP's clock, so `RP_Inf_SM_TrustMechanisms_004` and `_012_UF` publish a new version whose `NextUpdate` has already passed, the state a list reaches when no newer version appears. Every version the RP must not use adds an entity (`PP-C`, or a qualified service of `QP-N`), so an RP that used it would accept that entity's credential, while the last valid version stays in use (`_002_UF`).
+- **Certificate path.** The issuance anchors follow the IACA profile (path length 0). `IssuerIntegrity_032_UF` to `_034_UF` use the entity `PP-I` on `TL-PID`, whose anchor allows one intermediate CA.
 - **Decision 6 conflicts with a SHOULD** in SD-JWT VC. For the upstream contribution this needs a reference the EC accepts, for example a HAIP or ETSI TS 119 472-2 profile statement.
 
 ## 9. Next steps
@@ -639,4 +641,4 @@ These objectives can reuse the OIDF `vp1finalverifier` modules as execution vehi
 1. Done (2026-11-06): the baseline covers the `SM_Validity`, `SM_Revocation`, `RP_PP_SM_Revocation`, `SM_TrustMechanisms` and `SM_SessionEncryption` objectives plus the positive controls `RP_WS_IA_MainInteraction_001a` and `_001b`: 121 test cases in the FCAF format, one file per test case, in [fcaf-overlay](fcaf-overlay/README.md). The README lists the objectives left out and why.
 2. Design the harness: draft in [harness-design.md](harness-design.md) (2026-11-06), with four decisions open in its §12.
 3. Contact the FCAF maintainers about adding the Relying Party SUT before opening a pull request.
-4. Write the remaining objectives as test cases, starting with `SM_SessionBinding`, `SM_DeviceBinding`, `SM_IssuerIntegrity` and `RP_Inf_SM_TrustMechanisms`. In progress: `SM_SessionBinding` and `SM_DeviceBinding` are written and executable since 2026-11-13 (25 test cases, see "Beyond the baseline" in the [overlay README](fcaf-overlay/README.md)), without the proximity objectives `SessionBinding_010` and `DeviceBinding_012`.
+4. Write the remaining objectives as test cases. Done for `SM_SessionBinding` and `SM_DeviceBinding` (2026-11-13), `SM_IssuerIntegrity`, `RP_Inf_SM_TrustMechanisms` and the request-side areas `MS_ProtocolMessages`, `MS_Metadata`, `MS_CredentialFormats` and `SM_RpIntegrity` (2026-11-17): 97 executable test cases, see "Beyond the baseline" in the [overlay README](fcaf-overlay/README.md). Not written: the proximity objectives (`SessionBinding_010`, `DeviceBinding_012`, `RpIntegrity_010`, `_011`), `IssuerIntegrity_035` (CRL; optional, the harness serves no CRLs), `RP_Inf_SM_TrustMechanisms_007` (needs several RP Instances), `_010` and `_011` (aggregates of other test cases), `MS_ProtocolMessages_006` (ISO/IEC 18013-7 Annex C), `RpIntegrity_008` (several services) and `_009` (intermediaries). Still open: `IA_Engagement`, `IA_ProtocolFlow`, `MainInteraction_002` to `_005`, `DM_*`, `UC_*`, `SH_*`, `RP_PP_IA_Supportive` and the test book.
