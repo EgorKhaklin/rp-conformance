@@ -479,7 +479,7 @@ async function runPresentation(
   const otherKey = action.response.keyOfStep ? state.encryptionKeys.get(action.response.keyOfStep) : undefined;
   if (action.response.keyOfStep && !otherKey) throw new Error(`step ${action.response.keyOfStep} recorded no encryption key`);
   const held: HeldCredential = mdoc
-    ? { format: 'mso_mdoc', value: forged.credential as Uint8Array }
+    ? { format: 'mso_mdoc', value: forged.credential as Uint8Array, ...(forged.documentDocType ? { docType: forged.documentDocType } : {}) }
     : { format: 'dc+sd-jwt', value: forged.credential as string };
   const replayed = action.response.presentationOfStep ? state.presentations.get(action.response.presentationOfStep) : undefined;
   if (action.response.presentationOfStep && !replayed) throw new Error(`step ${action.response.presentationOfStep} recorded no presentation`);

@@ -122,6 +122,7 @@ A signer is trusted for a purpose only if its certificate chain ends in an ancho
 | `PP-D` | `TL-PID` | Like `PP-B`. Test cases remove it from `TL-PID`. |
 | `PP-E` | `TL-PID` | Like `PP-B`, but the anchor certificate has expired. |
 | `PP-W` | `TL-PID` | PID/Revocation with the anchor `CA-PP-W`; granted. Its PID/Issuance service, under the same anchor, is withdrawn and therefore not listed, since [ETSI TS 119 602] Annex D gives PID Providers lists no service status. |
+| `PP-I` | `TL-PID` | PID/Issuance and PID/Revocation, both with the anchor `CA-PP-I`, which allows one intermediate CA; granted. Its signing certificates are issued by the intermediate CA `CA-PP-I-INT` and carry it in their certificate chain. |
 | `QP-A` | `TL-QEAA` | Granted qualified service for the issuance of QEAAs with the anchor `CA-QP-A`, under which it also signs its status lists. |
 | `QP-N` | `TL-QEAA` | Like `QP-A`, but the issuance service is not qualified. |
 | `QP-W` | `TL-QEAA` | Like `QP-A`, with the qualified service for the issuance of QEAAs withdrawn. |

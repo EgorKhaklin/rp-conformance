@@ -45,7 +45,7 @@ export const queries = {
 };
 
 /** A Relying Party test case ID: `RP_<class>_<layer>_<area>_<nnn><variant>[_UF]`. */
-export const testCaseId = (sutClass: 'WS' | 'PP', layer: 'IA' | 'SM', area: string, number: number, variant = '', unhappyFlow = false) =>
+export const testCaseId = (sutClass: 'WS' | 'PP' | 'Inf', layer: 'IA' | 'SM' | 'MS', area: string, number: number, variant = '', unhappyFlow = false) =>
   `RP_${sutClass}_${layer}_${area}_${String(number).padStart(3, '0')}${variant}${unhappyFlow ? '_UF' : ''}`;
 
 export interface FormatWording {
@@ -118,6 +118,8 @@ export const preconditions = {
   identifierList:
     'The `status` element of the MSO of every presented credential carries an `identifier_list` entry (`id`, `uri`) that references an identifier list in CWT format (`application/identifierlist+cwt`) served by the Test Status Provider.',
   identifierListOmits: "The identifier list served for each presented credential does not contain the credential's identifier.",
+  placeOfBirth:
+    'The Relying Party is configured to request, with `default_query_pid` in SD-JWT VC format, also the claim `place_of_birth`.',
   trustedAuthoritiesOfPpA:
     'The Relying Party is configured to restrict `default_query_pid` with a `trusted_authorities` entry of type `aki` that names only the PID/Issuance anchor of `PP-A`.',
 };
@@ -274,10 +276,11 @@ export const presentationStep = {
   },
   /** A presentation of `default_credential_pid` with a credential fault, in the format the fault applies to. */
   credentialFault(fault: FaultId, options: PresentationOptions = {}): ScenarioStep {
-    return presentationStep.credentialVariant(faultInfo(fault).text, {
-      ...options,
-      credential: pid.of(formatOfCredentialFault(fault), { ...options.credential, faults: [fault] }),
-    });
+    const issuer = faultInfo(fault).issuer;
+    const credential = pid.of(formatOfCredentialFault(fault), { ...options.credential, ...(issuer ? { issuer } : {}), faults: [fault] });
+    // A fault that needs another issuer names it: the variant is one of the PID that issuer issues.
+    if (issuer) return { text: scenario.credentialVariant(faultInfo(fault).text, { credential: `${PID} issued by \`${issuer}\`` }), run: run({ ...options, credential }) };
+    return presentationStep.credentialVariant(faultInfo(fault).text, { ...options, credential });
   },
   /** A presentation while the credential's status list holds `value` (for example `0x01 (INVALID)`) at its index. */
   statusValue(value: string, status: number, format: CredentialFormat = 'dc+sd-jwt'): ScenarioStep {

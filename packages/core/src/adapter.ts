@@ -12,6 +12,7 @@ export type DefaultQueryId =
   | 'default_query_pid_trusted_authorities'
   | 'default_query_pid_mdoc'
   | 'default_query_pid_mdoc_trusted_authorities'
+  | 'default_query_pid_place_of_birth'
   | 'default_query_qeaa'
   | 'default_query_qeaa_mdoc'
   | 'default_query_pubeaa'
@@ -25,6 +26,7 @@ export const DEFAULT_QUERY_IDS: DefaultQueryId[] = [
   'default_query_pid_trusted_authorities',
   'default_query_pid_mdoc',
   'default_query_pid_mdoc_trusted_authorities',
+  'default_query_pid_place_of_birth',
   'default_query_qeaa',
   'default_query_qeaa_mdoc',
   'default_query_pubeaa',

@@ -28,6 +28,11 @@ export interface FaultInfo {
    * faults with `ES256K` need a credential bound to a key on secp256k1.
    */
   holderCurve?: 'secp256k1';
+  /**
+   * The entity of `default_trust_configuration_rp` that must issue the credential, when it is not `PP-A`: the faults of
+   * the certificate path with an intermediate CA need `PP-I`, whose signers are under one.
+   */
+  issuer?: string;
 }
 
 const credential = (target: CheckId | null, text: string): FaultInfo => ({ point: 'credential', format: 'dc+sd-jwt', target, text });
@@ -53,6 +58,14 @@ const SHARED_TEXT = {
   bits3: 'the `bits` value of its status list is 3',
   bomb: 'its `lst` value decompresses to more bytes than the maximum status list size the Relying Party declares, for example a ZLIB stream that inflates to 1 GiB of zero bytes',
   outOfRange: 'the index in its status reference equals the number of entries in the referenced status list, one past the last valid index',
+  signerExpired: 'its signing certificate, issued under the same anchor, has expired one hour ago',
+  signerNotYetValid: 'its signing certificate, issued under the same anchor, becomes valid only one day from now',
+  intermediateExpired: 'its signing certificate is issued by an intermediate CA of `PP-I` under the anchor `CA-PP-I` whose certificate has expired',
+  intermediateMissing: 'the certificate chain it carries holds only the signing certificate, without the intermediate CA `CA-PP-I-INT` that issued it',
+  issuerNotCa: 'its signing certificate is issued, under the anchor `CA-PP-I`, by a certificate whose `basicConstraints` have `cA` false',
+  keyP192: 'its signing certificate, issued under the same anchor, holds a key on curve P-192 (secp192r1), with which it is signed',
+  keyRsa1024: 'its signing certificate, issued under the same anchor, holds a 1024-bit RSA key, with which it is signed (RSASSA-PKCS1-v1_5 with SHA-256)',
+  criticalExtension: 'its signing certificate additionally carries a private extension (OID 1.3.6.1.4.1.55555.1.1) marked critical',
 };
 
 export const FAULTS = {
@@ -76,6 +89,72 @@ export const FAULTS = {
   'credential.no-status': credential('status-reference', 'it carries no `status` claim'),
   'credential.no-cnf': credential('key-binding', 'its Issuer-signed JWT carries no `cnf` claim, so it is bound to no key'),
   'credential.minimal-cnf-jwk': credential(null, 'the `jwk` member of its `cnf` claim carries only the members `kty`, `crv`, `x` and `y`'),
+
+  // Credential (SD-JWT VC), IssuerIntegrity: the issuer-signed JWT, its disclosures or its signing certificate.
+  'credential.alg-none': credential('issuer-signature', 'its Issuer-signed JWT is an unsecured JWT with `alg` `none` and an empty signature'),
+  'credential.alg-hs256': credential(
+    'issuer-signature',
+    'its Issuer-signed JWT is protected with `HS256`, keyed with the PEM encoding of the public key of the signing certificate in its `x5c` header',
+  ),
+  'credential.es256k': credential(
+    'issuer-signature',
+    'its Issuer-signed JWT is signed with `ES256K` by a key on curve secp256k1, whose certificate is issued under the same anchor and carried in `x5c`',
+  ),
+  'credential.no-x5c': credential('format', 'the header of its Issuer-signed JWT carries no `x5c` member'),
+  'credential.embedded-root': credential(
+    'issuer-trust',
+    'it is signed by a certificate issued by `CA-X`, and its `x5c` header carries that certificate followed by the self-signed certificate of `CA-X`',
+  ),
+  'credential.self-signed': credential('issuer-trust', 'it is signed by a self-signed certificate, which is the only certificate in its `x5c` header'),
+  'credential.typ-missing': credential('format', 'the header of its Issuer-signed JWT has no `typ` member'),
+  'credential.typ-jwt': credential('format', 'the `typ` header of its Issuer-signed JWT is `JWT`'),
+  'credential.typ-vc-sd-jwt': credential('format', 'the `typ` header of its Issuer-signed JWT is the former media type `vc+sd-jwt`'),
+  'credential.disclosure-foreign': credential(
+    'disclosures',
+    'it carries an additional disclosure for the claim `family_name` with the value `Musterfrau`, whose digest does not occur in the Issuer-signed JWT',
+  ),
+  'credential.disclosure-modified': credential(
+    'disclosures',
+    'the value in its disclosure of `family_name` is changed to `Musterfrau`, with the salt and the claim name kept',
+  ),
+  'credential.disclosure-duplicate': credential('disclosures', 'its disclosure of `family_name` is presented twice'),
+  'credential.digest-duplicate': credential('disclosures', 'the digest of its disclosure of `family_name` occurs twice in the `_sd` array of the Issuer-signed JWT'),
+  'credential.disclosure-name-sd': credential(
+    'disclosures',
+    'it carries an additional disclosure, referenced from the `_sd` array of the Issuer-signed JWT, whose claim name is `_sd`',
+  ),
+  'credential.disclosure-name-ellipsis': credential(
+    'disclosures',
+    'it carries an additional disclosure, referenced from the `_sd` array of the Issuer-signed JWT, whose claim name is `...`',
+  ),
+  'credential.disclosure-name-present': credential(
+    'disclosures',
+    'its Issuer-signed JWT also carries `family_name` as a plain claim, at the same level as the disclosure of `family_name`',
+  ),
+  'credential.disclosure-two-elements': credential(
+    'disclosures',
+    'its disclosure of `family_name`, referenced from the `_sd` array of an object, has two elements (salt and value) instead of three',
+  ),
+  'credential.disclosure-array-three-elements': credential(
+    'disclosures',
+    'its claim `nationalities` is a plain array whose element is a selectively disclosable array element, and the disclosure of that element has three elements (salt, name and value) instead of two',
+  ),
+  'credential.sd-alg-md5': credential('disclosures', 'its `_sd_alg` claim is `md5`, and every digest is computed with MD5'),
+  'credential.sd-alg-sha1': credential('disclosures', 'its `_sd_alg` claim is `sha-1`, and every digest is computed with SHA-1'),
+  'credential.vct-other': credential('format', 'its `vct` claim is `urn:eudi:other:1` instead of the type the request asks for'),
+  'credential.decoys': credential(null, 'the `_sd` array of its Issuer-signed JWT additionally contains three decoy digests'),
+  'credential.recursive-disclosures': credential(
+    null,
+    'its claim `place_of_birth` is disclosed recursively: the disclosure of `place_of_birth` holds an object whose members `locality` and `country` are themselves selectively disclosable',
+  ),
+  'credential.signer-expired': credential('issuer-trust', SHARED_TEXT.signerExpired),
+  'credential.signer-not-yet-valid': credential('issuer-trust', SHARED_TEXT.signerNotYetValid),
+  'credential.intermediate-expired': { ...credential('issuer-trust', SHARED_TEXT.intermediateExpired), issuer: 'PP-I' },
+  'credential.intermediate-missing': { ...credential('issuer-trust', SHARED_TEXT.intermediateMissing), issuer: 'PP-I' },
+  'credential.issuer-not-ca': { ...credential('issuer-trust', SHARED_TEXT.issuerNotCa), issuer: 'PP-I' },
+  'credential.key-p192': credential('issuer-signature', SHARED_TEXT.keyP192),
+  'credential.key-rsa1024': credential('issuer-signature', SHARED_TEXT.keyRsa1024),
+  'credential.critical-extension': credential('issuer-trust', SHARED_TEXT.criticalExtension),
 
   // Credential (mdoc), after a valid issuance: the MSO is decoded, changed and its IssuerAuth signed again.
   'mdoc.valid-until-past': mdoc(
@@ -102,6 +181,45 @@ export const FAULTS = {
   'mdoc.status-idx-out-of-range': mdoc('status-index', SHARED_TEXT.outOfRange),
   'mdoc.no-status': mdoc('status-reference', 'its MSO carries no `status` element'),
   'mdoc.no-device-key': mdoc('key-binding', 'its MSO carries no `deviceKeyInfo`, so it is bound to no device key'),
+
+  // Credential (mdoc), IssuerIntegrity: the IssuerSigned structure, the MSO or the document signer certificate.
+  'mdoc.element-value-changed': mdoc(
+    'disclosures',
+    'the `elementValue` of its `IssuerSignedItem` for `family_name` is changed to `Musterfrau`, so its digest no longer matches the MSO',
+  ),
+  'mdoc.digest-id-unknown': mdoc(
+    'disclosures',
+    'the `digestID` of its `IssuerSignedItem` for `family_name` is changed to a value for which the MSO holds no digest',
+  ),
+  'mdoc.mso-doctype-other': mdoc(
+    'format',
+    'the `docType` in its MSO is `org.iso.18013.5.1.mDL`, while the document in the DeviceResponse keeps the `docType` `eu.europa.ec.eudi.pid.1`',
+  ),
+  'mdoc.digest-sha1': mdoc('disclosures', 'the `digestAlgorithm` of its MSO is `SHA-1`, and every value digest is computed with SHA-1'),
+  'mdoc.doctype-other': mdoc(
+    'format',
+    'it is of the `docType` `org.iso.18013.5.1.mDL`, in its MSO and in the document, instead of the `docType` the request asks for',
+  ),
+  'mdoc.embedded-root': mdoc(
+    'issuer-trust',
+    'it is signed by a document signer certificate issued by `CA-X`, and the `x5chain` of its `IssuerAuth` carries that certificate followed by the self-signed certificate of `CA-X`',
+  ),
+  'mdoc.ds-no-eku': mdoc(
+    'issuer-trust',
+    'its document signer certificate, issued under the same anchor, has no extended key usage `1.0.18013.5.1.2`',
+  ),
+  'mdoc.signed-after-ds-expiry': mdoc(
+    'issuer-trust',
+    'the `signed` value in the `validityInfo` of its MSO lies one hour after the end of the validity period of its document signer certificate, which is still valid',
+  ),
+  'mdoc.signer-expired': mdoc('issuer-trust', SHARED_TEXT.signerExpired),
+  'mdoc.signer-not-yet-valid': mdoc('issuer-trust', SHARED_TEXT.signerNotYetValid),
+  'mdoc.intermediate-expired': { ...mdoc('issuer-trust', SHARED_TEXT.intermediateExpired), issuer: 'PP-I' },
+  'mdoc.intermediate-missing': { ...mdoc('issuer-trust', SHARED_TEXT.intermediateMissing), issuer: 'PP-I' },
+  'mdoc.issuer-not-ca': { ...mdoc('issuer-trust', SHARED_TEXT.issuerNotCa), issuer: 'PP-I' },
+  'mdoc.key-p192': mdoc('issuer-signature', SHARED_TEXT.keyP192),
+  'mdoc.key-rsa1024': mdoc('issuer-signature', SHARED_TEXT.keyRsa1024),
+  'mdoc.critical-extension': mdoc('issuer-trust', SHARED_TEXT.criticalExtension),
 
   // Status List Token (JWT), after a valid build: decoded, changed and signed again, or served in another form.
   'status-list.signature-bitflip': statusList('status-list-signature', 'one bit of its signature value is flipped'),

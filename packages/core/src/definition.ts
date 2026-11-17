@@ -323,6 +323,7 @@ export function presentation(
     const info = faultInfo(fault);
     if (!(points as readonly string[]).includes(info.point)) throw new Error(`fault ${fault} does not apply to the ${points.join(' or ')}`);
     if (info.format && info.format !== format) throw new Error(`fault ${fault} applies to ${info.format}, not ${format}`);
+    if (info.issuer && info.issuer !== credential.issuer) throw new Error(`fault ${fault} needs a credential issued by ${info.issuer}`);
   }
   const replays = result.response.faults.includes('presentation.replay');
   if (replays !== (result.response.presentationOfStep !== undefined)) {

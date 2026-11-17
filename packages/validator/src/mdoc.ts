@@ -22,6 +22,7 @@ import {
   x5chainOf,
 } from '@rp-conformance/forge';
 import { parseCertificate } from '@owf/x509';
+import { describeKey } from './disclosures';
 import { CheckRecorder, type ValidationMode, type ValidationResult } from './checks';
 import { evaluateIdentifierList } from './identifier-list';
 import { attempt, base64Of, evaluateStatusList, type FetchedStatusList, fail, isUri } from './status-list';
@@ -142,14 +143,12 @@ export async function validateMdocPresentation(presentation: string, options: Md
       asMap(issuerSigned.get('nameSpaces'), 'issuerSigned.nameSpaces');
       issuerAuth = attempt(() => readCose(issuerSigned.get('issuerAuth')), 'IssuerAuth');
       if (issuerAuth.tag !== undefined && issuerAuth.tag !== 18) fail(`IssuerAuth carries tag ${issuerAuth.tag}`);
-      if (issuerAuth.protectedHeader.get(COSE.alg) !== COSE_ALG.ES256) fail(`IssuerAuth alg ${String(issuerAuth.protectedHeader.get(COSE.alg))} is not supported`);
       const chain = x5chainOf(issuerAuth.unprotectedHeader.get(COSE.x5chain) ?? issuerAuth.protectedHeader.get(COSE.x5chain));
       if (!chain) fail('IssuerAuth carries no x5chain');
       x5chain = chain as Uint8Array[];
       if (!issuerAuth.payload) fail('IssuerAuth has no payload');
       mso = asMap(attempt(() => decodeEmbedded(decodeCbor(issuerAuth?.payload as Uint8Array)), 'the IssuerAuth payload is not MobileSecurityObjectBytes'), 'the MSO');
       if (typeof mso.get('version') !== 'string' || !/^1\./.test(mso.get('version') as string)) fail(`MSO version ${String(mso.get('version'))}`);
-      if (mso.get('digestAlgorithm') !== 'SHA-256') fail(`digestAlgorithm ${String(mso.get('digestAlgorithm'))} is not supported`);
       if (mso.get('docType') !== document.get('docType')) fail('the MSO docType differs from the document docType');
       asMap(mso.get('valueDigests'), 'valueDigests');
       const validityInfo = asMap(mso.get('validityInfo'), 'validityInfo');
@@ -165,6 +164,11 @@ export async function validateMdocPresentation(presentation: string, options: Md
       if (match.ok) {
         // ISO/IEC 18013-5 Annex B, Table B.3: a document signer certificate carries this extended key usage.
         if (!match.leaf.extendedKeyUsage?.includes(MDOC_DS_EXTENDED_KEY_USAGE)) fail('the signing certificate is not a document signer (no extended key usage 1.0.18013.5.1.2)');
+        // ISO/IEC 18013-5 section 9.3.1: the MSO was signed within the validity period of the document signer certificate.
+        const signed = dateOf((mso.get('validityInfo') as CborMap).get('signed')) as Date;
+        if (signed < match.leaf.notBefore || signed > match.leaf.notAfter) {
+          fail(`the MSO was signed (${signed.toISOString()}) outside the validity period of the document signer certificate`);
+        }
         issuer = { name: match.entity.name, statusAnchors: options.trustRule.statusAnchors(match.entity, match.service) };
         return `${match.entity.name} under ${match.anchor.subject.commonName} (${match.list.id})`;
       }
@@ -184,15 +188,18 @@ export async function validateMdocPresentation(presentation: string, options: Md
     });
 
     await recorder.run('issuer-signature', ['format'], async () => {
-      const jwk = parseCertificate(x5chain[0]).publicKey.jwk;
-      if (!jwk || jwk.crv !== 'P-256') fail('the document signer certificate has no P-256 key');
+      const key = describeKey(x5chain[0]);
+      if (key !== 'P-256') fail(`the document signer certificate holds a key ${key}, not on P-256`);
       const auth = issuerAuth as ReturnType<typeof readCose>;
+      if (auth.protectedHeader.get(COSE.alg) !== COSE_ALG.ES256) fail(`IssuerAuth alg ${String(auth.protectedHeader.get(COSE.alg))} is not supported`);
+      const jwk = parseCertificate(x5chain[0]).publicKey.jwk as JsonWebKey;
       if (!(await verifyEs256(jwk as JsonWebKey, sigStructure(auth.protectedBytes, auth.payload as Uint8Array), auth.signature))) {
         fail('the IssuerAuth signature does not verify');
       }
     });
 
     await recorder.run('disclosures', ['format'], () => {
+      if (mso.get('digestAlgorithm') !== 'SHA-256') fail(`digestAlgorithm ${String(mso.get('digestAlgorithm'))} is not supported`);
       const digests = mso.get('valueDigests') as CborMap;
       const disclosed: Record<string, Record<string, unknown>> = {};
       let count = 0;

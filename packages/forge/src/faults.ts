@@ -2,14 +2,15 @@
 // one deliberate fault. The catalogue (point, target check, FCAF wording) is FAULTS in @rp-conformance/core; this
 // module implements every entry, at three points: the issued credential, the Status List Token, the Authorization
 // Response.
-import { createHash, createHmac, createPublicKey, generateKeyPairSync, randomUUID, sign as nodeSign } from 'node:crypto';
+import { createHash, createHmac, createPublicKey, generateKeyPairSync, randomBytes, randomUUID, sign as nodeSign } from 'node:crypto';
 import { createDeflate } from 'node:zlib';
 import { type FaultId, faultInfo, type FaultPoint, type Flow } from '@rp-conformance/core';
 import { CompactEncrypt, CompactSign, exportJWK, generateKeyPair, importJWK, type JWK } from 'jose';
 import { createCertificate } from '@owf/x509';
 import { base64url, type EcKeyPair, randomSerial, sha256, signEs256 } from './crypto';
 import { decodeJws, flipBitInSegment, resignJws } from './jose';
-import { type CertifiedKey, createEndEntity, createSelfSignedCa, createSelfSignedSigner, type TestPki } from './pki';
+import { type CertifiedKey, createEndEntity, createSelfSignedCa, createSelfSignedSigner, type TestEntity, type TestPki } from './pki';
+import { foreignSigner, isSignerFault } from './signers';
 
 const HOUR = 3600;
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -32,6 +33,8 @@ export interface CredentialFaultContext {
   skewSeconds: number;
   /** Number of entries in the referenced status list (for `credential.status-idx-out-of-range`). */
   statusListEntries?: number;
+  /** The issuing entity, for the faults that certify another key under its anchor. */
+  issuer?: TestEntity;
 }
 
 type Payload = Record<string, unknown> & { status?: { status_list?: Record<string, unknown> } };
@@ -64,11 +67,162 @@ function statusListOf(payload: Payload): Record<string, unknown> {
   return reference;
 }
 
+/** A disclosure (RFC 9901 section 4.2): base64url of the JSON array, and its digest with `alg` (default SHA-256). */
+export const encodeDisclosure = (elements: unknown[]) => base64url.encode(JSON.stringify(elements));
+const NODE_HASH: Record<string, string> = { 'sha-256': 'sha256', md5: 'md5', 'sha-1': 'sha1' };
+export const disclosureDigest = (disclosure: string, alg = 'sha-256') => base64url.encode(createHash(NODE_HASH[alg] ?? alg).update(disclosure).digest());
+const decodeDisclosure = (disclosure: string) => base64url.decodeJson<unknown[]>(disclosure);
+const salt = () => base64url.encode(randomBytes(16));
+
+/** An issued SD-JWT VC taken apart: the issuer-signed JWT and its disclosures. */
+interface SdJwtParts {
+  jwt: string;
+  disclosures: string[];
+}
+
+const indexOfClaim = (parts: SdJwtParts, name: string) => {
+  const index = parts.disclosures.findIndex((d) => decodeDisclosure(d)[1] === name);
+  if (index < 0) throw new Error(`the credential has no disclosure of ${name}`);
+  return index;
+};
+
+/** Replaces a digest in the payload's top-level `_sd`. */
+const replaceDigest = (payload: Payload, from: string, to: string[]) => {
+  const sd = (payload._sd as string[] | undefined) ?? [];
+  const at = sd.indexOf(from);
+  if (at < 0) throw new Error('the digest is not in _sd');
+  sd.splice(at, 1, ...to);
+  payload._sd = sd;
+};
+
+/**
+ * The faults of the disclosures (IssuerIntegrity_008 to _012, _014, _015): change the disclosures, and the issuer-signed
+ * payload where the fault names it, which the issuer's key then signs again.
+ */
+async function applyDisclosureFault(fault: FaultId, parts: SdJwtParts, ctx: CredentialFaultContext): Promise<SdJwtParts | undefined> {
+  const resign = (change: (payload: Payload) => void) => resignJws(parts.jwt, ({ payload }) => change(payload as Payload), ctx.signer.key.privateKey);
+  const disclosures = [...parts.disclosures];
+  switch (fault) {
+    case 'credential.disclosure-foreign':
+      return { jwt: parts.jwt, disclosures: [...disclosures, encodeDisclosure([salt(), 'family_name', 'Musterfrau'])] };
+    case 'credential.disclosure-modified': {
+      const at = indexOfClaim(parts, 'family_name');
+      const [s, name] = decodeDisclosure(disclosures[at]);
+      disclosures[at] = encodeDisclosure([s, name, 'Musterfrau']);
+      return { jwt: parts.jwt, disclosures };
+    }
+    case 'credential.disclosure-duplicate': {
+      const at = indexOfClaim(parts, 'family_name');
+      disclosures.splice(at + 1, 0, disclosures[at]);
+      return { jwt: parts.jwt, disclosures };
+    }
+    case 'credential.digest-duplicate': {
+      const digest = disclosureDigest(disclosures[indexOfClaim(parts, 'family_name')]);
+      return { jwt: await resign((p) => void (p._sd as string[]).push(digest)), disclosures };
+    }
+    case 'credential.disclosure-name-sd':
+    case 'credential.disclosure-name-ellipsis': {
+      const extra = encodeDisclosure([salt(), fault === 'credential.disclosure-name-sd' ? '_sd' : '...', 'x']);
+      return { jwt: await resign((p) => void (p._sd as string[]).push(disclosureDigest(extra))), disclosures: [...disclosures, extra] };
+    }
+    case 'credential.disclosure-name-present': {
+      const value = decodeDisclosure(disclosures[indexOfClaim(parts, 'family_name')])[2];
+      return { jwt: await resign((p) => void (p.family_name = value)), disclosures };
+    }
+    case 'credential.disclosure-two-elements': {
+      const at = indexOfClaim(parts, 'family_name');
+      const [s, , value] = decodeDisclosure(disclosures[at]);
+      const old = disclosures[at];
+      disclosures[at] = encodeDisclosure([s, value]);
+      return { jwt: await resign((p) => replaceDigest(p, disclosureDigest(old), [disclosureDigest(disclosures[at])])), disclosures };
+    }
+    case 'credential.disclosure-array-three-elements': {
+      const at = indexOfClaim(parts, 'nationalities');
+      const old = disclosures[at];
+      const [first] = decodeDisclosure(old)[2] as unknown[];
+      const element = encodeDisclosure([salt(), 'nationality', first]);
+      disclosures.splice(at, 1, element);
+      const jwt = await resign((p) => {
+        replaceDigest(p, disclosureDigest(old), []);
+        p.nationalities = [{ '...': disclosureDigest(element) }];
+      });
+      return { jwt, disclosures };
+    }
+    case 'credential.sd-alg-md5':
+    case 'credential.sd-alg-sha1': {
+      const alg = fault === 'credential.sd-alg-md5' ? 'md5' : 'sha-1';
+      const jwt = await resign((p) => {
+        p._sd = (p._sd as string[]).map((digest) => {
+          const disclosure = disclosures.find((d) => disclosureDigest(d) === digest);
+          return disclosure ? disclosureDigest(disclosure, alg) : digest;
+        });
+        p._sd_alg = alg;
+      });
+      return { jwt, disclosures };
+    }
+    case 'credential.decoys': {
+      const decoys = [0, 1, 2].map(() => base64url.encode(sha256(randomBytes(32))));
+      return { jwt: await resign((p) => void (p._sd as string[]).push(...decoys)), disclosures };
+    }
+    case 'credential.recursive-disclosures': {
+      const at = indexOfClaim(parts, 'place_of_birth');
+      const old = disclosures[at];
+      const value = decodeDisclosure(old)[2] as Record<string, unknown>;
+      const members = Object.entries(value).map(([name, v]) => encodeDisclosure([salt(), name, v]));
+      disclosures[at] = encodeDisclosure([salt(), 'place_of_birth', { _sd: members.map((d) => disclosureDigest(d)).sort() }]);
+      disclosures.push(...members);
+      return { jwt: await resign((p) => replaceDigest(p, disclosureDigest(old), [disclosureDigest(disclosures[at])])), disclosures };
+    }
+    default:
+      return undefined;
+  }
+}
+
+const join = (parts: SdJwtParts) => `${[parts.jwt, ...parts.disclosures].join('~')}~`;
+
 /** Applies a credential fault to an issued SD-JWT VC (issuer-signed JWT `~` disclosures `~`, without KB-JWT). */
 export async function applyCredentialFault(fault: FaultId, sdJwt: string, ctx: CredentialFaultContext): Promise<string> {
   ensurePoint(fault, 'credential', 'dc+sd-jwt');
   const [issuerJwt, ...rest] = sdJwt.split('~');
-  if (fault === 'credential.signature-bitflip') return [flipBitInSegment(issuerJwt, 2), ...rest].join('~');
+  const parts: SdJwtParts = { jwt: issuerJwt, disclosures: rest.filter(Boolean) };
+  // A signer fault is applied when the credential is issued (forgePresentation).
+  if (isSignerFault(fault)) return sdJwt;
+  const unsigned = (header: Record<string, unknown>) => {
+    const decoded = decodeJws(issuerJwt);
+    return `${base64url.encode(JSON.stringify({ ...decoded.header, ...header }))}.${base64url.encode(JSON.stringify(decoded.payload))}`;
+  };
+  const withJwt = (jwt: string) => join({ ...parts, jwt });
+  switch (fault) {
+    case 'credential.signature-bitflip':
+      return withJwt(flipBitInSegment(issuerJwt, 2));
+    case 'credential.alg-none':
+      return withJwt(`${unsigned({ alg: 'none' })}.`);
+    case 'credential.alg-hs256': {
+      const input = unsigned({ alg: 'HS256' });
+      return withJwt(`${input}.${base64url.encode(createHmac('sha256', hmacKeyOf(ctx.signer)).update(input).digest())}`);
+    }
+    case 'credential.es256k':
+    case 'credential.key-p192':
+    case 'credential.key-rsa1024': {
+      if (!ctx.issuer) throw new Error(`fault ${fault} needs the issuing entity`);
+      const kind = fault === 'credential.es256k' ? 'secp256k1' : fault === 'credential.key-p192' ? 'p192' : 'rsa1024';
+      const signer = await foreignSigner(kind, ctx.issuer, 'dc+sd-jwt', ctx.now);
+      const input = unsigned({ alg: signer.jwsAlg, x5c: [Buffer.from(signer.certificate.der).toString('base64')] });
+      return withJwt(`${input}.${base64url.encode(signer.sign(input))}`);
+    }
+    case 'credential.no-x5c':
+      return withJwt(await resignJws(issuerJwt, ({ header }) => void delete header.x5c, ctx.signer.key.privateKey));
+    case 'credential.typ-missing':
+      return withJwt(await resignJws(issuerJwt, ({ header }) => void delete header.typ, ctx.signer.key.privateKey));
+    case 'credential.typ-jwt':
+      return withJwt(await resignJws(issuerJwt, ({ header }) => void (header.typ = 'JWT'), ctx.signer.key.privateKey));
+    case 'credential.typ-vc-sd-jwt':
+      return withJwt(await resignJws(issuerJwt, ({ header }) => void (header.typ = 'vc+sd-jwt'), ctx.signer.key.privateKey));
+    case 'credential.vct-other':
+      return withJwt(await resignJws(issuerJwt, ({ payload }) => void (payload.vct = 'urn:eudi:other:1'), ctx.signer.key.privateKey));
+  }
+  const disclosed = await applyDisclosureFault(fault, parts, ctx);
+  if (disclosed) return join(disclosed);
   const change = CREDENTIAL_CHANGES[fault];
   if (!change) throw new Error(`fault ${fault} is not implemented`);
   const changed = await resignJws(issuerJwt, ({ payload }) => change(payload as Payload, ctx), ctx.signer.key.privateKey);

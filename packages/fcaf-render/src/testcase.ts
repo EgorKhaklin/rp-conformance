@@ -12,6 +12,7 @@ export const AREA_TITLE: Record<string, string> = {
   SessionEncryption: 'Session Encryption',
   SessionBinding: 'Session Binding',
   DeviceBinding: 'Device Binding',
+  IssuerIntegrity: 'Issuer Integrity',
 };
 
 const numbered = (items: string[]) => items.map((text, i) => `${i + 1}. ${text}`).join('\n');

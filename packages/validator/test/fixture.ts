@@ -164,7 +164,11 @@ export class Fixture {
     const replay = presentationFault === 'presentation.replay';
     if (replay && !options.other) throw new Error('presentation.replay needs another transaction');
     const boundTo = replay ? (options.other as Transaction) : tx;
-    const held = (forged.format === 'mso_mdoc' ? { format: 'mso_mdoc', value: forged.credential } : { format: 'dc+sd-jwt', value: forged.credential }) as HeldCredential;
+    const held = (
+      forged.format === 'mso_mdoc'
+        ? { format: 'mso_mdoc', value: forged.credential, ...(forged.documentDocType ? { docType: forged.documentDocType } : {}) }
+        : { format: 'dc+sd-jwt', value: forged.credential }
+    ) as HeldCredential;
     const presentation = (replay && options.replayed) || await buildPresentation(
       held,
       { disclose: (credentialQuery.claims ?? []).map((c) => String(c.path[0])), elements: requestedElements(credentialQuery.claims) },

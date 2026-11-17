@@ -13,5 +13,6 @@ export * from './presentation';
 export * from './queries';
 export * from './registration';
 export * from './status-list';
+export * from './signers';
 export * from './step';
 export * from './trusted-list';
