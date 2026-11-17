@@ -40,8 +40,10 @@ interface Decoded {
 }
 
 /** Algorithms of the ECCG agreed cryptographic mechanisms that a request may name: JOSE names and COSE identifiers. */
-const ECCG_JOSE = new Set(['ES256', 'ES384', 'ES512', 'PS256', 'PS384', 'PS512']);
-const ECCG_COSE = new Set([-7, -35, -36, -37, -38, -39]);
+// ECDSA on P-256, P-384 and P-521 with SHA-2, also as the fully-specified algorithms of RFC 9864 (ESP256, ESP384,
+// ESP512), and RSASSA-PSS.
+const ECCG_JOSE = new Set(['ES256', 'ES384', 'ES512', 'ESP256', 'ESP384', 'ESP512', 'PS256', 'PS384', 'PS512']);
+const ECCG_COSE = new Set([-7, -35, -36, -9, -51, -52, -37, -38, -39]);
 const PRIVATE_MEMBERS = ['d', 'p', 'q', 'dp', 'dq', 'qi', 'k', 'oth'];
 const ALLOWED_INVOCATION = new Set(['client_id', 'request_uri', 'request_uri_method']);
 const SIGNED_PROTOCOLS = ['openid4vp-v1-signed', 'openid4vp-v1-multisigned'];

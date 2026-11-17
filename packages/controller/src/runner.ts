@@ -642,6 +642,8 @@ async function runRequest(step: StepDefinition, action: RequestAction, flow: Flo
  * next step, so a retrieval missing at the end of the wait is checked again after that step.
  */
 async function runTrustList(action: TrustListAction, record: StepRecord, ctx: Context, state: TestCaseState) {
+  // A retrieval still awaited from an earlier trust-list step is decided now, before this step publishes another version.
+  await checkPendingRetrieval(state, ctx, true);
   const current = state.entities.get(action.list) ?? (action.list === 'TL-QEAA' ? trustedListEntitiesOf(ctx.harness.pki) : defaultEntitiesOf(ctx.harness.pki, action.list));
   const entities = [...current.filter((e) => !action.remove?.includes(e)), ...(action.add ?? []).filter((e) => !current.includes(e))];
   // A version the Relying Party must not use leaves the entities of the version in use unchanged.

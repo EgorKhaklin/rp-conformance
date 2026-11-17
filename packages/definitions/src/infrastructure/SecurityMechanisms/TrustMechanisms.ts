@@ -157,6 +157,7 @@ export const definitions = [
     references: LOTE,
     steps: [
       publish('The Test Trust Infrastructure publishes a new version of `TL-PID` with the same entries.', { list: 'TL-PID' }),
+      validPid(),
       publish('The Test Trust Infrastructure publishes a version of `TL-PID` that lists the PID/Issuance service of `PP-W` again.', {
         list: 'TL-PID',
         restoreIssuance: ['PP-W'],
@@ -164,7 +165,10 @@ export const definitions = [
       }),
       pidOf('PP-W', 'REJ'),
     ],
-    comments: ['The rolled back version would make `PP-W` a PID Provider again, so a Relying Party that used it would accept its PID.'],
+    comments: [
+      'Step 2 makes a Relying Party that retrieves lists only when it needs them load the version of step 1, so the version of step 3 rolls back from the one in use.',
+      'The rolled back version would make `PP-W` a PID Provider again, so a Relying Party that used it would accept its PID.',
+    ],
   }),
   trustMechanisms({
     number: 6,

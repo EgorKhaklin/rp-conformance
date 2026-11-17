@@ -26,16 +26,20 @@ EUDI_specific | EUDI_required
 ## Test Scenario
 
 1. The Test Trust Infrastructure publishes a new version of `TL-PID` with the same entries. Wait until the Relying Party has retrieved it, at most `T_refresh`.
-2. The Test Trust Infrastructure publishes a version of `TL-PID` that lists the PID/Issuance service of `PP-W` again. It is valid in every other respect, except that its `LoTESequenceNumber` is one lower than that of the version the Relying Party retrieved before, and its `ListIssueDateTime` one day earlier. Wait until the Relying Party has retrieved it, at most `T_refresh`.
-3. Perform a presentation for `default_query_pid` in which the Conformance Wallet presents, in an otherwise valid Authorization Response, a variant of `default_credential_pid` that differs from it only in that it is issued by `PP-W`.
+2. Perform a presentation for `default_query_pid` in which the Conformance Wallet presents `default_credential_pid` in a valid Authorization Response.
+3. The Test Trust Infrastructure publishes a version of `TL-PID` that lists the PID/Issuance service of `PP-W` again. It is valid in every other respect, except that its `LoTESequenceNumber` is one lower than that of the version the Relying Party retrieved before, and its `ListIssueDateTime` one day earlier. Wait until the Relying Party has retrieved it, at most `T_refresh`.
+4. Perform a presentation for `default_query_pid` in which the Conformance Wallet presents, in an otherwise valid Authorization Response, a variant of `default_credential_pid` that differs from it only in that it is issued by `PP-W`.
 
 ## Expected results
 
 1. The Test Trust Infrastructure logs a retrieval of the new version of `TL-PID` by the Relying Party.
-2. The Test Trust Infrastructure logs a retrieval of the new version of `TL-PID` by the Relying Party.
-3. The Relying Party rejects the presentation: its verification result reports a failure and releases no attribute value from the presentation, and the endpoint receiving the Authorization Response does not answer with HTTP status 5xx.
+2. The Relying Party accepts the presentation: its verification result reports success and releases exactly the attributes requested in `default_query_pid`, with the values of `default_credential_pid`.
+3. The Test Trust Infrastructure logs a retrieval of the new version of `TL-PID` by the Relying Party.
+4. The Relying Party rejects the presentation: its verification result reports a failure and releases no attribute value from the presentation, and the endpoint receiving the Authorization Response does not answer with HTTP status 5xx.
 
 ## Comments
+
+Step 2 makes a Relying Party that retrieves lists only when it needs them load the version of step 1, so the version of step 3 rolls back from the one in use.
 
 The rolled back version would make `PP-W` a PID Provider again, so a Relying Party that used it would accept its PID.
 
