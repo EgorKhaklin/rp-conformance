@@ -4,7 +4,7 @@
 import { createHash, X509Certificate } from 'node:crypto';
 import { type CallbackContext, type Jwk, setGlobalConfig } from '@openid4vc/oauth2';
 import { Openid4vpClient } from '@openid4vc/openid4vp';
-import { type CredentialFormat, type FaultId, faultInfo } from '@rp-conformance/core';
+import { type CapturedRequest, type CredentialFormat, type FaultId, faultInfo } from '@rp-conformance/core';
 import {
   base64url,
   buildAuthorizationResponse,
@@ -60,6 +60,8 @@ export interface PresentationEvidence {
   responseData?: Record<string, unknown>;
   response?: HttpExchange;
   redirect?: HttpExchange;
+  /** The request as captured, raw, for the request-side checks (catalogue scenario SCN-Q). */
+  captured?: CapturedRequest;
   /** Set when the wallet could not complete the flow. */
   error?: string;
 }
@@ -151,6 +153,12 @@ export class ConformanceWallet {
     } catch (error) {
       evidence.error = (error as Error).message;
     }
+    const fetched = evidence.requestFetch;
+    evidence.captured = {
+      flow: 'redirect',
+      invocationUri,
+      ...(fetched ? { requestUri: { status: fetched.status, contentType: fetched.contentType, body: fetched.body } } : {}),
+    };
     return evidence;
   }
 
@@ -220,6 +228,8 @@ export class ConformanceWallet {
     } catch (error) {
       evidence.error = (error as Error).message;
     }
+    const chosen = call.requests.find((r) => (DC_API_PROTOCOLS as readonly string[]).includes(r.protocol)) ?? call.requests[0];
+    evidence.captured = { flow: 'dc-api', origin: call.origin, ...(chosen ? { protocol: chosen.protocol, data: chosen.data } : {}) };
     return evidence;
   }
 

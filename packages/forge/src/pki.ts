@@ -37,6 +37,11 @@ export interface EntitySpec {
    * service that is not qualified (`QP-N`), or a qualified service that is withdrawn (`QP-W`).
    */
   qeaaService?: 'granted' | 'not-qualified' | 'withdrawn';
+  /**
+   * `PP-I`: its signers are issued by an intermediate CA `CA-PP-I-INT` under its anchor, which allows one intermediate
+   * (the certificate path test cases of IssuerIntegrity).
+   */
+  intermediate?: boolean;
   /** `EP-A`: on no list; the rulebook of the credential defines its anchor `CA-EP-A`. */
   rulebook?: 'default_credential_eaa';
   /** Short host-like name used in subject alternative names and `iss`. */
@@ -51,6 +56,7 @@ export const ENTITIES: EntitySpec[] = [
   { id: 'PP-D', list: 'TL-PID', host: 'pp-d.rp-test' },
   { id: 'PP-E', list: 'TL-PID', expiredAnchor: true, host: 'pp-e.rp-test' },
   { id: 'PP-W', list: 'TL-PID', issuanceWithdrawn: true, host: 'pp-w.rp-test' },
+  { id: 'PP-I', list: 'TL-PID', intermediate: true, host: 'pp-i.rp-test' },
   { id: 'QP-A', trustedList: 'TL-QEAA', qeaaService: 'granted', host: 'qp-a.rp-test' },
   { id: 'QP-N', trustedList: 'TL-QEAA', qeaaService: 'not-qualified', host: 'qp-n.rp-test' },
   { id: 'QP-W', trustedList: 'TL-QEAA', qeaaService: 'withdrawn', host: 'qp-w.rp-test' },
@@ -74,6 +80,8 @@ export interface TestEntity {
    * under the revocation anchor.
    */
   signers: { issuance: CertifiedKey; mdoc: CertifiedKey; revocation: CertifiedKey };
+  /** `PP-I`: the intermediate CA under the issuance anchor that issued its signers. */
+  intermediate?: CertifiedKey;
 }
 
 /** The lists in ETSI TS 119 612 format: the test list of trusted lists and the Trusted List it points to. */
@@ -138,7 +146,7 @@ export async function createSelfSignedCa(
   organization: string,
   commonName: string,
   validity: { notBefore: Date; notAfter: Date },
-  options: { uri?: string } = {},
+  options: { uri?: string; pathLenConstraint?: number } = {},
 ): Promise<CertifiedKey> {
   const key = await generateEcKeyPair();
   const uri = options.uri ?? `https://${commonName.toLowerCase().replace(/[^a-z0-9]+/g, '-')}.rp-test`;
@@ -149,7 +157,7 @@ export async function createSelfSignedCa(
     notBefore: validity.notBefore,
     notAfter: validity.notAfter,
     signatureAlgorithm: 'ES256',
-    basicConstraints: { cA: true, pathLenConstraint: 0 },
+    basicConstraints: { cA: true, pathLenConstraint: options.pathLenConstraint ?? 0 },
     keyUsage: ['keyCertSign', 'crlSign'],
     crlDistributionPoints: [`${uri}/crl`],
     extensions: annexBExtensions(uri, false),
@@ -170,6 +178,7 @@ export async function createDocumentSigner(
   commonName: string,
   validity: { notBefore: Date; notAfter: Date },
   uri = `https://${organization.toLowerCase().replace(/[^a-z0-9]+/g, '-')}.rp-test`,
+  options: { extensions?: X509Extension[]; extendedKeyUsage?: boolean } = {},
 ): Promise<CertifiedKey> {
   const key = await generateEcKeyPair();
   const certificate = await createCertificate({
@@ -182,7 +191,7 @@ export async function createDocumentSigner(
     signatureAlgorithm: 'ES256',
     keyUsage: ['digitalSignature'],
     crlDistributionPoints: [`${uri}/crl`],
-    extensions: annexBExtensions(uri, true),
+    extensions: [...annexBExtensions(uri, options.extendedKeyUsage ?? true), ...(options.extensions ?? [])],
     hasher: keyIdHasher,
     signer: (tbs) => signEs256(issuer.key.privateKey, tbs),
   });
@@ -199,6 +208,7 @@ export async function createEndEntity(
     dnsNames?: string[];
     uris?: string[];
     keyUsage?: KeyUsageType[];
+    extensions?: X509Extension[];
   },
 ): Promise<CertifiedKey> {
   const key = await generateEcKeyPair();
@@ -213,10 +223,68 @@ export async function createEndEntity(
     keyUsage: options.keyUsage ?? ['digitalSignature'],
     subjectAlternativeNames:
       options.dnsNames || options.uris ? { dnsNames: options.dnsNames, uris: options.uris } : undefined,
+    ...(options.extensions ? { extensions: options.extensions } : {}),
     hasher: keyIdHasher,
     signer: (tbs) => signEs256(issuer.key.privateKey, tbs),
   });
   return { certificate, key, chain: [certificate, ...issuer.chain] };
+}
+
+/**
+ * A CA certificate issued by `issuer`: an intermediate CA (`cA` true, path length 0, `keyUsage` keyCertSign and
+ * cRLSign), or, with `cA` false, a certificate that only claims to issue certificates (IssuerIntegrity_034).
+ */
+export async function createIntermediateCa(
+  issuer: CertifiedKey,
+  organization: string,
+  commonName: string,
+  validity: { notBefore: Date; notAfter: Date },
+  options: { cA?: boolean } = {},
+): Promise<CertifiedKey> {
+  const key = await generateEcKeyPair();
+  const cA = options.cA ?? true;
+  const certificate = await createCertificate({
+    subject: subjectFor(organization, commonName),
+    subjectPublicKey: key.publicJwk,
+    issuerCertificate: issuer.certificate.der,
+    serialNumber: randomSerial(),
+    notBefore: validity.notBefore,
+    notAfter: validity.notAfter,
+    signatureAlgorithm: 'ES256',
+    basicConstraints: cA ? { cA: true, pathLenConstraint: 0 } : { cA: false },
+    keyUsage: ['keyCertSign', 'crlSign'],
+    hasher: keyIdHasher,
+    signer: (tbs) => signEs256(issuer.key.privateKey, tbs),
+  });
+  return { certificate, key, chain: [certificate, ...issuer.chain] };
+}
+
+/**
+ * A certificate for a public key the test PKI does not generate itself (secp256k1, P-192, RSA), issued by `issuer` as an
+ * end-entity signer, or as an mdoc document signer with the extended key usage of ISO/IEC 18013-5 Annex B.
+ */
+export async function createCertificateForKey(
+  issuer: CertifiedKey,
+  organization: string,
+  commonName: string,
+  subjectPublicKeyDer: Uint8Array,
+  validity: { notBefore: Date; notAfter: Date },
+  options: { documentSigner?: boolean } = {},
+): Promise<Certificate> {
+  const uri = `https://${organization.toLowerCase().replace(/[^a-z0-9]+/g, '-')}.rp-test`;
+  return createCertificate({
+    subject: subjectFor(organization, commonName),
+    subjectPublicKey: subjectPublicKeyDer,
+    issuerCertificate: issuer.certificate.der,
+    serialNumber: randomSerial(),
+    notBefore: validity.notBefore,
+    notAfter: validity.notAfter,
+    signatureAlgorithm: 'ES256',
+    keyUsage: ['digitalSignature'],
+    ...(options.documentSigner ? { crlDistributionPoints: [`${uri}/crl`], extensions: annexBExtensions(uri, true) } : {}),
+    hasher: keyIdHasher,
+    signer: (tbs) => signEs256(issuer.key.privateKey, tbs),
+  });
 }
 
 /** A self-signed end-entity certificate, as used for the scheme operator certificates of the test lists. */
@@ -285,30 +353,43 @@ async function createEntity(spec: EntitySpec, now: Date): Promise<TestEntity> {
     ? { notBefore: new Date(now.getTime() - 2 * YEAR), notAfter: new Date(now.getTime() - DAY) }
     : { notBefore: new Date(now.getTime() - 30 * DAY), notAfter: new Date(now.getTime() + 10 * YEAR) };
   const issuerUri = `https://${spec.host}`;
-  const issuanceAnchor = await createSelfSignedCa(spec.id, `CA-${spec.id}`, anchorValidity, { uri: issuerUri });
+  const issuanceAnchor = await createSelfSignedCa(spec.id, `CA-${spec.id}`, anchorValidity, {
+    uri: issuerUri,
+    ...(spec.intermediate ? { pathLenConstraint: 1 } : {}),
+  });
   const revocationAnchor = spec.separateRevocationAnchor
     ? await createSelfSignedCa(spec.id, `CA-${spec.id}-REV`, anchorValidity, { uri: issuerUri })
     : issuanceAnchor;
+  const intermediate = spec.intermediate
+    ? await createIntermediateCa(issuanceAnchor, spec.id, `CA-${spec.id}-INT`, {
+        notBefore: new Date(now.getTime() - 30 * DAY),
+        notAfter: new Date(now.getTime() + 5 * YEAR),
+      })
+    : undefined;
+  // The signers of PP-I are under its intermediate CA; those of every other entity directly under the anchors.
+  const issuingCa = intermediate ?? issuanceAnchor;
+  const revocationCa = intermediate ?? revocationAnchor;
   const leafValidity = {
     notBefore: new Date(Math.min(now.getTime() - DAY, anchorValidity.notAfter.getTime() - YEAR)),
     notAfter: new Date(now.getTime() + 2 * YEAR),
     dnsNames: [spec.host],
     uris: [issuerUri],
   };
-  const issuanceSigner = await createEndEntity(issuanceAnchor, spec.id, `${spec.id} issuance signer`, leafValidity);
+  const issuanceSigner = await createEndEntity(issuingCa, spec.id, `${spec.id} issuance signer`, leafValidity);
   const documentSigner = await createDocumentSigner(
-    issuanceAnchor,
+    issuingCa,
     spec.id,
     `${spec.id} document signer`,
     documentSignerValidity(now, anchorValidity.notAfter),
     issuerUri,
   );
-  const revocationSigner = await createEndEntity(revocationAnchor, spec.id, `${spec.id} status list signer`, leafValidity);
+  const revocationSigner = await createEndEntity(revocationCa, spec.id, `${spec.id} status list signer`, leafValidity);
   return {
     spec,
     issuerUri,
     anchors: { issuance: issuanceAnchor, revocation: revocationAnchor },
     signers: { issuance: issuanceSigner, mdoc: documentSigner, revocation: revocationSigner },
+    ...(intermediate ? { intermediate } : {}),
   };
 }
 

@@ -6,10 +6,11 @@ import { type CredentialFormat, holderCurveOf, type PresentationAction } from '@
 import { applyCredentialFault, applyStatusListFault, type ServedStatusList, type StatusListFaultContext } from './faults';
 import { applyIdentifierListFault, applyMdocFault, applyStatusListCwtFault, bindMdocToSecp256k1Key } from './faults-cose';
 import { buildIdentifierListCwt, IDENTIFIER_LIST_CWT_TYPE } from './identifier-list';
-import { issueCredentialAMdoc, issueCredentialASdJwtVc } from './attestation';
-import { issuePidMdoc, newMdocIdentifier } from './mdoc';
+import { CREDENTIAL_A_DOCTYPE, issueCredentialAMdoc, issueCredentialASdJwtVc } from './attestation';
+import { issuePidMdoc, newMdocIdentifier, PID_DOCTYPE } from './mdoc';
 import { issuePidSdJwtVc } from './pid';
 import { type CertifiedKey, createDocumentSigner, documentSignerValidity, type TestEntity, type TestPki } from './pki';
+import { faultySigner, isSignerFault } from './signers';
 import { buildStatusListTokenCwt, buildStatusListTokenJwt, STATUS_LIST_CWT_TYPE } from './status-list';
 
 /** Entries of every status list the harness issues; 1024 entries are 128 bytes at one bit per status. */
@@ -59,6 +60,11 @@ export interface ForgedCredential {
   signer: CertifiedKey;
   statusList?: ForgedStatusList;
   identifierList?: ForgedIdentifierList;
+  /**
+   * The docType the Conformance Wallet gives the document of an mdoc, when it differs from the MSO's: the issued type,
+   * for `mdoc.mso-doctype-other`.
+   */
+  documentDocType?: string;
 }
 
 const bitsFor = (values: number[]): 1 | 2 | 4 | 8 => {
@@ -76,7 +82,10 @@ export async function forgePresentation(action: PresentationAction, ctx: StepFor
   const spec = action.credential;
   const issuer = ctx.pki.entities[spec.issuer];
   if (!issuer) throw new Error(`no entity ${spec.issuer} in the test PKI`);
-  const signer = await signerOf(issuer, spec.format, spec.signedUnder, now);
+  const [credentialFault] = spec.faults;
+  const signer = isSignerFault(credentialFault)
+    ? await faultySigner(credentialFault, issuer, spec.format, ctx.pki, now)
+    : await signerOf(issuer, spec.format, spec.signedUnder, now);
   const faultContext = (listSigner: CertifiedKey, uri: string): StatusListFaultContext => ({
     pki: ctx.pki,
     issuer: spec.issuer,
@@ -151,9 +160,10 @@ export async function forgePresentation(action: PresentationAction, ctx: StepFor
     });
     const bound = secp256k1 ? await bindMdocToSecp256k1Key(issued.issuerSigned, ctx.holderSecp256k1PublicJwk as JsonWebKey, signer) : issued.issuerSigned;
     const credential = fault
-      ? await applyMdocFault(fault, bound, { signer, now, skewSeconds: ctx.skewSeconds, statusListEntries: statusList?.entries })
+      ? await applyMdocFault(fault, bound, { signer, now, skewSeconds: ctx.skewSeconds, statusListEntries: statusList?.entries, issuer })
       : bound;
-    return { format: spec.format, credential, claims: issued.claims, signer, statusList, identifierList };
+    const documentDocType = fault === 'mdoc.mso-doctype-other' ? (pid ? PID_DOCTYPE : CREDENTIAL_A_DOCTYPE) : undefined;
+    return { format: spec.format, credential, claims: issued.claims, signer, statusList, identifierList, ...(documentDocType ? { documentDocType } : {}) };
   }
 
   const issued = await (pid ? issuePidSdJwtVc : issueCredentialASdJwtVc)({
@@ -165,7 +175,7 @@ export async function forgePresentation(action: PresentationAction, ctx: StepFor
     ...(short ? { validitySeconds: SHORT_VALIDITY_SECONDS } : {}),
   });
   const credential = fault
-    ? await applyCredentialFault(fault, issued.compact, { signer, now, skewSeconds: ctx.skewSeconds, statusListEntries: statusList?.entries })
+    ? await applyCredentialFault(fault, issued.compact, { signer, now, skewSeconds: ctx.skewSeconds, statusListEntries: statusList?.entries, issuer })
     : issued.compact;
   return { format: spec.format, credential, claims: issued.claims, signer, statusList, identifierList };
 }

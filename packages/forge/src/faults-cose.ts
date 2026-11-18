@@ -22,7 +22,9 @@ import {
 } from './cbor';
 import { randomSerial, sha256, signEs256 } from './crypto';
 import { decompressionBomb, otherSigner, type ServedStatusList, type StatusListFaultContext } from './faults';
-import type { CertifiedKey } from './pki';
+import type { CertifiedKey, TestEntity } from './pki';
+import { createHash } from 'node:crypto';
+import { foreignSigner, isSignerFault } from './signers';
 
 const HOUR = 3600;
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -58,6 +60,20 @@ export interface MdocFaultContext {
   skewSeconds: number;
   /** Number of entries in the referenced status list (for `mdoc.status-idx-out-of-range`). */
   statusListEntries?: number;
+  /** The issuing entity, for the faults that certify another key under its anchor. */
+  issuer?: TestEntity;
+}
+
+/** The docType of the faults that present an mdoc of another type: an mDL (ISO/IEC 18013-5). */
+export const OTHER_DOCTYPE = 'org.iso.18013.5.1.mDL';
+
+/** The `IssuerSignedItem` of `element`, decoded, with the namespace array and its index. */
+function issuerSignedItem(issuerSigned: CborMap, element: string) {
+  for (const items of (issuerSigned.get('nameSpaces') as Map<string, unknown[]>).values()) {
+    const index = items.findIndex((item) => decodeEmbedded<CborMap>(item).get('elementIdentifier') === element);
+    if (index >= 0) return { items, index, item: decodeEmbedded<CborMap>(items[index]) };
+  }
+  throw new Error(`the mdoc has no IssuerSignedItem for ${element}`);
 }
 
 const statusListEntryOf = (mso: CborMap): CborMap => {
@@ -82,6 +98,9 @@ const MDOC_CHANGES: Partial<Record<FaultId, (mso: CborMap, ctx: MdocFaultContext
   },
   'mdoc.no-status': (m) => void m.delete('status'),
   'mdoc.no-device-key': (m) => void m.delete('deviceKeyInfo'),
+  'mdoc.mso-doctype-other': (m) => void m.set('docType', OTHER_DOCTYPE),
+  'mdoc.doctype-other': (m) => void m.set('docType', OTHER_DOCTYPE),
+  'mdoc.signed-after-ds-expiry': (m, c) => void validityInfoOf(m).set('signed', tdate(new Date(c.signer.certificate.notAfter.getTime() + HOUR * 1000))),
 };
 
 /** Applies a credential fault to an issued mdoc (`IssuerSigned`, CBOR) and returns the changed `IssuerSigned`. */
@@ -89,13 +108,50 @@ export async function applyMdocFault(fault: FaultId, issuerSignedBytes: Uint8Arr
   ensure(fault, 'credential', 'mso_mdoc');
   const issuerSigned = decodeCbor<CborMap>(issuerSignedBytes);
   const issuerAuth = readCose(issuerSigned.get('issuerAuth'));
-  if (fault === 'mdoc.signature-bitflip') {
-    issuerSigned.set('issuerAuth', coseValue({ ...issuerAuth, signature: flipBitInBytes(issuerAuth.signature) }));
-    return encodeCbor(issuerSigned);
+  const mso = decodeEmbedded<CborMap>(decodeCbor(issuerAuth.payload ?? new Uint8Array()));
+  // A signer fault is applied when the mdoc is issued (forgePresentation); signed-after-ds-expiry also changes the MSO.
+  if (isSignerFault(fault) && fault !== 'mdoc.signed-after-ds-expiry') return issuerSignedBytes;
+  switch (fault) {
+    case 'mdoc.signature-bitflip':
+      issuerSigned.set('issuerAuth', coseValue({ ...issuerAuth, signature: flipBitInBytes(issuerAuth.signature) }));
+      return encodeCbor(issuerSigned);
+    case 'mdoc.element-value-changed':
+    case 'mdoc.digest-id-unknown': {
+      const { items, index, item } = issuerSignedItem(issuerSigned, 'family_name');
+      if (fault === 'mdoc.element-value-changed') item.set('elementValue', 'Musterfrau');
+      else item.set('digestID', 0xfffff);
+      items[index] = embedded(item);
+      return encodeCbor(issuerSigned);
+    }
+    case 'mdoc.digest-sha1': {
+      const valueDigests = mso.get('valueDigests') as CborMap;
+      for (const [namespace, items] of issuerSigned.get('nameSpaces') as Map<string, unknown[]>) {
+        const digests = valueDigests.get(namespace) as CborMap;
+        for (const item of items) {
+          digests.set(decodeEmbedded<CborMap>(item).get('digestID'), new Uint8Array(createHash('sha1').update(encodeCbor(item)).digest()));
+        }
+      }
+      mso.set('digestAlgorithm', 'SHA-1');
+      issuerSigned.set('issuerAuth', await resign(issuerAuth, encodeCbor(embedded(mso)), ctx.signer.key.privateKey));
+      return encodeCbor(issuerSigned);
+    }
+    case 'mdoc.key-p192':
+    case 'mdoc.key-rsa1024': {
+      if (!ctx.issuer) throw new Error(`fault ${fault} needs the issuing entity`);
+      const signer = await foreignSigner(fault === 'mdoc.key-p192' ? 'p192' : 'rsa1024', ctx.issuer, 'mso_mdoc', ctx.now);
+      const header = new Map(issuerAuth.protectedHeader);
+      header.set(COSE.alg, signer.coseAlg);
+      const protectedBytes = encodeCbor(header);
+      const unprotectedHeader = new Map(issuerAuth.unprotectedHeader);
+      unprotectedHeader.set(COSE.x5chain, x5chainValue([signer.certificate.der]));
+      const payload = issuerAuth.payload as Uint8Array;
+      const signature = signer.sign(sigStructure(protectedBytes, payload));
+      issuerSigned.set('issuerAuth', coseValue({ tag: issuerAuth.tag, protectedBytes, unprotectedHeader, payload, signature }));
+      return encodeCbor(issuerSigned);
+    }
   }
   const change = MDOC_CHANGES[fault];
   if (!change) throw new Error(`fault ${fault} is not implemented`);
-  const mso = decodeEmbedded<CborMap>(decodeCbor(issuerAuth.payload ?? new Uint8Array()));
   change(mso, ctx);
   issuerSigned.set('issuerAuth', await resign(issuerAuth, encodeCbor(embedded(mso)), ctx.signer.key.privateKey));
   return encodeCbor(issuerSigned);

@@ -128,6 +128,8 @@ export interface MdocPresentOptions {
   deviceNameSpaces?: Map<string, Map<string, unknown>>;
   /** Signs `Sig_structure` instead of ES256 with `holderPrivateKey`, under the COSE algorithm `alg` (the ES256K fault). */
   deviceSigner?: { alg: number; sign: (data: Uint8Array) => Promise<Uint8Array> | Uint8Array };
+  /** The docType of the document, when it is not that of the MSO (`mdoc.mso-doctype-other`). */
+  docType?: string;
 }
 
 /** The SessionTranscript of OpenID4VP 1.0 Appendix B.2.6.1 or B.2.6.2, computed with @owf/mdoc, as a CBOR value. */
@@ -151,7 +153,7 @@ export async function presentMdoc(issuerSignedBytes: Uint8Array, options: MdocPr
   const issuerSigned = decodeCbor<CborMap>(issuerSignedBytes);
   const issuerAuth = readCose(issuerSigned.get('issuerAuth'));
   const mso = decodeEmbedded<CborMap>(decodeCbor(issuerAuth.payload ?? new Uint8Array()));
-  const docType = String(mso.get('docType'));
+  const docType = options.docType ?? String(mso.get('docType'));
   const namespaces = new Map<string, Tagged[]>();
   for (const [namespace, items] of (issuerSigned.get('nameSpaces') as Map<string, Tagged[]>) ?? new Map()) {
     const requested = options.elements[namespace] ?? [];

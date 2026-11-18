@@ -1,6 +1,6 @@
 import { type CheckId, CREDENTIAL_CHECKS, STATUS_LIST_CHECKS } from '@rp-conformance/core';
-import { base64url, sdJwtHasher, sha256, verifyEs256 } from '@rp-conformance/forge';
-import { decodeSdJwtSync, unpackSync } from '@sd-jwt/core';
+import { base64url, sha256, verifyEs256 } from '@rp-conformance/forge';
+import { describeKey, processDisclosures } from './disclosures';
 import { parseCertificate } from '@owf/x509';
 import { CheckRecorder, type ValidationMode, type ValidationResult } from './checks';
 import { decodeSegment, evaluateStatusList, type FetchedStatusList, fail, isUri, leafJwk } from './status-list';
@@ -18,6 +18,8 @@ export interface SdJwtVcValidation extends ValidationResult {
   issuer?: string;
   /** Whether the validator retrieved the status list. */
   statusListFetched: boolean;
+  /** Whether the issuer matched a trust list that is used within its grace period (`trust-list-stale`). */
+  trustListStale: boolean;
 }
 
 export interface SdJwtVcValidationOptions {
@@ -74,6 +76,7 @@ export async function validateSdJwtVcPresentation(presentation: string, options:
   let claims: Record<string, unknown> | undefined;
   let reference: { idx: number; uri: string } | undefined;
   let statusListFetched = false;
+  let trustListStale = false;
   const issuerJwt = presentation.split('~')[0] ?? '';
 
   const result = await recorder.collect(async () => {
@@ -84,11 +87,9 @@ export async function validateSdJwtVcPresentation(presentation: string, options:
       payload = decodeSegment(issuerJwt.split('.')[1], 'the issuer-signed JWT payload');
       // A vc+sd-jwt typ is rejected (catalogue decision 6).
       if (header.typ !== 'dc+sd-jwt') fail(`typ is ${String(header.typ)}, expected dc+sd-jwt`);
-      if (header.alg !== 'ES256') fail(`alg ${String(header.alg)} is not supported`);
       if (!Array.isArray(header.x5c) || header.x5c.length === 0 || header.x5c.some((c) => typeof c !== 'string')) fail('x5c is missing');
       x5c = header.x5c as string[];
       if (!options.expectedVct.includes(String(payload.vct))) fail(`vct ${String(payload.vct)} was not requested`);
-      if (payload._sd_alg !== undefined && payload._sd_alg !== 'sha-256') fail(`_sd_alg ${String(payload._sd_alg)} is not supported`);
       // A missing KB-JWT is a failure of key-binding, not of the format (RFC 9901 section 7.3).
       kbJwt = parts[parts.length - 1] ?? '';
       if (kbJwt) {
@@ -102,7 +103,8 @@ export async function validateSdJwtVcPresentation(presentation: string, options:
       if (!match.ok) fail(match.reason);
       if (match.ok) {
         issuer = { name: match.entity.name, statusAnchors: options.trustRule.statusAnchors(match.entity, match.service) };
-        return `${match.entity.name} under ${match.anchor.subject.commonName} (${match.list.id})`;
+        trustListStale = match.stale;
+        return `${match.entity.name} under ${match.anchor.subject.commonName} (${match.list.id}${match.stale ? ', stale within the grace period' : ''})`;
       }
     });
 
@@ -119,23 +121,21 @@ export async function validateSdJwtVcPresentation(presentation: string, options:
       fail('no certificate in x5c has an authority key identifier that trusted_authorities names');
     });
 
+    // The algorithm and the key are those of the ECCG agreed cryptographic mechanisms that the profile uses: ES256 with
+    // a P-256 key (OIA_03, HAIP section 7).
     await recorder.run('issuer-signature', ['format'], async () => {
-      const jwk = leafJwk(x5c);
-      if (!jwk || jwk.crv !== 'P-256') fail('the signing certificate has no P-256 key');
+      const key = describeKey(x5c[0]);
+      if (key !== 'P-256') fail(`the signing certificate holds a key ${key}, not on P-256`);
+      if (header.alg !== 'ES256') fail(`alg ${String(header.alg)} is not supported`);
+      const jwk = leafJwk(x5c) as JsonWebKey;
       const [h, p, s] = issuerJwt.split('.');
       if (!(await verifyEs256(jwk as JsonWebKey, `${h}.${p}`, base64url.decode(s ?? '')))) fail('the issuer signature does not verify');
     });
 
     await recorder.run('disclosures', ['format'], () => {
-      const decoded = decodeSdJwtSync(presentation, sdJwtHasher);
-      const digests = decoded.disclosures.map((d) => d._digest);
-      if (new Set(digests).size !== digests.length) fail('a disclosure is presented twice');
-      const { unpackedObj, disclosureKeymap } = unpackSync(payload, decoded.disclosures, sdJwtHasher);
-      const referenced = new Set(Object.values(disclosureKeymap));
-      const unreferenced = digests.filter((d) => !referenced.has(d ?? ''));
-      if (unreferenced.length) fail(`${unreferenced.length} disclosure(s) are not referenced by a digest in the payload`);
-      claims = unpackedObj as Record<string, unknown>;
-      return `${digests.length} disclosures`;
+      const { claims: disclosed, count } = processDisclosures(payload, presentation.split('~').slice(1, -1));
+      claims = disclosed;
+      return `${count} disclosures`;
     });
 
     await recorder.run('validity', ['format'], () => {
@@ -201,5 +201,5 @@ export async function validateSdJwtVcPresentation(presentation: string, options:
       },
     });
   });
-  return { ...result, claims: result.failures.includes('disclosures') ? undefined : claims, issuer: issuer?.name, statusListFetched };
+  return { ...result, claims: result.failures.includes('disclosures') ? undefined : claims, issuer: issuer?.name, statusListFetched, trustListStale };
 }

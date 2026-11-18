@@ -1,4 +1,4 @@
-import { randomBytes } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import { SDJwtVcInstance } from '@sd-jwt/sd-jwt-vc';
 import { base64url, sha256, signEs256 } from './crypto';
 import type { CertifiedKey } from './pki';
@@ -103,21 +103,92 @@ export interface PresentOptions {
   now?: Date;
 }
 
-/** Presents an SD-JWT VC: discloses the given claims and appends a KB-JWT (RFC 9901 section 4.3). */
+/** Claim names that cannot be disclosed (RFC 9901 section 4.2.1); a disclosure with one is presented as it is. */
+const RESERVED_NAMES = new Set(['_sd', '...']);
+
+const HASHES: Record<string, string> = { 'sha-256': 'sha256', 'sha-1': 'sha1', md5: 'md5' };
+
+/** The digests a value references: the `_sd` members of its objects and the `...` entries of its arrays, recursively. */
+function referencedDigests(value: unknown, root = true): { direct: string[]; nested: string[] } {
+  const direct: string[] = [];
+  const nested: string[] = [];
+  const walk = (v: unknown, top: boolean) => {
+    if (Array.isArray(v)) {
+      for (const element of v) {
+        if (element && typeof element === 'object' && !Array.isArray(element) && typeof (element as Record<string, unknown>)['...'] === 'string') {
+          nested.push((element as Record<string, string>)['...']);
+        } else walk(element, false);
+      }
+    } else if (v && typeof v === 'object') {
+      for (const [key, member] of Object.entries(v)) {
+        if (key === '_sd' && Array.isArray(member)) (top ? direct : nested).push(...member.filter((d): d is string => typeof d === 'string'));
+        else walk(member, false);
+      }
+    }
+  };
+  walk(value, root);
+  return { direct, nested };
+}
+
+/**
+ * Selects the disclosures of an issued SD-JWT VC for a presentation (RFC 9901 section 4.3): the disclosures of the
+ * requested top-level claims and every disclosure they reference, recursively. A disclosure that the payload does not
+ * reference at the top level as a claim (a foreign one, an array element, one with a reserved or no claim name) is
+ * presented as issued, so a credential fault in the disclosures reaches the Relying Party unchanged.
+ */
+export function selectDisclosures(compact: string, disclose: string[]): string[] {
+  const [jwt, ...rest] = compact.split('~');
+  const disclosures = rest.filter(Boolean);
+  const payload = base64url.decodeJson<Record<string, unknown>>(jwt.split('.')[1] ?? '');
+  const alg = HASHES[String(payload._sd_alg ?? 'sha-256')] ?? 'sha256';
+  const digestOf = (d: string) => base64url.encode(createHash(alg).update(d).digest());
+  const decoded = new Map(disclosures.map((d) => [digestOf(d), (() => {
+    try {
+      return base64url.decodeJson<unknown[]>(d);
+    } catch {
+      return undefined;
+    }
+  })()]));
+  const { direct, nested } = referencedDigests(payload);
+  const keep = new Set<string>(nested);
+  const dropped = new Set<string>();
+  for (const digest of direct) {
+    const elements = decoded.get(digest);
+    const name = Array.isArray(elements) && elements.length === 3 ? elements[1] : undefined;
+    if (typeof name === 'string' && !RESERVED_NAMES.has(name) && !disclose.includes(name)) dropped.add(digest);
+    else keep.add(digest);
+  }
+  // Disclosures referenced from inside a kept disclosure are kept with it; those inside a dropped one are dropped.
+  const queue = [...keep];
+  while (queue.length) {
+    const elements = decoded.get(queue.pop() as string);
+    if (!Array.isArray(elements)) continue;
+    const inner = referencedDigests(elements[elements.length - 1], false);
+    for (const d of [...inner.direct, ...inner.nested]) if (!keep.has(d)) keep.add(d), queue.push(d);
+  }
+  for (const digest of dropped) {
+    const elements = decoded.get(digest);
+    if (!Array.isArray(elements)) continue;
+    const inner = referencedDigests(elements[elements.length - 1], false);
+    for (const d of [...inner.direct, ...inner.nested]) if (!keep.has(d)) dropped.add(d);
+  }
+  return disclosures.filter((d) => !dropped.has(digestOf(d)));
+}
+
+/**
+ * Presents an SD-JWT VC: discloses the requested claims (`selectDisclosures`) and appends a KB-JWT (RFC 9901 section
+ * 4.3) with `iat`, `aud`, `nonce` and the `sd_hash` (SHA-256) of the presented SD-JWT, signed with ES256.
+ */
 export async function presentSdJwtVc(compact: string, options: PresentOptions): Promise<string> {
-  const sdjwt = new SDJwtVcInstance({
-    hasher: sdJwtHasher,
-    kbSignAlg: 'ES256',
-    kbSigner: async (data) => base64url.encode(await signEs256(options.holderPrivateKey, data)),
-  });
-  const frame = Object.fromEntries(options.disclose.map((claim) => [claim, true]));
-  return sdjwt.present(compact, frame, {
-    kb: {
-      payload: {
-        iat: Math.floor((options.now ?? new Date()).getTime() / 1000),
-        aud: options.audience,
-        nonce: options.nonce,
-      },
-    },
-  });
+  const [jwt] = compact.split('~');
+  const sdJwt = `${[jwt, ...selectDisclosures(compact, options.disclose)].join('~')}~`;
+  const header = { typ: 'kb+jwt', alg: 'ES256' };
+  const payload = {
+    iat: Math.floor((options.now ?? new Date()).getTime() / 1000),
+    aud: options.audience,
+    nonce: options.nonce,
+    sd_hash: base64url.encode(sha256(sdJwt)),
+  };
+  const input = `${base64url.encode(JSON.stringify(header))}.${base64url.encode(JSON.stringify(payload))}`;
+  return `${sdJwt}${input}.${base64url.encode(await signEs256(options.holderPrivateKey, input))}`;
 }

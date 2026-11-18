@@ -65,6 +65,9 @@ importers:
       '@rp-conformance/trust-infrastructure':
         specifier: workspace:*
         version: link:../trust-infrastructure
+      '@rp-conformance/validator':
+        specifier: workspace:*
+        version: link:../validator
       '@rp-conformance/wallet':
         specifier: workspace:*
         version: link:../wallet
@@ -213,10 +216,16 @@ importers:
       '@owf/crypto':
         specifier: ^0.7.0
         version: 0.7.0
+      '@owf/eudi-access-certificate':
+        specifier: ^0.6.0
+        version: 0.6.0
       '@owf/eudi-jades':
         specifier: ^0.6.0
         version: 0.6.0
       '@owf/eudi-lote':
+        specifier: ^0.6.0
+        version: 0.6.0
+      '@owf/eudi-registration-certificate':
         specifier: ^0.6.0
         version: 0.6.0
       '@owf/eudi-tl':

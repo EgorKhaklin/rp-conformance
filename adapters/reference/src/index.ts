@@ -1,10 +1,11 @@
-import type {
-  DefaultQueryId,
-  Flow,
-  RelyingPartyAdapter,
-  RelyingPartyResult,
-  StartedPresentation,
-  TestEnvironment,
+import {
+  durationMs,
+  type DefaultQueryId,
+  type Flow,
+  type RelyingPartyAdapter,
+  type RelyingPartyResult,
+  type StartedPresentation,
+  type TestEnvironment,
 } from '@rp-conformance/core';
 import { ReferenceRelyingParty, type ReferenceRpResult } from '@rp-conformance/reference-rp';
 
@@ -34,6 +35,7 @@ export class ReferenceAdapter implements RelyingPartyAdapter {
       kbMaxAgeSeconds: Number(env.ics.items['RP.P.6'] ?? 300),
       maxStatusListBytes: Number(env.ics.items['RP.R.4'] ?? 1048576),
       allowInsecureUrls: true,
+      graceMs: durationMs(String(env.ics.items['RP.T.2'] ?? '')) ?? 0,
     }).start();
     const failed = (await this.rp.refreshTrust()).filter((list) => list.error);
     if (failed.length > 0) throw new Error(`reference RP could not load: ${failed.map((l) => l.error).join('; ')}`);
@@ -68,6 +70,7 @@ export class ReferenceAdapter implements RelyingPartyAdapter {
     return {
       outcome: result.status,
       releasedAttributes: result.attributes,
+      ...(result.flags ? { flags: result.flags } : {}),
       raw: result,
     };
   }

@@ -10,6 +10,27 @@ const verifier = async ({ data, signatureP1363, publicKey }: { data: Uint8Array;
   return verifyEs256(publicKey.jwk, data, signatureP1363);
 };
 
+/**
+ * The extensions the path validation processes (RFC 5280 section 4.2), and those of the ISO/IEC 18013-5 Annex B and ETSI
+ * EN 319 412 profiles; a certificate with any other extension marked critical is rejected (RFC 5280 section 4.2).
+ */
+const KNOWN_EXTENSIONS = new Set([
+  '2.5.29.14', // subjectKeyIdentifier
+  '2.5.29.35', // authorityKeyIdentifier
+  '2.5.29.15', // keyUsage
+  '2.5.29.17', // subjectAltName
+  '2.5.29.18', // issuerAltName
+  '2.5.29.19', // basicConstraints
+  '2.5.29.30', // nameConstraints
+  '2.5.29.31', // cRLDistributionPoints
+  '2.5.29.32', // certificatePolicies
+  '2.5.29.36', // policyConstraints
+  '2.5.29.37', // extKeyUsage
+  '2.5.29.54', // inhibitAnyPolicy
+  '1.3.6.1.5.5.7.1.1', // authorityInfoAccess
+  '1.3.6.1.5.5.7.1.3', // qcStatements
+]);
+
 const sameCertificate = (a: Certificate, b: Certificate) => Buffer.from(a.der).equals(Buffer.from(b.der));
 
 function withinValidity(certificate: Certificate, now: Date): string | undefined {
@@ -41,6 +62,8 @@ export async function validatePath(x5c: string[], anchors: Certificate[], now = 
   for (const certificate of chain) {
     const problem = withinValidity(certificate, now);
     if (problem) return { ok: false, reason: problem };
+    const unknown = certificate.extensions.find((extension) => extension.critical && !KNOWN_EXTENSIONS.has(extension.oid));
+    if (unknown) return { ok: false, reason: `certificate ${certificate.subject.rfc4514} carries the unknown critical extension ${unknown.oid}` };
   }
   for (let i = 0; i < chain.length - 1; i++) {
     const issuer = chain[i + 1];

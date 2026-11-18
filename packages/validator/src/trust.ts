@@ -1,4 +1,4 @@
-import type { CredentialCategory } from '@rp-conformance/core';
+import type { CredentialCategory, TrustListCheck } from '@rp-conformance/core';
 import { verifyCompact } from '@owf/eudi-jades';
 import { LoTEProfile, validateLoTEProfile } from '@owf/eudi-lote';
 import {
@@ -11,6 +11,8 @@ import {
 } from '@owf/eudi-tl';
 import { type Certificate, parseCertificate } from '@owf/x509';
 import { base64url, verifyEs256 } from '@rp-conformance/forge';
+import { CheckRecorder, type ValidationMode, type ValidationResult } from './checks';
+import { fail } from './status-list';
 import { validatePath } from './x509-path';
 
 export interface TrustedService {
@@ -74,41 +76,131 @@ const PROFILE_BY_TYPE: Record<string, LoTEProfile> = {
   'http://uri.etsi.org/19602/LoTEType/EUWRPRCProvidersList': LoTEProfile.EUWRPRCProvidersList,
 };
 
-export class TrustListError extends Error {}
+export class TrustListError extends Error {
+  /** The trust-list check the list failed, when it failed one. */
+  constructor(
+    message: string,
+    readonly check?: TrustListCheck,
+  ) {
+    super(message);
+  }
+}
+
+/** The outcome of loading one list: an error and the check it failed, when it was not loaded. */
+export interface RefreshResult {
+  id: string;
+  error?: string;
+  failed?: TrustListCheck;
+}
+
+const refused = (id: string, error: unknown): RefreshResult => ({
+  id,
+  error: (error as Error).message,
+  ...(error instanceof TrustListError && error.check ? { failed: error.check } : {}),
+});
+
+export interface ListCheckOptions {
+  now?: Date;
+  /** The grace period `G` after `NextUpdate` (ICS RP.T.2), milliseconds; default 0. */
+  graceMs?: number;
+  /** The version of the list in use, whose sequence number a new version must not undercut. */
+  current?: LoadedList;
+  mode?: ValidationMode;
+}
+
+/** The checks of a new version of a trust list, and the list when it passed them. */
+export interface ListValidation extends ValidationResult {
+  list?: LoadedList;
+}
+
+/** The first failure of a list validation as an error, for callers that only need the list. */
+const listOrThrow = (id: string, validation: ListValidation): LoadedList => {
+  if (validation.list) return validation.list;
+  const failed = validation.checks.find((c) => c.status === 'fail');
+  throw new TrustListError(failed?.detail?.startsWith(`${id}:`) ? failed.detail : `${id}: ${failed?.detail ?? 'not usable'}`, failed?.check as TrustListCheck);
+};
+
+/** `NextUpdate` within the grace period: passes, and reports a list whose `NextUpdate` has passed as stale. */
+function checkFreshness(id: string, nextUpdate: Date, now: Date, graceMs: number): string | undefined {
+  if (Number.isNaN(nextUpdate.getTime())) fail(`${id}: NextUpdate is not a date`);
+  if (now.getTime() > nextUpdate.getTime() + graceMs) fail(`${id}: NextUpdate ${nextUpdate.toISOString()} has passed${graceMs ? ' and the grace period with it' : ''}`);
+  if (nextUpdate < now) return `${id}: NextUpdate ${nextUpdate.toISOString()} has passed; stale within the grace period`;
+  return undefined;
+}
 
 /**
- * Verifies a sealed LoTE as a Relying Party must: the JAdES signature with the configured scheme operator certificate
- * (any `x5c` must be that certificate), the profile of its `LoTEType` (ETSI TS 119 602, strict), and `NextUpdate`.
+ * Checks a new version of a sealed LoTE as a Relying Party must before using it (`TRUST_LIST_CHECKS`): it is sealed by
+ * the configured scheme operator certificate (any `x5c` must be that certificate), the JAdES seal verifies with it, its
+ * `LoTEType` is the configured one and it passes the profile of that type (ETSI TS 119 602, strict), its `NextUpdate`
+ * has not passed by more than the grace period, and its sequence number is not lower than that of the version in use.
+ */
+export async function checkLote(jws: string, source: ListSource, options: ListCheckOptions = {}): Promise<ListValidation> {
+  const recorder = new CheckRecorder(options.mode ?? 'first-failure');
+  const now = options.now ?? new Date();
+  const operator = parseCertificate(source.schemeOperatorCertificatePem);
+  let payload: unknown;
+  let list: LoadedList | undefined;
+  const result = await recorder.collect(async () => {
+    await recorder.run('trust-list-signer', [], () => {
+      let header: { x5c?: string[] };
+      try {
+        header = base64url.decodeJson<{ x5c?: string[] }>(jws.split('.')[0] ?? '');
+      } catch {
+        fail(`${source.id}: the seal header cannot be decoded`);
+      }
+      if (header!.x5c && Buffer.from(header!.x5c[0] ?? '', 'base64').compare(Buffer.from(operator.der)) !== 0) {
+        fail(`${source.id}: sealed by a certificate other than the scheme operator certificate`);
+      }
+    });
+    await recorder.run('trust-list-signature', ['trust-list-signer'], async () => {
+      const jwk = operator.publicKey.jwk;
+      if (!jwk) fail(`${source.id}: scheme operator key is not supported`);
+      const verified = await verifyCompact(jws, (data, signature) => verifyEs256(jwk as JsonWebKey, data, base64url.decode(signature)));
+      if (!verified.valid) fail(`${source.id}: seal does not verify`);
+      payload = verified.payload;
+    });
+    await recorder.run('trust-list-type', ['trust-list-signature'], () => {
+      const profile = PROFILE_BY_TYPE[source.loteType];
+      if (!profile) fail(`${source.id}: unsupported LoTEType ${source.loteType}`);
+      const type = (payload as { LoTE?: { ListAndSchemeInformation?: { LoTEType?: string } } }).LoTE?.ListAndSchemeInformation?.LoTEType;
+      if (type !== source.loteType) fail(`${source.id}: LoTEType ${String(type)} is not the configured ${source.loteType}`);
+      const validation = validateLoTEProfile(payload, profile);
+      if (!validation.valid) fail(`${source.id}: not a valid ${profile}: ${validation.issues.map((i) => i.message).join('; ')}`);
+    });
+    const info = () => (payload as { LoTE: Record<string, any> }).LoTE.ListAndSchemeInformation;
+    await recorder.run('trust-list-freshness', ['trust-list-signature'], () => checkFreshness(source.id, new Date(info().NextUpdate), now, options.graceMs ?? 0));
+    await recorder.run('trust-list-sequence', ['trust-list-signature'], () => {
+      const sequence = Number(info().LoTESequenceNumber);
+      if (options.current && sequence < options.current.sequenceNumber) {
+        fail(`${source.id}: LoTESequenceNumber ${sequence} is lower than ${options.current.sequenceNumber} of the version in use`);
+      }
+    });
+    if (recorder.failures.length) return;
+    const lote = (payload as { LoTE: Record<string, any> }).LoTE;
+    list = {
+      id: source.id,
+      kind: 'lote',
+      type: info().LoTEType,
+      sequenceNumber: Number(info().LoTESequenceNumber),
+      nextUpdate: new Date(info().NextUpdate),
+      entities: (lote.TrustedEntitiesList ?? []).map((entity: any) => ({
+        name: entity.TrustedEntityInformation.TEName[0].value,
+        services: entity.TrustedEntityServices.map((svc: any) => ({
+          type: svc.ServiceInformation.ServiceTypeIdentifier,
+          ...(svc.ServiceInformation.ServiceStatus ? { status: svc.ServiceInformation.ServiceStatus } : {}),
+          anchors: (svc.ServiceInformation.ServiceDigitalIdentity?.X509Certificates ?? []).map((c: { val: string }) => parseCertificate(c.val)),
+        })),
+      })),
+    };
+  });
+  return { ...result, ...(list ? { list } : {}) };
+}
+
+/**
+ * Verifies a sealed LoTE as a Relying Party must (`checkLote`) and returns it; throws on the first check it fails.
  */
 export async function verifyLote(jws: string, source: ListSource, now = new Date()): Promise<LoadedList> {
-  const operator = parseCertificate(source.schemeOperatorCertificatePem);
-  const header = base64url.decodeJson<{ x5c?: string[] }>(jws.split('.')[0] ?? '');
-  if (header.x5c && Buffer.from(header.x5c[0] ?? '', 'base64').compare(Buffer.from(operator.der)) !== 0) {
-    throw new TrustListError(`${source.id}: sealed by a certificate other than the scheme operator certificate`);
-  }
-  const jwk = operator.publicKey.jwk;
-  if (!jwk) throw new TrustListError(`${source.id}: scheme operator key is not supported`);
-  const result = await verifyCompact(jws, (data, signature) => verifyEs256(jwk, data, base64url.decode(signature)));
-  if (!result.valid) throw new TrustListError(`${source.id}: seal does not verify`);
-  const profile = PROFILE_BY_TYPE[source.loteType];
-  if (!profile) throw new TrustListError(`${source.id}: unsupported LoTEType ${source.loteType}`);
-  const validation = validateLoTEProfile(result.payload, profile);
-  if (!validation.valid) {
-    throw new TrustListError(`${source.id}: not a valid ${profile}: ${validation.issues.map((i) => i.message).join('; ')}`);
-  }
-  const lote = (result.payload as { LoTE: Record<string, any> }).LoTE;
-  const info = lote.ListAndSchemeInformation;
-  const nextUpdate = new Date(info.NextUpdate);
-  if (nextUpdate < now) throw new TrustListError(`${source.id}: NextUpdate ${info.NextUpdate} has passed`);
-  const entities: TrustedEntity[] = (lote.TrustedEntitiesList ?? []).map((entity: any) => ({
-    name: entity.TrustedEntityInformation.TEName[0].value,
-    services: entity.TrustedEntityServices.map((svc: any) => ({
-      type: svc.ServiceInformation.ServiceTypeIdentifier,
-      ...(svc.ServiceInformation.ServiceStatus ? { status: svc.ServiceInformation.ServiceStatus } : {}),
-      anchors: (svc.ServiceInformation.ServiceDigitalIdentity?.X509Certificates ?? []).map((c: { val: string }) => parseCertificate(c.val)),
-    })),
-  }));
-  return { id: source.id, kind: 'lote', type: info.LoTEType, sequenceNumber: info.LoTESequenceNumber, nextUpdate, entities };
+  return listOrThrow(source.id, await checkLote(jws, source, { now }));
 }
 
 /** URIs of ETSI TS 119 612 V2.4.1 the Relying Party evaluates (clauses 5.3.3, 5.5.1, 5.5.4). */
@@ -137,13 +229,68 @@ const der = (pem: string) => parseCertificate(pem).der;
 const issuesOf = (result: { issues: { path: (string | number)[]; message: string }[] }) =>
   result.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('; ');
 
-/** `NextUpdate` of a Trusted List; a closed list (no date) or one whose date has passed is not used (clause 5.3.15). */
-function nextUpdateOf(list: TrustedList, id: string, now: Date): Date {
-  if (!list.nextUpdate) throw new TrustListError(`${id}: NextUpdate is null, the list is closed`);
-  const nextUpdate = new Date(list.nextUpdate);
-  if (Number.isNaN(nextUpdate.getTime())) throw new TrustListError(`${id}: NextUpdate ${list.nextUpdate} is not a date`);
-  if (nextUpdate < now) throw new TrustListError(`${id}: NextUpdate ${list.nextUpdate} has passed`);
-  return nextUpdate;
+/** The certificate in the `KeyInfo` of a list's XML signature, base64 DER. */
+const signingCertificateOf = (xml: string) => {
+  const signature = xml.search(/<(?:\w+:)?Signature[\s>]/);
+  if (signature < 0) return undefined;
+  return /<(?:\w+:)?X509Certificate>([^<]+)</.exec(xml.slice(signature))?.[1]?.replace(/\s+/g, '');
+};
+
+/** Where a Member State list is checked against: the certificates of its LOTL pointer and the territory it announces. */
+export interface TrustedListPointerSource {
+  id: string;
+  /** DER of the certificates the LOTL pointer names. */
+  anchors: Uint8Array[];
+  schemeTerritory?: string;
+}
+
+/**
+ * Checks a new version of a Member State Trusted List (ETSI TS 119 612) reached through the LOTL (`TRUST_LIST_CHECKS`):
+ * it is signed by a certificate the LOTL pointer names, its XAdES signature verifies, its type, profile and territory
+ * are those of the pointer, its `NextUpdate` has not passed by more than the grace period, and its sequence number is not
+ * lower than that of the version in use.
+ */
+export async function checkTrustedList(xml: string, pointer: TrustedListPointerSource, options: ListCheckOptions = {}): Promise<ListValidation> {
+  const recorder = new CheckRecorder(options.mode ?? 'first-failure');
+  const now = options.now ?? new Date();
+  const { id } = pointer;
+  let tl: TrustedList | undefined;
+  let list: LoadedList | undefined;
+  const result = await recorder.collect(async () => {
+    await recorder.run('trust-list-signer', [], () => {
+      const certificate = signingCertificateOf(xml);
+      if (!certificate) fail(`${id}: the signature carries no signing certificate`);
+      const signer = Buffer.from(certificate as string, 'base64');
+      if (!pointer.anchors.some((anchor) => signer.equals(Buffer.from(anchor)))) fail(`${id}: signed by a certificate the LOTL pointer does not name`);
+    });
+    await recorder.run('trust-list-signature', ['trust-list-signer'], async () => {
+      try {
+        tl = await loadTrustedList(xml, { trustAnchors: pointer.anchors });
+      } catch (error) {
+        fail(`${id}: ${(error as Error).message}`);
+      }
+    });
+    await recorder.run('trust-list-type', ['trust-list-signature'], () => {
+      const profile = validateTrustedListProfile(tl as TrustedList, MEMBER_STATE_LIST);
+      if (!profile.valid) fail(`${id}: ${issuesOf(profile)}`);
+      if (pointer.schemeTerritory && tl?.schemeTerritory !== pointer.schemeTerritory) {
+        fail(`${id}: scheme territory ${tl?.schemeTerritory} differs from the LOTL pointer`);
+      }
+    });
+    await recorder.run('trust-list-freshness', ['trust-list-signature'], () => {
+      if (!tl?.nextUpdate) fail(`${id}: NextUpdate is null, the list is closed`);
+      return checkFreshness(id, new Date(tl?.nextUpdate as string), now, options.graceMs ?? 0);
+    });
+    await recorder.run('trust-list-sequence', ['trust-list-signature'], () => {
+      const sequence = tl?.sequenceNumber ?? 0;
+      if (options.current && sequence < options.current.sequenceNumber) {
+        fail(`${id}: TSLSequenceNumber ${sequence} is lower than ${options.current.sequenceNumber} of the version in use`);
+      }
+    });
+    if (recorder.failures.length || !tl) return;
+    list = { id, kind: 'trusted-list', type: tl.tslType ?? '', sequenceNumber: tl.sequenceNumber ?? 0, nextUpdate: new Date(tl.nextUpdate as string), entities: entitiesOf(tl) };
+  });
+  return { ...result, ...(list ? { list } : {}) };
 }
 
 /** A Trusted List's providers as trusted entities: every service with its type, status and certificates. */
@@ -216,7 +363,16 @@ export interface MatchedIssuer {
 }
 
 export type TrustMatch =
-  | { ok: true; list: LoadedList; entity: TrustedEntity; service: TrustedService; anchor: Certificate; leaf: Certificate }
+  | {
+      ok: true;
+      list: LoadedList;
+      entity: TrustedEntity;
+      service: TrustedService;
+      anchor: Certificate;
+      leaf: Certificate;
+      /** The list's `NextUpdate` has passed and it is used within the grace period: the result signals `trust-list-stale`. */
+      stale: boolean;
+    }
   | { ok: false; reason: string };
 
 /** The trust configuration of a Relying Party, derived from the lists of `default_trust_configuration_rp`. */
@@ -226,11 +382,16 @@ export class TrustStore {
   readonly retrievals: { id: string; url: string; at: string; status: number }[] = [];
   private readonly sources: TrustSources;
 
+  /** The grace period `G` after a list's `NextUpdate` (ICS RP.T.2), milliseconds. */
+  readonly graceMs: number;
+
   constructor(
     sources: TrustSources | ListSource[],
     private readonly fetchImpl: typeof fetch = fetch,
+    options: { graceMs?: number } = {},
   ) {
     this.sources = Array.isArray(sources) ? { lotes: sources } : sources;
+    this.graceMs = options.graceMs ?? 0;
   }
 
   private async fetchText(id: string, url: string): Promise<string> {
@@ -244,15 +405,18 @@ export class TrustStore {
    * Fetches and verifies every configured list: the LoTEs, the LOTL and the Trusted Lists it points to, and loads the
    * rulebook anchors. A list that fails is left out, so nothing it lists is trusted.
    */
-  async refresh(now = new Date()): Promise<{ id: string; error?: string }[]> {
-    const results: { id: string; error?: string }[] = [];
+  async refresh(now = new Date()): Promise<RefreshResult[]> {
+    const results: RefreshResult[] = [];
     for (const source of this.sources.lotes) {
+      const current = this.lists.get(source.id);
       try {
-        this.lists.set(source.id, await verifyLote(await this.fetchText(source.id, source.url), source, now));
+        const validation = await checkLote(await this.fetchText(source.id, source.url), source, { now, graceMs: this.graceMs, current });
+        this.lists.set(source.id, listOrThrow(source.id, validation));
         results.push({ id: source.id });
       } catch (error) {
-        this.lists.delete(source.id);
-        results.push({ id: source.id, error: (error as Error).message });
+        // The last valid version stays in use until its NextUpdate plus the grace period (RP_Inf_SM_TrustMechanisms_002).
+        if (current && !this.usable(current, now)) this.lists.delete(source.id);
+        results.push(refused(source.id, error));
       }
     }
     if (this.sources.listOfTrustedLists) results.push(...(await this.refreshTrustedLists(this.sources.listOfTrustedLists, now)));
@@ -273,53 +437,52 @@ export class TrustStore {
 
   /**
    * ETSI TS 119 612 Annex A: the LOTL is verified with the configured signing certificates (its XAdES signature, its
-   * profile and `NextUpdate`); each Member State list it points to is verified with the certificates of its pointer, and
-   * must have the `TSLType` and scheme territory the pointer announces.
+   * profile and `NextUpdate`); each Member State list it points to is checked with the certificates of its pointer
+   * (`checkTrustedList`). A list that fails keeps its last valid version in use until that one's `NextUpdate` plus the
+   * grace period.
    */
-  private async refreshTrustedLists(source: ListOfTrustedListsSource, now: Date): Promise<{ id: string; error?: string }[]> {
-    for (const [id, list] of this.lists) if (list.kind === 'trusted-list') this.lists.delete(id);
+  private async refreshTrustedLists(source: ListOfTrustedListsSource, now: Date): Promise<RefreshResult[]> {
     let lotl: TrustedList;
     try {
       const xml = await this.fetchText('LOTL', source.url);
       lotl = await loadTrustedList(xml, { trustAnchors: source.signingCertificatesPem.map(der) });
       const profile = validateTrustedListProfile(lotl, TrustedListProfiles.euLotl);
       if (!profile.valid) throw new TrustListError(`LOTL: not a list of trusted lists: ${issuesOf(profile)}`);
-      nextUpdateOf(lotl, 'LOTL', now);
+      checkFreshness('LOTL', new Date(lotl.nextUpdate ?? 'closed'), now, this.graceMs);
     } catch (error) {
+      for (const [id, list] of this.lists) if (list.kind === 'trusted-list' && !this.usable(list, now)) this.lists.delete(id);
       return [{ id: 'LOTL', error: (error as Error).message }];
     }
-    const results: { id: string; error?: string }[] = [{ id: 'LOTL' }];
+    const results: RefreshResult[] = [{ id: 'LOTL' }];
     const pointers = (lotl.pointersToOtherLists ?? []).filter((p) => p.tslType?.replace(/^https?:\/\//, '') === TS119612.euGeneric.replace(/^https?:\/\//, ''));
+    const ids = new Set<string>();
     for (const pointer of pointers) {
       const id = `TL ${pointer.schemeTerritory ?? pointer.location}`;
+      ids.add(id);
+      const current = this.lists.get(id);
       try {
         const xml = await this.fetchText(id, pointer.location);
-        const list = await loadTrustedList(xml, { trustAnchors: getPointerSigningCertificates(lotl, { location: pointer.location }) });
-        const profile = validateTrustedListProfile(list, MEMBER_STATE_LIST);
-        if (!profile.valid) throw new TrustListError(`${id}: ${issuesOf(profile)}`);
-        if (pointer.schemeTerritory && list.schemeTerritory !== pointer.schemeTerritory) {
-          throw new TrustListError(`${id}: scheme territory ${list.schemeTerritory} differs from the LOTL pointer`);
-        }
-        this.lists.set(id, {
-          id,
-          kind: 'trusted-list',
-          type: list.tslType ?? '',
-          sequenceNumber: list.sequenceNumber ?? 0,
-          nextUpdate: nextUpdateOf(list, id, now),
-          entities: entitiesOf(list),
-        });
+        const validation = await checkTrustedList(xml, { id, anchors: getPointerSigningCertificates(lotl, { location: pointer.location }), schemeTerritory: pointer.schemeTerritory }, { now, graceMs: this.graceMs, current });
+        this.lists.set(id, listOrThrow(id, validation));
         results.push({ id });
       } catch (error) {
-        results.push({ id, error: (error as Error).message });
+        if (current && !this.usable(current, now)) this.lists.delete(id);
+        results.push(refused(id, error));
       }
     }
+    for (const [id, list] of this.lists) if (list.kind === 'trusted-list' && !ids.has(id)) this.lists.delete(id);
     if (pointers.length === 0) results.push({ id: 'LOTL', error: 'LOTL: no pointer to a Member State list' });
     return results;
   }
 
+  /** A list may be used until its `NextUpdate` plus the grace period. */
+  private usable(list: LoadedList, now: Date): boolean {
+    return now.getTime() <= list.nextUpdate.getTime() + this.graceMs;
+  }
+
   /** Finds the service of a list of `rule` that may sign the credential and has an anchor the `x5c` chain validates to. */
   async match(rule: TrustRule, x5c: string[], now = new Date()): Promise<TrustMatch> {
-    const lists = [...this.lists.values()].filter(rule.lists);
+    const lists = [...this.lists.values()].filter(rule.lists).filter((list) => this.usable(list, now));
     if (lists.length === 0) return { ok: false, reason: `no list of ${rule.name} is available` };
     const reasons: string[] = [];
     for (const list of lists) {
@@ -327,7 +490,7 @@ export class TrustStore {
         for (const service of entity.services.filter(rule.issuance)) {
           if (service.anchors.length === 0) continue;
           const path = await validatePath(x5c, service.anchors, now);
-          if (path.ok) return { ok: true, list, entity, service, anchor: path.anchor, leaf: path.leaf };
+          if (path.ok) return { ok: true, list, entity, service, anchor: path.anchor, leaf: path.leaf, stale: list.nextUpdate < now };
           reasons.push(`${entity.name}: ${path.reason}`);
         }
       }

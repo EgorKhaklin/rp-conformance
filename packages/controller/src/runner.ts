@@ -10,7 +10,11 @@ import {
   flowsOf,
   type Ics,
   isExecutable,
+  type CapturedRequest,
+  type CheckResult,
   type PresentationAction,
+  type RequestAction,
+  type PublishableList,
   type RelyingPartyAdapter,
   type RelyingPartyResult,
   type StartAction,
@@ -19,9 +23,11 @@ import {
   type TrustListAction,
   type Verdict,
   controlsOf,
+  durationMs,
 } from '@rp-conformance/core';
-import { base64url, defaultEntitiesOf, forgePresentation } from '@rp-conformance/forge';
+import { base64url, defaultEntitiesOf, forgePresentation, requestAnchorKeyIds, trustedListEntitiesOf } from '@rp-conformance/forge';
 import { DcApiShim, type DcApiOutcome, type DcApiRun } from '@rp-conformance/dc-api-shim';
+import { validateRequests } from '@rp-conformance/validator';
 import { ConformanceWallet, type DcApiAnswer, type HeldCredential, type PresentationEvidence } from '@rp-conformance/wallet';
 import { evaluate, worst } from './evaluate';
 import { type Harness, startHarness } from './harness';
@@ -36,7 +42,7 @@ export const IMPLEMENTED_FLOWS: Flow[] = FLOWS;
 
 export interface StepRecord {
   step: number;
-  /** `presentation`, `start` (request only) or `trust-list` (new list version). */
+  /** `presentation`, `start` (request only), `trust-list` (new list version) or `request` (requests checked). */
   action: string;
   text: string;
   /** Expected-result codes, for example `ACC` or `REJ + NOFETCH`. */
@@ -61,6 +67,8 @@ export interface StepRecord {
   };
   statusLog: { url: string; at: string; status: number }[];
   trustLog?: { url: string; at: string; status: number; version?: number }[];
+  /** A request step: the request checks over the captured requests. */
+  requestChecks?: CheckResult[];
   artifacts: string[];
   verdict: Verdict;
   reason: string;
@@ -149,13 +157,7 @@ export function selectTestCases(all: TestCaseDefinition[], only?: string[]): Tes
   return [...selected.filter((d) => !d.control), ...selected.filter((d) => d.control)];
 }
 
-/** ISO 8601 duration (`PT1H`, `PT5M`, `PT30S`) in milliseconds. */
-export function durationMs(value: string | undefined): number | undefined {
-  const match = value && /^P(?:(\d+)D)?(?:T(?:(\d+)H)?(?:(\d+)M)?(?:(\d+(?:\.\d+)?)S)?)?$/.exec(value);
-  if (!match) return undefined;
-  const [, d = '0', h = '0', m = '0', s = '0'] = match;
-  return ((Number(d) * 24 + Number(h)) * 60 + Number(m)) * 60_000 + Number(s) * 1000;
-}
+export { durationMs };
 
 export async function runConformance(options: RunOptions): Promise<{ report: RunReport; reportPath: string }> {
   const log = options.log ?? (() => {});
@@ -263,11 +265,11 @@ interface TestCaseState {
   /** The `vp_token` entry the Conformance Wallet presented in each step, for `presentation.replay`. */
   presentations: Map<number, string>;
   /** Lists the test case changed, restored afterwards. */
-  changedLists: Set<'TL-PID'>;
+  changedLists: Set<PublishableList>;
   /** The current entities of each changed list. */
-  entities: Map<'TL-PID', string[]>;
+  entities: Map<PublishableList, string[]>;
   /** A list retrieval still awaited, checked again after the next step. */
-  pendingRetrieval?: { record: StepRecord; list: 'TL-PID'; version: number; publishedAt: Date; checks: number };
+  pendingRetrieval?: { record: StepRecord; list: PublishableList; version: number; publishedAt: Date; checks: number };
   /** Whether the Relying Party answered a request of this test case (a started presentation). */
   rpReached: boolean;
 }
@@ -362,6 +364,9 @@ async function runStep(
         break;
       case 'trust-list':
         await runTrustList(step.run, record, ctx, state);
+        break;
+      case 'request':
+        await runRequest(step, step.run, flow, record, save, ctx, state);
         break;
       default:
         record.reason = 'the step is text only';
@@ -479,7 +484,7 @@ async function runPresentation(
   const otherKey = action.response.keyOfStep ? state.encryptionKeys.get(action.response.keyOfStep) : undefined;
   if (action.response.keyOfStep && !otherKey) throw new Error(`step ${action.response.keyOfStep} recorded no encryption key`);
   const held: HeldCredential = mdoc
-    ? { format: 'mso_mdoc', value: forged.credential as Uint8Array }
+    ? { format: 'mso_mdoc', value: forged.credential as Uint8Array, ...(forged.documentDocType ? { docType: forged.documentDocType } : {}) }
     : { format: 'dc+sd-jwt', value: forged.credential as string };
   const replayed = action.response.presentationOfStep ? state.presentations.get(action.response.presentationOfStep) : undefined;
   if (action.response.presentationOfStep && !replayed) throw new Error(`step ${action.response.presentationOfStep} recorded no presentation`);
@@ -580,17 +585,72 @@ async function runStart(action: StartAction, flow: Flow, index: number, record: 
 }
 
 /**
+ * Starts `count` presentations and captures their requests at the Conformance Wallet without answering them (catalogue
+ * scenario SCN-Q), then evaluates `CONF`: every request check the expectation names passes over the captured requests.
+ * A check skipped because it does not apply (no `state`) passes; one skipped because a check it requires failed fails.
+ */
+async function runRequest(step: StepDefinition, action: RequestAction, flow: Flow, record: StepRecord, save: Save, ctx: Context, state: TestCaseState) {
+  const captured: CapturedRequest[] = [];
+  const count = action.count ?? 1;
+  for (let i = 0; i < count; i++) {
+    const { uri } = await startPresentation(action, flow, record, async (name, content) => save(`${i + 1}-${name}`, content), ctx);
+    state.rpReached = true;
+    let evidence: PresentationEvidence | undefined;
+    if (flow === 'dc-api') {
+      const run = await (await ctx.dcApiShim()).run(uri, async (call): Promise<DcApiOutcome> => {
+        evidence = await ctx.wallet.startDcApi(call);
+        return { kind: 'withhold' };
+      });
+      if (!evidence) throw new Error(run.error ?? 'the page made no digital credential request');
+    } else {
+      evidence = await ctx.wallet.start(uri);
+    }
+    if (!evidence.captured) throw new Error('the Conformance Wallet captured no request');
+    captured.push(evidence.captured);
+    await save(`${i + 1}-captured-request.json`, JSON.stringify(evidence.captured, null, 2));
+  }
+  const pki = ctx.harness.pki;
+  const anchorsOf = (list: string) => Object.values(pki.entities).filter((e) => e.spec.list === list).map((e) => e.anchors.issuance.certificate);
+  const validation = await validateRequests(captured, {
+    accessCertificateAnchors: anchorsOf('TL-AC'),
+    registrationCertificateAnchors: anchorsOf('TL-RC'),
+    trustedAuthorityKeyIds: requestAnchorKeyIds(pki),
+    requireTrustedAuthorities: action.query.endsWith('_trusted_authorities'),
+    // The harness runs on one machine with the Relying Party; an http URL on a loopback host stands for https.
+    allowLoopbackHttp: true,
+  });
+  record.requestChecks = validation.checks;
+  await save('request-checks.json', JSON.stringify(validation, null, 2));
+  const named = step.expect.checks ?? [];
+  const results = named.map((check) => validation.checks.find((c) => c.check === check));
+  const failed = results.filter((r) => r && (r.status === 'fail' || (r.status === 'skip' && r.detail?.startsWith('requires'))));
+  if (step.expect.codes.some((c) => c !== 'CONF') || named.length === 0) {
+    record.verdict = 'INCONCLUSIVE';
+    record.reason = 'a request step evaluates CONF with named request checks only';
+  } else if (failed.length) {
+    record.verdict = 'FAIL';
+    record.reason = failed.map((r) => `${r?.check}: ${r?.status === 'skip' ? `not evaluated, ${r.detail}` : r?.detail}`).join('; ');
+  } else {
+    record.verdict = 'PASS';
+    record.reason = `${count} request(s) pass ${named.join(', ')}`;
+  }
+}
+
+/**
  * Publishes a new version of a list, asks the adapter to refresh, and waits until the Relying Party retrieved it
  * (`LIST_RETRIEVED`). A Relying Party that fetches lists only when it needs them retrieves the new version during the
  * next step, so a retrieval missing at the end of the wait is checked again after that step.
  */
 async function runTrustList(action: TrustListAction, record: StepRecord, ctx: Context, state: TestCaseState) {
-  const current = state.entities.get(action.list) ?? defaultEntitiesOf(ctx.harness.pki, action.list);
+  // A retrieval still awaited from an earlier trust-list step is decided now, before this step publishes another version.
+  await checkPendingRetrieval(state, ctx, true);
+  const current = state.entities.get(action.list) ?? (action.list === 'TL-QEAA' ? trustedListEntitiesOf(ctx.harness.pki) : defaultEntitiesOf(ctx.harness.pki, action.list));
   const entities = [...current.filter((e) => !action.remove?.includes(e)), ...(action.add ?? []).filter((e) => !current.includes(e))];
-  state.entities.set(action.list, entities);
+  // A version the Relying Party must not use leaves the entities of the version in use unchanged.
+  if (!action.faults?.length) state.entities.set(action.list, entities);
   state.changedLists.add(action.list);
-  const { version, publishedAt } = await ctx.harness.publishList(action.list, entities);
-  record.reason = `published version ${version} of ${action.list} with ${entities.join(', ')}`;
+  const { version, publishedAt } = await ctx.harness.publishList(action.list, entities, action);
+  record.reason = `published version ${version} of ${action.list} with ${entities.join(', ')}${action.faults?.length ? `, with the fault ${action.faults.join(', ')}` : ''}`;
   await ctx.adapter.refreshTrust?.(ctx.harness.namespace);
   const refreshMs = durationMs(String(ctx.ics.items['RP.T.1'] ?? '')) ?? 60_000;
   const waitMs = ctx.trustRefreshWaitMs ?? (ctx.adapter.refreshTrust ? 10_000 : refreshMs);
@@ -606,7 +666,7 @@ function retrievals(state: TestCaseState, ctx: Context) {
   const pending = state.pendingRetrieval;
   if (!pending) return [];
   return ctx.harness.trust
-    .retrievalsOf(ctx.harness.namespace, pending.list, pending.publishedAt)
+    .retrievalsOf(ctx.harness.namespace, ctx.harness.pathOf(pending.list), pending.publishedAt)
     .filter((entry) => entry.status === 200 && (entry.version ?? 0) >= pending.version);
 }
 

@@ -1,9 +1,9 @@
 import { parseTestCaseId, type TestCaseDefinition } from '@rp-conformance/core';
 
-export const CLASS_DIR: Record<string, string> = { WS: 'wallet_solution', PP: 'pid_provider' };
-export const CLASS_TITLE: Record<string, string> = { WS: 'Relying Party - Wallet Solution', PP: 'Relying Party - PID Provider' };
-export const LAYER_DIR: Record<string, string> = { IA: 'Interaction', SM: 'SecurityMechanisms' };
-export const LAYER_TITLE: Record<string, string> = { IA: 'Interaction', SM: 'Security Mechanisms' };
+export const CLASS_DIR: Record<string, string> = { WS: 'wallet_solution', PP: 'pid_provider', Inf: 'infrastructure' };
+export const CLASS_TITLE: Record<string, string> = { WS: 'Relying Party - Wallet Solution', PP: 'Relying Party - PID Provider', Inf: 'Relying Party - Trust Infrastructure' };
+export const LAYER_DIR: Record<string, string> = { IA: 'Interaction', SM: 'SecurityMechanisms', MS: 'MessageStructure' };
+export const LAYER_TITLE: Record<string, string> = { IA: 'Interaction', SM: 'Security Mechanisms', MS: 'Message Structure' };
 export const AREA_TITLE: Record<string, string> = {
   MainInteraction: 'Main Interaction',
   Validity: 'Validity',
@@ -12,6 +12,11 @@ export const AREA_TITLE: Record<string, string> = {
   SessionEncryption: 'Session Encryption',
   SessionBinding: 'Session Binding',
   DeviceBinding: 'Device Binding',
+  IssuerIntegrity: 'Issuer Integrity',
+  ProtocolMessages: 'Protocol Messages',
+  Metadata: 'Metadata',
+  CredentialFormats: 'Credential Formats',
+  RpIntegrity: 'Relying Party Integrity',
 };
 
 const numbered = (items: string[]) => items.map((text, i) => `${i + 1}. ${text}`).join('\n');

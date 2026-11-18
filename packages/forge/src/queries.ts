@@ -36,6 +36,14 @@ export const PID_MDOC_QUERY: DcqlQuery = {
   ],
 };
 
+/**
+ * The variant of `default_query_pid` in SD-JWT VC format that also requests the structured claim `place_of_birth`
+ * (IssuerIntegrity_015, recursive disclosures).
+ */
+export const PID_PLACE_OF_BIRTH_QUERY: DcqlQuery = {
+  credentials: [{ ...PID_QUERY.credentials[0], claims: [...(PID_QUERY.credentials[0].claims ?? []), { path: ['place_of_birth'] }] }],
+};
+
 const ATTRIBUTES_A = ['attribute_A', 'attribute_B', 'attribute_C'];
 
 /**
@@ -78,7 +86,7 @@ export function akiOf(subjectKeyIdentifierHex: string): string {
  * The default queries of a run, each in SD-JWT VC and in mdoc format: `default_query_pid`, `default_query_qeaa`,
  * `default_query_pubeaa` and `default_query_eaa`. The `…_trusted_authorities` variants of `default_query_pid` restrict
  * it with a `trusted_authorities` entry of type `aki` that names only the PID/Issuance anchor of `PP-A`
- * (TrustMechanisms_016).
+ * (TrustMechanisms_016); `default_query_pid_place_of_birth` also requests `place_of_birth` (IssuerIntegrity_015).
  */
 export function defaultQueries(pki: TestPki): Record<DefaultQueryId, DcqlQuery> {
   const ski = pki.entities['PP-A'].anchors.issuance.certificate.subjectKeyIdentifier;
@@ -89,6 +97,7 @@ export function defaultQueries(pki: TestPki): Record<DefaultQueryId, DcqlQuery> 
   return {
     default_query_pid: PID_QUERY,
     default_query_pid_trusted_authorities: restricted(PID_QUERY),
+    default_query_pid_place_of_birth: PID_PLACE_OF_BIRTH_QUERY,
     default_query_pid_mdoc: PID_MDOC_QUERY,
     default_query_pid_mdoc_trusted_authorities: restricted(PID_MDOC_QUERY),
     default_query_qeaa: attestationQuery('qeaa'),

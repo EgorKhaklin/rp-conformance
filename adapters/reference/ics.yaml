@@ -16,4 +16,5 @@ RP.R.2: Reject
 RP.R.3: None
 RP.R.4: 1048576
 RP.T.1: PT1H
-RP.T.2: PT0S
+RP.T.2: PT1H    # grace period G: a stale list is used and signalled as trust-list-stale
+RP.T.3: "Yes"

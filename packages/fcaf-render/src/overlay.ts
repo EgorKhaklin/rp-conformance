@@ -20,6 +20,7 @@ export interface SharedPages {
   relyingParty: string;
   rpWs: string;
   rpPp: string;
+  rpInf: string;
   navRp: string;
 }
 
@@ -44,6 +45,7 @@ export async function loadSharedPages(): Promise<SharedPages> {
     relyingParty: await read('pages/relying-party.md'),
     rpWs: await read('pages/rp-ws.md'),
     rpPp: await read('pages/rp-pp.md'),
+    rpInf: await read('pages/rp-inf.md'),
     navRp: await read('pages/nav-rp.yml'),
   };
 }
@@ -88,6 +90,7 @@ export function renderOverlay(
   write(`${rp}/index.md`, pages.relyingParty);
   write(`${rp}/wallet_solution/rp_ws.md`, pages.rpWs);
   write(`${rp}/pid_provider/rp_pp.md`, pages.rpPp);
+  write(`${rp}/infrastructure/rp_inf.md`, pages.rpInf);
   for (const [sutClass, classDir] of Object.entries(CLASS_DIR)) {
     const mine = definitions.filter((d) => parseTestCaseId(d.id).sutClass === sutClass);
     write(`${rp}/${classDir}/test-cases.md`, testCasesPage(CLASS_TITLE[sutClass]));

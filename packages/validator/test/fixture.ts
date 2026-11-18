@@ -2,13 +2,28 @@
 // served from memory, and one function that builds a presentation step exactly as the controller does (forge, fault
 // layer, Conformance Wallet response) and runs the reference validator over it in `all` mode.
 import { randomUUID } from 'node:crypto';
-import { categoryOfQuery, type DcqlQuery, type DefaultQueryId, type Flow, faultsOf, faultInfo, type PresentationAction } from '@rp-conformance/core';
+import {
+  categoryOfQuery,
+  type DcqlQuery,
+  type DefaultQueryId,
+  type Flow,
+  faultsOf,
+  type FaultId,
+  faultInfo,
+  type PresentationAction,
+  type TrustListAction,
+} from '@rp-conformance/core';
 import {
   buildAuthorizationResponse,
   buildDcApiResponse,
   buildPresentation,
   buildSealedLote,
   buildTrustedLists,
+  buildTrustListVersion,
+  buildRequest,
+  issueRegistrationCertificate,
+  requestAnchorKeyIds,
+  trustedListEntitiesOf,
   createTestPki,
   defaultEntitiesOf,
   defaultQueries,
@@ -39,10 +54,13 @@ import {
   type ValidationMode,
   validateAuthorizationResponse,
   validateMdocPresentation,
+  validateRequests,
   validateSdJwtVcPresentation,
 } from '../src/index';
 
 export const LISTS: LoteListId[] = ['TL-PID', 'TL-PUB', 'TL-WP', 'TL-AC', 'TL-RC'];
+/** The grace period `G` of the reference validator in the self-validation (ICS RP.T.2 of the reference Relying Party). */
+export const GRACE_MS = 60 * 60 * 1000;
 export const AUDIENCE = 'x509_hash:self-validation';
 export const SKEW = 60;
 export const KB_MAX_AGE = 300;
@@ -77,6 +95,8 @@ export class Fixture {
   trust!: TrustStore;
   queries!: Record<DefaultQueryId, DcqlQuery>;
   private sequence = 1;
+  /** The sequence number of the latest version of each list, for a rollback. */
+  private readonly latest = new Map<string, number>();
 
   private constructor(
     readonly pki: TestPki,
@@ -104,9 +124,11 @@ export class Fixture {
         rulebooks: [{ credential: 'default_credential_eaa', anchorsPem: [fixture.pki.entities['EP-A'].anchors.issuance.certificate.pem] }],
       },
       fetchList,
+      { graceMs: GRACE_MS },
     );
     for (const id of LISTS) await fixture.publish(id, undefined, false);
-    const trustedLists = await buildTrustedLists({ pki: fixture.pki, locations: TRUSTED_LIST_LOCATIONS });
+    const trustedLists = await buildTrustedLists({ pki: fixture.pki, locations: TRUSTED_LIST_LOCATIONS, sequenceNumber: fixture.sequence });
+    fixture.latest.set('TL-QEAA', fixture.sequence++);
     fixture.lists.set(TRUSTED_LIST_LOCATIONS.LOTL, trustedLists.LOTL);
     fixture.lists.set(TRUSTED_LIST_LOCATIONS['TL-QEAA'], trustedLists['TL-QEAA']);
     await fixture.reload();
@@ -115,14 +137,81 @@ export class Fixture {
 
   /** Publishes a list (default: the entities of `default_trust_configuration_rp`) and reloads the trust store. */
   async publish(id: LoteListId, entities = defaultEntitiesOf(this.pki, id), reload = true) {
-    const { jws } = await buildSealedLote({ list: id, pki: this.pki, entities, sequenceNumber: this.sequence++ });
+    const { jws } = await buildSealedLote({ list: id, pki: this.pki, entities, sequenceNumber: this.sequence });
+    this.latest.set(id, this.sequence++);
     this.lists.set(`${BASE}/${id}`, jws);
     if (reload) await this.reload();
+  }
+
+  /**
+   * Publishes the version of `TL-PID` or `TL-QEAA` a trust-list step publishes, as the harness does, and reloads the
+   * trust store; returns the lists the store refused.
+   */
+  async publishVersion(action: TrustListAction, entities: string[]) {
+    const version = await buildTrustListVersion(action, {
+      pki: this.pki,
+      entities,
+      sequenceNumber: this.sequence++,
+      previousSequenceNumber: this.latest.get(action.list) ?? 1,
+      location: `${BASE}/${action.list}`,
+      locations: TRUSTED_LIST_LOCATIONS,
+      graceMs: GRACE_MS,
+    });
+    if (!action.faults?.includes('trust-list.rollback')) this.latest.set(action.list, version.sequenceNumber);
+    this.lists.set(action.list === 'TL-QEAA' ? TRUSTED_LIST_LOCATIONS['TL-QEAA'] : `${BASE}/${action.list}`, version.body);
+    return (await this.trust.refresh()).filter((r) => r.error);
+  }
+
+  /** Restores `TL-PID` and `TL-QEAA` of `default_trust_configuration_rp`. */
+  async restore() {
+    await this.publishVersion({ kind: 'trust-list', list: 'TL-QEAA' }, trustedListEntitiesOf(this.pki));
+    await this.publish('TL-PID');
   }
 
   async reload() {
     const failed = (await this.trust.refresh()).filter((r) => r.error);
     if (failed.length) throw new Error(failed.map((f) => f.error).join('; '));
+  }
+
+  /** The registration certificate of the Relying Party, for every default query, as the harness issues it. */
+  private registration?: Promise<string>;
+
+  /**
+   * Builds `count` requests of the reference Relying Party's form for a default query via `flow`, the first with
+   * `fault` (or, for the faults that repeat an earlier request's value, the second), and runs the request checks over them.
+   */
+  async validateRequests(flow: Flow, query: DefaultQueryId, options: { count?: number; fault?: FaultId } = {}) {
+    this.registration ??= issueRegistrationCertificate(
+      this.pki,
+      Object.entries(this.queries)
+        .filter(([id]) => !id.endsWith('_trusted_authorities'))
+        .map(([, q]) => q),
+    );
+    const registrationCertificate = await this.registration;
+    const count = Math.max(options.count ?? 1, options.fault === 'request.nonce-reused' || options.fault === 'request.enc-key-reused' ? 2 : 1);
+    const captured = [];
+    let first: Awaited<ReturnType<typeof buildRequest>> | undefined;
+    for (let i = 0; i < count; i++) {
+      const repeat = i === 1 && first;
+      const built = await buildRequest({
+        pki: this.pki,
+        flow,
+        query: this.queries[query],
+        registrationCertificate,
+        baseUrl: 'https://rp.rp-test',
+        ...(repeat && options.fault === 'request.nonce-reused' ? { nonce: first?.nonce } : {}),
+        ...(repeat && options.fault === 'request.enc-key-reused' ? { encryptionJwk: first?.encryptionJwk } : {}),
+        ...(i === 0 && options.fault && !['request.nonce-reused', 'request.enc-key-reused'].includes(options.fault) ? { fault: options.fault } : {}),
+      });
+      first ??= built;
+      captured.push(built.captured);
+    }
+    return validateRequests(captured, {
+      accessCertificateAnchors: [this.pki.entities['AC-A'].anchors.issuance.certificate],
+      registrationCertificateAnchors: [this.pki.entities['RC-A'].anchors.issuance.certificate],
+      trustedAuthorityKeyIds: requestAnchorKeyIds(this.pki),
+      requireTrustedAuthorities: query.endsWith('_trusted_authorities'),
+    });
   }
 
   async transaction(): Promise<Transaction> {
@@ -164,7 +253,11 @@ export class Fixture {
     const replay = presentationFault === 'presentation.replay';
     if (replay && !options.other) throw new Error('presentation.replay needs another transaction');
     const boundTo = replay ? (options.other as Transaction) : tx;
-    const held = (forged.format === 'mso_mdoc' ? { format: 'mso_mdoc', value: forged.credential } : { format: 'dc+sd-jwt', value: forged.credential }) as HeldCredential;
+    const held = (
+      forged.format === 'mso_mdoc'
+        ? { format: 'mso_mdoc', value: forged.credential, ...(forged.documentDocType ? { docType: forged.documentDocType } : {}) }
+        : { format: 'dc+sd-jwt', value: forged.credential }
+    ) as HeldCredential;
     const presentation = (replay && options.replayed) || await buildPresentation(
       held,
       { disclose: (credentialQuery.claims ?? []).map((c) => String(c.path[0])), elements: requestedElements(credentialQuery.claims) },

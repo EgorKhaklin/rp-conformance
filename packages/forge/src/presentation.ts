@@ -12,7 +12,7 @@ import { encodeDeviceResponse, jwkThumbprint, type Oid4vpHandover, PID_NAMESPACE
 import { presentSdJwtVc } from './pid';
 
 /** A credential the Conformance Wallet holds: an SD-JWT VC (compact, without KB-JWT) or an mdoc's `IssuerSigned` (CBOR). */
-export type HeldCredential = { format: 'dc+sd-jwt'; value: string } | { format: 'mso_mdoc'; value: Uint8Array };
+export type HeldCredential = { format: 'dc+sd-jwt'; value: string } | { format: 'mso_mdoc'; value: Uint8Array; docType?: string };
 
 /** A key pair on secp256k1, as Node.js key objects: WebCrypto has no secp256k1. */
 export interface Secp256k1KeyPair {
@@ -91,7 +91,9 @@ export async function buildPresentation(
     if (info.format && info.format !== held.format) throw new Error(`fault ${fault} applies to ${info.format}, not ${held.format}`);
     if (info.flow && info.flow !== binding.handover.flow) throw new Error(`fault ${fault} applies to the ${info.flow} flow`);
   }
-  return held.format === 'mso_mdoc' ? presentMdocWithFault(held.value, requested, binding, keys, fault) : presentSdJwtVcWithFault(held.value, requested, binding, keys, options);
+  return held.format === 'mso_mdoc'
+    ? presentMdocWithFault(held.value, requested, binding, keys, fault, held.docType)
+    : presentSdJwtVcWithFault(held.value, requested, binding, keys, options);
 }
 
 async function presentSdJwtVcWithFault(
@@ -180,6 +182,7 @@ async function presentMdocWithFault(
   binding: PresentationBinding,
   keys: PresentationKeys,
   fault?: FaultId,
+  docType?: string,
 ): Promise<string> {
   let handover = binding.handover;
   let { nonce, jwkThumbprint: thumbprint } = binding;
@@ -237,6 +240,7 @@ async function presentMdocWithFault(
     elements: requested.elements,
     deviceNameSpaces,
     deviceSigner,
+    docType,
   });
   if (fault === 'presentation.device-signature-bitflip' || fault === 'presentation.no-device-auth') {
     const response = decodeCbor<CborMap>(deviceResponse);
