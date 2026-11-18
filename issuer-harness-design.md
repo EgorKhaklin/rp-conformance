@@ -1,6 +1,6 @@
 # Issuer conformance harness: design addendum
 
-Draft 0.1, 2026-11-18. Addendum to [harness-design.md](harness-design.md) for the issuing side: how the harness executes the test objectives of [issuer-test-catalogue.md](issuer-test-catalogue.md) (182 objectives, draft 0.2) against a PID Provider or Attestation Provider. It describes only what differs from the RP harness. Everything not mentioned here (verdict model, evidence, reports, JUnit XML, known findings, CI conventions) works as harness design sections 5 to 8 describe. Nothing of it is implemented yet. Section 9 of the catalogue lists this addendum as step 2.
+Draft 0.2, 2026-11-18 (decisions on the open points applied, see §12). Addendum to [harness-design.md](harness-design.md) for the issuing side: how the harness executes the test objectives of [issuer-test-catalogue.md](issuer-test-catalogue.md) (182 objectives, draft 0.2) against a PID Provider or Attestation Provider. It describes only what differs from the RP harness. Everything not mentioned here (verdict model, evidence, reports, JUnit XML, known findings, CI conventions) works as harness design sections 5 to 8 describe. Nothing of it is implemented yet. Section 9 of the catalogue lists this addendum as step 2.
 
 ## 0. Summary
 
@@ -12,7 +12,7 @@ Key choices:
 - **Same method**: valid first, then one named fault. Faults are self-validated against a reference before they are used. Executable definitions are the single source of truth. Positive controls gate every `_UF` test.
 - **The SUT's answer is the outcome.** Unlike an RP, a Provider answers every request directly (HTTP status and error object, or credentials), so most verdicts need no adapter call. The adapter is needed only for what happens outside the protocol: creating offers, authenticating the test subject, revoking, changing subject data.
 - **The reference validator becomes the checker of what is issued** (`OBS-CRED`). The same named checks a Relying Party must run are now run on the Provider's output, plus data model checks for the PID Rulebook.
-- **A reference issuer**, built on the forge, proves that every executable test case can pass and that each fault is refused for exactly its reason.
+- **EUDIPLO is the reference issuer** (decision 2, §12). The reference validator proves that each fault fails exactly its check. EUDIPLO's issuer proves that the executable test cases can pass. There is no reference issuer of the harness's own.
 
 ## 1. Goals and non-goals
 
@@ -88,7 +88,7 @@ flowchart LR
 | Component | Responsibility | Status |
 | --- | --- | --- |
 | Test controller | Loads the ICS and the issuer definitions, selects test cases, gates on positive controls, executes steps, evaluates, reports | Shared, generalised (§4) |
-| Artifact forge | Test PKI, status lists, LoTEs, credentials for the reference issuer. New: WIA, PoP, KA, proofs, DPoP proofs with faults | Shared, extended |
+| Artifact forge | Test PKI, status lists, LoTEs, valid credentials for the output-side self-validation (§7). New: WIA, PoP, KA, proofs, DPoP proofs with faults | Shared, extended |
 | Issuance client | The wallet side of OpenID4VCI: offer, both grants, client attestation, DPoP, nonce, proofs, batch, deferred, notification, refresh. Applies one fault per step | New (§5.1) |
 | Test Wallet Provider | Wallet Units `CW-1`, `CW-2`, `CW-B`: issues their WIAs and KAs under `WP-A` or `WP-B`, and revokes them | New (§5.2) |
 | Test Registrar | Issues the SUT's signing, access and registration certificates from CSRs | New (§5.3) |
@@ -104,12 +104,12 @@ Host names stay `*.rp-test` until the repository is renamed (catalogue decision 
 | Package | Reused as is | Generalised or extended |
 | --- | --- | --- |
 | `core` | `Verdict`, relevancy, `IcsCondition`, the HTTP helpers, request logs, the check result model | `definition.ts` and `adapter.ts` are RP-specific today (`Flow`, `DefaultQueryId`, `RelyingPartyAdapter`, `RP.*` ICS items). Split them into a SUT-neutral part (test case fields, steps, expectations, ICS conditions) and an RP part. The issuer part adds the issuer step actions (§6), expectation codes and `IssuerAdapter`. `faults.ts` gets the issuer fault points (§6.2) |
-| `forge` | Test PKI and `ENTITIES`, LoTE writing and sealing, Status List Tokens (JWT, CWT) with all their faults, identifier lists, Trusted Lists, `default_credential_A`, PID issuance (for the reference issuer), registration certificates | New entities and list content (§5.2, §5.3). New builders for WIA, PoP, KA, proofs and DPoP proofs, with their faults. An entity `PP-T` whose CAs certify keys from CSRs instead of generating them |
+| `forge` | Test PKI and `ENTITIES`, LoTE writing and sealing, Status List Tokens (JWT, CWT) with all their faults, identifier lists, Trusted Lists, `default_credential_A`, PID issuance (for the output-side self-validation, §7), registration certificates | New entities and list content (§5.2, §5.3). New builders for WIA, PoP, KA, proofs and DPoP proofs, with their faults. An entity `PP-T` whose CAs certify keys from CSRs instead of generating them |
 | `validator` | All 9 credential checks except `key-binding`, all Status List Token and identifier list checks, path validation, `TrustStore`, `TRUST_RULES` per category | `key-binding` becomes `holder-binding` on the issuer side: `cnf.jwk` or `deviceKeyInfo` equals a proof key and one of the KA's `attested_keys`, since there is no presentation. New: PID Rulebook checks (`DM_*`), metadata checks (`MS_Metadata`), and issuer request checks for the self-validation (§7) |
 | `status-provider` | Unchanged: per-URL artifacts, programmable behaviour, request log | None |
 | `trust-infrastructure` | Unchanged: namespaced, versioned lists, retrieval log | None |
 | `controller` | Selection, gating, step execution, report, JUnit XML, known findings, CLI conventions | A runner per SUT kind behind one CLI (`rp-conformance issuer run --adapter … --ics …`). New evaluators for the issuer codes (§6.3). Long-running steps (`REVOKED(t)` with `t` up to 24 h) are scheduled after the others |
-| `fcaf-render` | Test case rendering, lint integration | A second overlay for issuer test cases (decision needed, §12) |
+| `fcaf-render` | Test case rendering, lint integration | A second overlay, `fcaf-overlay-issuer/`, for the issuer test cases (decision 1, §12) |
 | `wallet`, `reference-rp`, `dc-api-shim` | Used only by `PP_RP_SM_Revocation_008`: the issued credential is presented to the reference RP | None |
 
 ## 5. New components
@@ -198,20 +198,21 @@ Optional hooks map to ICS items: no `authenticateSubject` means `P-AC` cannot ru
 
 | Adapter | How |
 | --- | --- |
-| Reference issuer | In-process (`adapters/issuer-reference`), see §5.5 |
-| EUDIPLO | One tenant per namespace, as for the RP adapter:<br/>- `setUp` imports the key chain with the Registrar's certificates (`/api/key-chain/import`) and creates the credential and issuance configurations: `walletAttestationRequired`, `walletProviderTrustLists` naming `TL-WP`, `keyAttestationsRequired` with the levels of the ICS, `statusManagement`, and `revokeWithWalletUnit` for chaining.<br/>- `createOffer` calls `POST /api/issuer/offer`.<br/>- `setStatus` calls `POST /api/session/revoke`, and `GET /api/session/:id/credential-status` confirms it.<br/>- `authenticateSubject` uses EUDIPLO's chained or interactive authorization with a scripted login.<br/>- `refreshTrust` uses the trust list cache endpoint the RP adapter already calls.<br/>The exact calls are confirmed when the adapter is written. |
+| EUDIPLO (reference, §5.5) | One tenant per namespace, as for the RP adapter:<br/>- `setUp` imports the key chain with the Registrar's certificates (`/api/key-chain/import`) and creates the credential and issuance configurations: `walletAttestationRequired`, `walletProviderTrustLists` naming `TL-WP`, `keyAttestationsRequired` with the levels of the ICS, `statusManagement`, and `revokeWithWalletUnit` for chaining.<br/>- `createOffer` calls `POST /api/issuer/offer`.<br/>- `setStatus` calls `POST /api/session/revoke`, and `GET /api/session/:id/credential-status` confirms it.<br/>- `authenticateSubject` uses EUDIPLO's chained or interactive authorization with a scripted login.<br/>- `refreshTrust` uses the trust list cache endpoint the RP adapter already calls.<br/>The exact calls are confirmed when the adapter is written. |
 | Manual | Prints offers and asks the tester for back-office events; verdicts that depend on them become REVIEW |
 
-### 5.5 Reference issuer
+### 5.5 EUDIPLO as the reference issuer
 
-New package `packages/reference-issuer`: a minimal OpenID4VCI Credential Issuer and Authorization Server built on the forge and the reference validator. It has the issuer-side counterparts of the RP harness's reference RP:
+Decision 2 (§12): the harness has no reference issuer of its own. EUDIPLO's issuer, through its adapter, takes the part the reference RP has on the RP side: an executable test case counts as validated once it has passed against EUDIPLO. EUDIPLO runs in the Compose setup the RP suite already uses, so it is available to every developer and to CI.
 
-- metadata, plain and signed with the access certificate, with the registration certificate by value
-- both grants, PAR, PKCE, DPoP with server nonces, the nonce endpoint, batch, deferred, notification and refresh
-- WIA and KA validation against `TL-WP` and `SL-WP-*` through the reference validator's `TrustStore` and status list checks, so the issuer side validates WIAs and KAs exactly as the RP side validates credentials
-- PID and `default_credential_A` issuance with the forge, status lists it publishes itself, revocation and chaining driven by its adapter
+What this changes compared with the RP harness:
 
-Its job is the self-validation (§7): every executable test case must pass against it, and every fault must be refused for exactly its reason. It is not a production issuer and implements nothing optional beyond what the catalogue tests.
+- **Faults are still proven without the SUT.** Each fault must fail exactly its target check of the reference validator (§7, level 1), which needs no issuer. That part of the self-validation stays in `pnpm test`.
+- **Test cases are proven against EUDIPLO.** The reference run (§7, level 3) needs Docker and a running EUDIPLO, so it runs in its own CI job, not in `pnpm test`.
+- **A failure has two possible causes**: a fault in the harness or a defect in EUDIPLO. Every FAIL in the reference run is analysed before it is recorded. A defect in EUDIPLO becomes a known finding (`adapters/issuer-eudiplo/known-findings.yaml`) with a reference to the upstream issue. The report marks the test case **not validated** until EUDIPLO is fixed and the test case passes. A fault in the harness is fixed.
+- **Features EUDIPLO lacks** (for example a hook the adapter cannot offer, or an ICS item it declares No) leave the test cases that need them not validated as well. They stay in the suite, run against other Providers, and are listed in the report and in the delivery phases with the reason.
+- **Version pinning**: the reference run uses a pinned EUDIPLO release, so a change on EUDIPLO's `main` cannot invalidate the suite overnight. The nightly job (§8) runs against `main` separately and reports regressions as findings, not as harness failures.
+- **Time-based test cases** (`REVOKED(t)`) need short `T_rev` and `T_chain` in EUDIPLO's configuration. The adapter sets the shortest values EUDIPLO allows, and the ICS declares them.
 
 ## 6. Definitions, steps, faults and expected results
 
@@ -274,15 +275,15 @@ The RP harness's three levels carry over:
 
 1. **Artifacts**: every WIA, PoP, KA, proof and DPoP proof the forge builds valid passes every issuer request check of the reference validator. Each fault fails exactly its target check and no other. The new issuer request checks (`wia-signature`, `wia-trust`, `wia-validity`, `wia-status`, `wia-pop`, `ka-signature`, `ka-trust`, `ka-levels`, `ka-status`, `proof-signature`, `proof-claims`, `proof-nonce`, `proof-key-attested`, `dpop-proof`, `dpop-binding`, `pkce`, …) are named per point, as the RP side's credential, status and request checks are. The checks for status lists and trust lists are the existing ones.
 2. **Definitions**: every step of every executable issuer definition, built as the controller builds it, passes every check when the step expects `ISS` and fails exactly one check when it expects `REJ`.
-3. **Reference run**: every executable test case passes against the reference issuer in every variant it runs in, including the time-based ones with `T_rev` and `T_chain` of seconds.
+3. **Reference run**: every executable test case passes against EUDIPLO (pinned release, §5.5) in every variant it runs in, or is marked not validated with an analysed reason (a known finding or a missing feature). This runs in its own CI job, since it needs Docker.
 
-The output side is validated the other way round. The reference issuer's credentials and status lists must pass every `OBS-CRED` and `OBS-SL` check. For each `CONF` check, a forge-built credential or list with the matching fault must fail it. That reuses the RP harness's credential and Status List Token faults, which already exist for exactly these checks.
+The output side is validated without the SUT. Credentials and status lists that the forge builds valid (the PID and `default_credential_A`, both formats) must pass every `OBS-CRED` and `OBS-SL` check. For each `CONF` check, a forge-built credential or list with the matching fault must fail it. That reuses the RP harness's credential and Status List Token faults, which already exist for exactly these checks. Levels 1 and 2 and the output side run in `pnpm test`.
 
 ## 8. Deployment and CI
 
 - The issuer run uses the same Compose file as the EUDIPLO RP run. One EUDIPLO instance serves both suites, in separate tenants.
 - The nightly job gets a second step after the RP run: `rp-conformance issuer run --adapter eudiplo --ics adapters/issuer-eudiplo/ics.yaml --known-findings adapters/issuer-eudiplo/known-findings.yaml`, with its own report, JUnit suite and artifact.
-- The reference run of the issuer suite is part of `pnpm test`, as the RP one is.
+- The fault and output self-validation of the issuer suite (§7, levels 1 and 2) is part of `pnpm test`. The reference run against the pinned EUDIPLO release is a CI job of its own on every pull request that touches the issuer suite, since it needs Docker.
 
 ## 9. Gaps and risks
 
@@ -295,15 +296,17 @@ The output side is validated the other way round. The reference issuer's credent
 | `T_rev` and `T_chain` of up to 24 h | Long runs | Declared values; nightly with minutes; long steps run in parallel and last |
 | `@openid4vc/openid4vci` refuses faulty messages | Fault injection | Fault layer assembles JWTs and HTTP requests directly, as on the RP side |
 | OpenID4VCI and HAIP section numbers in the catalogue not checked against the FCAF-pinned versions (catalogue §8.2) | Wrong references in rendered test cases | Checked when the definitions are written |
-| Issuer classes are not reserved in the FCAF methodology (catalogue §8.2) | FCAF contribution | Rendered in a separate overlay until the FCAF maintainers agree |
+| Issuer classes are not reserved in the FCAF methodology (catalogue §8.2) | FCAF contribution | Rendered in the separate overlay `fcaf-overlay-issuer/` (decision 1) until the FCAF maintainers agree |
+| EUDIPLO as the reference (decision 2): a harness fault and an EUDIPLO defect look alike | False FAIL, or a false PASS when both are wrong the same way | Faults proven by the reference validator alone (§7, level 1); every FAIL analysed before it becomes a known finding; test cases EUDIPLO cannot pass marked not validated (§5.5) |
+| EUDIPLO lacks a feature the catalogue tests | Test cases that cannot be validated | Listed per phase with the reason; validated later against another Provider or when EUDIPLO adds it |
 
 ## 10. Delivery phases
 
 | Phase | Content | Test cases enabled |
 | --- | --- | --- |
-| I0 | `core` split into SUT-neutral and RP parts (the RP suite stays green); Test Wallet Provider with `TL-WP` and `SL-WP-A`; Test Registrar and `PP-T`; issuance client for the pre-authorized code flow with WIA, PoP, DPoP, nonce, proof and KA; `IssuerAdapter`; reference issuer; `holder-binding` | Positive control `PP_WS_IA_MainInteraction_001` (`SD`, `PA`) |
-| I1 | The catalogue's first baseline (§9 step 4): authorization code flow, mdoc, `SM_ClientAttestation`, `SM_KeyAttestation`, `SM_ProofOfPossession`, `SM_Validity`, `SM_Revocation_001`–`_003`, `DM_PidSdJwt`, `DM_PidMdoc`, `PP_RP_SM_Revocation`; issuer overlay rendering | About 70 objectives before variants |
-| I2 | EUDIPLO issuer adapter, nightly step, known findings | Same, against EUDIPLO |
+| I0 | `core` split into SUT-neutral and RP parts (the RP suite stays green); Test Wallet Provider with `TL-WP` and `SL-WP-A`; Test Registrar and `PP-T`; issuance client for the pre-authorized code flow with WIA, PoP, DPoP, nonce, proof and KA; `IssuerAdapter` and the EUDIPLO issuer adapter (the reference, decision 2); `holder-binding`; the reference-run CI job | Positive control `PP_WS_IA_MainInteraction_001` (`SD`, `PA`), passing against EUDIPLO |
+| I1 | The catalogue's first baseline (§9 step 4): authorization code flow, mdoc, `SM_ClientAttestation`, `SM_KeyAttestation`, `SM_ProofOfPossession`, `SM_Validity`, `SM_Revocation_001`–`_003`, `DM_PidSdJwt`, `DM_PidMdoc`, `PP_RP_SM_Revocation`; rendering to `fcaf-overlay-issuer/` | About 70 objectives before variants, each validated against EUDIPLO or marked not validated with the reason |
+| I2 | Nightly step against EUDIPLO `main`, known findings for the issuer suite | Same, against EUDIPLO `main` |
 | I3 | Rest of `PP_WS` (`MS_*`, `TokenBinding`, `Batch`, `Reissuance`, `Deferred`, `Notification`, `IssuerIntegrity`, `Unlinkability`, `SH_*`), revocation chaining, `PP_Inf` | Remaining PID Provider objectives |
 | I4 | `AP_*`: category variants `Q`, `PB`, `E` of every objective not marked PID only, and the objectives from 100 | Attestation Provider objectives |
 
@@ -311,8 +314,10 @@ The output side is validated the other way round. The reference issuer's credent
 
 The catalogue stays the source of the objectives. The definitions are the source of the test cases, as on the RP side. Where writing a definition shows that an objective cannot be executed as written, the catalogue row is changed in the same commit, with the reason, as Phase 5 of the RP harness did for `RP_Inf_009`.
 
-## 12. Decisions needed
+## 12. Decisions (2026-11-18)
 
-1. **Overlay for the issuer test cases**: a second directory (`fcaf-overlay-issuer/`, recommended, since the classes are not reserved in the FCAF methodology), or the RP overlay under a new `suts/pid_provider/`.
-2. **Reference issuer scope**: a minimal issuer of its own (recommended, as the reference RP proves the RP harness independently of EUDIPLO), or EUDIPLO's issuer as the reference.
-3. **OIDF bridge**: run the overlap candidates of catalogue §7 through the OIDF OpenID4VCI issuer suite in addition, or only through the harness (as decided by default on the RP side: optional, not part of the phases).
+| # | Question | Decision | Applied in |
+| --- | --- | --- | --- |
+| 1 | Where the issuer test cases are rendered | A separate overlay, `fcaf-overlay-issuer/`, since the FCAF methodology does not reserve the issuer classes. The RP overlay stays as it is. | §4, §9, §10 |
+| 2 | What the executable test cases are proven against | EUDIPLO's issuer, through its adapter, at a pinned release. The harness builds no reference issuer of its own. Faults are still proven by the reference validator alone. | §0, §5.4, §5.5, §7, §8, §9, §10 |
+| 3 | OIDF OpenID4VCI issuer suite | Optional, as on the RP side: the harness implements every objective itself, and a bridge to the OIDF suite may come later, outside the phases. | §1 (no dependency) |
