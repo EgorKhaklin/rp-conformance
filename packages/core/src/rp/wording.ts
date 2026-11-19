@@ -1,12 +1,11 @@
 // The shared wording of the FCAF Relying Party test cases, so the 121 definitions do not repeat it. The FCAF markdown in
 // fcaf-overlay/ is rendered from the definitions (packages/fcaf-render); a test checks that it is up to date.
 import type { DefaultQueryId } from './adapter';
+import type { CredentialFormat, IcsCondition } from '../definition';
 import {
-  type CredentialFormat,
   type CredentialSpec,
   type Expectation,
   type Flow,
-  type IcsCondition,
   type IdentifierListSpec,
   ics,
   identifierListToken,
@@ -19,8 +18,8 @@ import {
   statusListFormatOf,
   statusListToken,
 } from './definition';
-import type { RequestCheck } from './checks';
-import { type FaultId, faultInfo } from './faults';
+import type { RequestCheck } from '../checks';
+import { type FaultId, faultInfo } from '../faults';
 
 /** Markup of a `default_*` item, as the FCAF lint expects it. */
 export const item = (name: string) => `\`${name}\``;
