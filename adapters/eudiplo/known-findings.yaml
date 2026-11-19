@@ -56,3 +56,13 @@
   finding: >-
     EUDIPLO uses a list whose LoTEType is that of a Wallet Providers list as TL-PID and accepts a PID of the entity it
     adds (ETSI TS 119 602, LoTEType)
+# Upstream issue text: upstream-findings/certificate-path-constraints.md
+- testCase: RP_WS_SM_IssuerIntegrity_034b_UF
+  finding: >-
+    EUDIPLO accepts an mdoc whose document signer certificate is issued by a certificate with basicConstraints cA
+    false (RFC 5280 section 6.1.4)
+# Upstream issue text: upstream-findings/certificate-path-constraints.md
+- testCase: RP_WS_SM_IssuerIntegrity_037b_UF
+  finding: >-
+    EUDIPLO accepts an mdoc whose document signer certificate carries an unknown extension marked critical (RFC 5280
+    section 4.2)
