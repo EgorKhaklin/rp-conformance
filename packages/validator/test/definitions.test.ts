@@ -19,7 +19,7 @@ beforeAll(async () => {
 const rejects = (codes: string[]) => codes.some((c) => c === 'REJ' || c === 'REJ_OR_ACC' || c === 'NOSTAT' || c === 'POLICY');
 
 async function selfValidate(definition: TestCaseDefinition, flow: Flow) {
-  const outcomes: { step: number; expected: string; failures: string[]; target?: string; stale?: boolean; exact?: boolean }[] = [];
+  const outcomes: { step: number; expected: string; failures: string[]; target?: string; stale?: boolean; exact?: boolean; late?: boolean }[] = [];
   const transactions = new Map<number, Transaction>();
   const presentations = new Map<number, string>();
   const entities = { 'TL-PID': defaultEntitiesOf(fixture.pki, 'TL-PID'), 'TL-QEAA': trustedListEntitiesOf(fixture.pki) };
@@ -32,7 +32,7 @@ async function selfValidate(definition: TestCaseDefinition, flow: Flow) {
       } else if (action.kind === 'request') {
         // Requests of the reference Relying Party's form pass the checks the step names, none of them skipped for a
         // failed prerequisite or for not applying in the flow.
-        const result = await fixture.validateRequests(flow, action.query, { count: action.count });
+        const result = await fixture.validateRequests(flow, action.query, { count: action.count, requestUri: action.requestUri });
         const named = (step.expect.checks ?? []).map((check) => result.checks.find((c) => c.check === check));
         outcomes.push({
           step: i + 1,
@@ -48,6 +48,10 @@ async function selfValidate(definition: TestCaseDefinition, flow: Flow) {
         const target = fault && faultInfo(fault).target;
         outcomes.push({ step: i + 1, expected: 'LIST', failures: refused.map((r) => r.failed ?? 'refused'), target: target ?? undefined, exact: true });
         if (!target) entities[action.list] = changed;
+      } else if (action.kind === 'flow' || action.kind === 'error-response') {
+        // A flow step continues an earlier transaction or sends an error response: no artifact of its own for the
+        // reference validator. The run against the reference Relying Party covers it (reference-run.test.ts).
+        continue;
       } else {
         const earlier = action.response.keyOfStep ?? action.response.presentationOfStep;
         const other = earlier ? transactions.get(earlier) : undefined;
@@ -62,6 +66,8 @@ async function selfValidate(definition: TestCaseDefinition, flow: Flow) {
           failures: result.failures,
           target: fault && (faultInfo(fault).target ?? undefined),
           stale: result.credential?.trustListStale,
+          // A late response (ProtocolFlow_011) is valid; only its timing makes the Relying Party reject it.
+          late: action.wallet?.late,
         });
       }
     }
@@ -72,8 +78,8 @@ async function selfValidate(definition: TestCaseDefinition, flow: Flow) {
 }
 
 describe('executable definitions against the reference validator', () => {
-  it('all 218 test definitions are executable: the 121 of the baseline (Phases 1 to 4) and 97 of Phase 5', () => {
-    expect(executableDefinitions).toHaveLength(218);
+  it('all 234 test definitions are executable: the 121 of the baseline (Phases 1 to 4), 97 of Phase 5 and 16 of IA_Engagement and IA_ProtocolFlow', () => {
+    expect(executableDefinitions).toHaveLength(234);
   });
 
   const runs = executableDefinitions.flatMap((d) => flowsOf(d).map((flow) => [d.id, flow, d] as const));
@@ -88,7 +94,7 @@ describe('executable definitions against the reference validator', () => {
         continue;
       }
       expect(outcome.stale ?? false, `${label}: trust-list-stale`).toBe(outcome.expected.split('+').includes('STALE'));
-      if (!rejects(outcome.expected.split('+'))) {
+      if (outcome.late || !rejects(outcome.expected.split('+'))) {
         expect(outcome.failures, label).toEqual([]);
       } else {
         expect(outcome.failures, label).toHaveLength(1);

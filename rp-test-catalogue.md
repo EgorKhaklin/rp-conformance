@@ -186,6 +186,8 @@ The RP fills these in; profiles in the catalogue refer to them.
 | ICS-15 | Uses `trusted_authorities` in DCQL | `P-TA` |
 | ICS-16 | Optional checks: issuer registration (`providesAttestations`), CRL/OCSP of issuer certificates | |
 | ICS-17 | Maximum accepted response size and decompressed status list size | |
+| ICS-18 | Sets `request_uri_method=post` and answers a POST with `wallet_nonce` | `P-POST` |
+| ICS-19 | The RP's own front end redeems the response code of a same-device redirect (an RP that is only a back end leaves this to the relying service) | `P-FE` |
 
 ## 5. Catalogue
 
@@ -230,8 +232,8 @@ Columns: **Objective** says what is verified. **Stimulus** is the mutation or in
 
 | ID | Objective | Stimulus | Expected | References | Var | Rel |
 | --- | --- | --- | --- | --- | --- | --- |
-| `RP_WS_IA_Engagement_001` | Same-device invocation uses `haip-vp://`, `openid4vp://` or a claimed https URL as declared. | Capture | CONF | HAIP 5.1; OID4VP §9 | RD | G/R |
-| `RP_WS_IA_Engagement_002` | Cross-device QR code encodes the same authorization request as same-device. | Decode QR | CONF | OID4VP §5.7; OIA_08c | RD | G/O |
+| `RP_WS_IA_Engagement_001` | Same-device invocation uses `haip-vp://`, `openid4vp://` or a claimed https URL. *Changed: no ICS item declares the scheme, so the test accepts any of the three.* | Capture | CONF | HAIP 5.1; OID4VP §9 | RD | G/R |
+| `RP_WS_IA_Engagement_002` | Cross-device QR code encodes the same authorization request as same-device. *Not executable: the adapter hands the harness one invocation URI per transaction, and the QR code exists only in the Relying Party's user interface.* | Decode QR | CONF | OID4VP §5.7; OIA_08c | RD | G/O |
 | `RP_WS_IA_Engagement_003` | DC API invocation calls the Digital Credentials API with the OpenID4VP protocol identifier. | Capture in browser | CONF | HAIP 5.2; OID4VP A.1 | DC | G/R |
 
 ##### RP_WS_IA_ProtocolFlow
@@ -240,18 +242,18 @@ Columns: **Objective** says what is verified. **Stimulus** is the mutation or in
 | --- | --- | --- | --- | --- | --- | --- |
 | `RP_WS_IA_ProtocolFlow_001` | `request_uri` returns the Request Object with `Content-Type: application/oauth-authz-req+jwt`. | GET `request_uri` | CONF | RFC 9101 §5.2; OID4VP §5.10.1 | RD | G/R |
 | `RP_WS_IA_ProtocolFlow_002` | `request_uri` can be fetched more than once. | Second GET | CONF (OIDF `request-uri-fetched-twice`) | OID4VP §5 | RD | G/R |
-| `RP_WS_IA_ProtocolFlow_003` | `request_uri_method=post` is handled: `wallet_nonce` echoed in the signed request object. | POST with `wallet_metadata`, `wallet_nonce` | CONF (OIDF `request-uri-method-post`) | OID4VP §5.10 | RD | G/O |
-| `RP_WS_IA_ProtocolFlow_004_UF` | `request_uri` of an unknown, expired or completed transaction does not return a request object. | GET stale `request_uri` | 4xx, no request object | OID4VP §5.10.2 | RD | G/R |
+| `RP_WS_IA_ProtocolFlow_003` | `request_uri_method=post` is handled: `wallet_nonce` echoed in the signed request object. *Changed: applies when the RP sets `request_uri_method=post` (ICS-18).* | POST with `wallet_metadata`, `wallet_nonce` | CONF (OIDF `request-uri-method-post`) | OID4VP §5.10 | RD; `P-POST` | G/O |
+| `RP_WS_IA_ProtocolFlow_004_UF` | `request_uri` of an unknown or completed transaction does not return a request object. *Changed: the expired transaction is left to `_011_UF`, which waits out `T_tx` once; the unknown `request_uri` is that of a completed transaction with every part in which two transactions' `request_uri`s differ replaced.* | GET `request_uri` of a completed and of an unknown transaction | 4xx, no request object | OID4VP §5.10, §14.1 | RD | G/R |
 | `RP_WS_IA_ProtocolFlow_005` | Same-device: `response_uri` answers 200 `application/json` with a `redirect_uri` containing a fresh response code (≥ 128 bit). | `SCN-R`, no mutation | CONF | OID4VP §8.2, §14.2; HAIP 5.1 | RD | G/R |
-| `RP_WS_IA_ProtocolFlow_006_UF` | Same-device: the RP does not complete the transaction when the wallet does not follow the redirect back. | `SCN-F`: response posted, redirect not followed | REJ (session not completed, no attributes released to the front end) | HAIP 5.1 | RD | G/R |
-| `RP_WS_IA_ProtocolFlow_007_UF` | Same-device: the RP rejects a redirect back that arrives in a different user session. | `SCN-F`: redirect followed in a fresh browser profile | REJ | HAIP 5.1; OID4VP §14.2 | RD | G/R |
-| `RP_WS_IA_ProtocolFlow_008_UF` | A response code can be redeemed once only. | `SCN-F`: redeem the response code twice | Second redemption REJ | OID4VP §14.2 | RD | G/R |
-| `RP_WS_IA_ProtocolFlow_009_UF` | A forged response code yields no result. | `SCN-F`: random response code | REJ | OID4VP §14.2 | RD | G/R |
+| `RP_WS_IA_ProtocolFlow_006_UF` | Same-device: the RP does not complete the transaction when the wallet does not follow the redirect back. *Changed: observed at the RP's front end (ICS-19), since the back end's result (`OBS-RESULT`) is complete once the response is verified; then the redirect is followed, which must release the result.* | `SCN-F`: response posted, redirect not followed; front end asked in the user agent that started the transaction | No attributes released to the front end | HAIP 5.1 | RD; `P-FE` | G/R |
+| `RP_WS_IA_ProtocolFlow_007_UF` | Same-device: the RP rejects a redirect back that arrives in a different user session. *Changed: observed at the RP's front end (ICS-19).* | `SCN-F`: redirect followed in a fresh browser profile | No attributes released to the front end | HAIP 5.1; OID4VP §14.2 | RD; `P-FE` | G/R |
+| `RP_WS_IA_ProtocolFlow_008_UF` | A response code can be redeemed once only. *Changed: observed at the RP's front end (ICS-19).* | `SCN-F`: redeem the response code twice | Second redemption releases no attributes | OID4VP §14.2 | RD; `P-FE` | G/R |
+| `RP_WS_IA_ProtocolFlow_009_UF` | A forged response code yields no result. *Changed: observed at the RP's front end (ICS-19).* | `SCN-F`: random response code | No attributes released to the front end | OID4VP §14.2 | RD; `P-FE` | G/R |
 | `RP_WS_IA_ProtocolFlow_010` | A wallet error response (`access_denied`, `invalid_request`), unencrypted as permitted, ends the transaction as failed and gets 200 `application/json`. | Error response | CONF, transaction failed | OID4VP §8.2, §8.3.1, §8.5 | RD | G/R |
 | `RP_WS_IA_ProtocolFlow_011_UF` | A response arriving after the transaction lifetime is rejected. | `SCN-F`: send after `T_tx` | REJ | OID4VP §14.1; ICS-09 | RD, DC | G/R |
 | `RP_WS_IA_ProtocolFlow_012_UF` | A second response for a completed transaction is rejected and does not change the first result. | `SCN-F`: resend the identical response | REJ, first result unchanged | OID4VP §14.1, §14.3.2 | RD | G/R |
 | `RP_WS_IA_ProtocolFlow_013_UF` | A response with an unknown or missing `state` (when the RP sent one) is rejected. | `SCN-F` | REJ | OID4VP §14.3.2 | RD | G/O |
-| `RP_WS_IA_ProtocolFlow_014` | DC API error object and cancelled request end the transaction as failed. | `{"error":"access_denied"}` / cancel | CONF | OID4VP A.4 | DC | G/R |
+| `RP_WS_IA_ProtocolFlow_014` | DC API error object ends the transaction as failed. *Changed: the cancelled request is dropped; a rejected `navigator.credentials.get` reaches only the RP's page, and neither OID4VP nor HAIP defines what the page reports to its back end.* | `{"error":"access_denied"}` | REJ | OID4VP A.4 | DC | G/R |
 
 ##### RP_WS_IA_MainInteraction (positive baseline; positive controls for the `_UF` tests)
 
@@ -641,4 +643,4 @@ These objectives can reuse the OIDF `vp1finalverifier` modules as execution vehi
 1. Done (2026-11-06): the baseline covers the `SM_Validity`, `SM_Revocation`, `RP_PP_SM_Revocation`, `SM_TrustMechanisms` and `SM_SessionEncryption` objectives plus the positive controls `RP_WS_IA_MainInteraction_001a` and `_001b`: 121 test cases in the FCAF format, one file per test case, in [fcaf-overlay](fcaf-overlay/README.md). The README lists the objectives left out and why.
 2. Design the harness: draft in [harness-design.md](harness-design.md) (2026-11-06), with four decisions open in its §12.
 3. Contact the FCAF maintainers about adding the Relying Party SUT before opening a pull request.
-4. Write the remaining objectives as test cases. Done for `SM_SessionBinding` and `SM_DeviceBinding` (2026-11-13), `SM_IssuerIntegrity`, `RP_Inf_SM_TrustMechanisms` and the request-side areas `MS_ProtocolMessages`, `MS_Metadata`, `MS_CredentialFormats` and `SM_RpIntegrity` (2026-11-17): 97 executable test cases, see "Beyond the baseline" in the [overlay README](fcaf-overlay/README.md). Not written: the proximity objectives (`SessionBinding_010`, `DeviceBinding_012`, `RpIntegrity_010`, `_011`), `IssuerIntegrity_035` (CRL; optional, the harness serves no CRLs), `RP_Inf_SM_TrustMechanisms_007` (needs several RP Instances), `_010` and `_011` (aggregates of other test cases), `MS_ProtocolMessages_006` (ISO/IEC 18013-7 Annex C), `RpIntegrity_008` (several services) and `_009` (intermediaries). Still open: `IA_Engagement`, `IA_ProtocolFlow`, `MainInteraction_002` to `_005`, `DM_*`, `UC_*`, `SH_*`, `RP_PP_IA_Supportive` and the test book.
+4. Write the remaining objectives as test cases. Done for `SM_SessionBinding` and `SM_DeviceBinding` (2026-11-13), `SM_IssuerIntegrity`, `RP_Inf_SM_TrustMechanisms` and the request-side areas `MS_ProtocolMessages`, `MS_Metadata`, `MS_CredentialFormats` and `SM_RpIntegrity` (2026-11-17): 97 executable test cases, see "Beyond the baseline" in the [overlay README](fcaf-overlay/README.md). Not written: the proximity objectives (`SessionBinding_010`, `DeviceBinding_012`, `RpIntegrity_010`, `_011`), `IssuerIntegrity_035` (CRL; optional, the harness serves no CRLs), `RP_Inf_SM_TrustMechanisms_007` (needs several RP Instances), `_010` and `_011` (aggregates of other test cases), `MS_ProtocolMessages_006` (ISO/IEC 18013-7 Annex C), `RpIntegrity_008` (several services) and `_009` (intermediaries). Done for `IA_Engagement` and `IA_ProtocolFlow` (2026-11-19, issue 29): 16 executable test cases; not written: `IA_Engagement_002` (the QR code exists only in the RP's user interface). Still open: `MainInteraction_002` to `_005`, `DM_*`, `UC_*`, `SH_*`, `RP_PP_IA_Supportive` and the test book.

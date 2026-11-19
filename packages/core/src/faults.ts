@@ -502,6 +502,15 @@ export const FAULTS = {
   'response.jws': response('response-format', 'the `response` parameter is a JWS signed with a key of the Conformance Wallet instead of a JWE'),
   'response.alg-none': response('response-format', 'the `response` parameter is an unsecured JWT with `alg` `none` instead of a JWE'),
   'response.extra-member': response(null, 'its decrypted payload additionally contains the member `foo` with the value `bar`'),
+
+  // RP_WS_IA_Engagement and RP_WS_IA_ProtocolFlow: request faults of the invocation and of the answers at `request_uri`
+  // (self-validation only), and the `state` of the Authorization Response (ProtocolFlow_013).
+  'request.invocation-scheme-other': request('invocation-scheme', 'its invocation URI uses the scheme `mdoc-openid4vp://`', 'redirect'),
+  'request.request-uri-content-type-jwt': request('request-uri-content-type', 'its `request_uri` answers with `Content-Type` `application/jwt`', 'redirect'),
+  'request.refetch-refused': request('request-uri-refetch', 'its `request_uri` answers a second retrieval with HTTP 404', 'redirect'),
+  'request.wallet-nonce-missing': request('wallet-nonce', 'the request object its `request_uri` returns to a POST does not carry the `wallet_nonce`', 'redirect'),
+  'response.state-other': response('response-payload', 'its decrypted payload carries a newly generated random `state` instead of the `state` of the request', 'redirect'),
+  'response.state-missing': response('response-payload', 'its decrypted payload carries no `state`', 'redirect'),
 } as const satisfies Record<string, FaultInfo>;
 
 export type FaultId = keyof typeof FAULTS;

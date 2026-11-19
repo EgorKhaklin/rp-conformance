@@ -238,8 +238,17 @@ describe('fault self-validation', () => {
       const result = await fixture.validateRequests(flow, query, { count: 3 });
       expect(result.failures, query).toEqual([]);
       const skipped = result.checks.filter((c) => c.status === 'skip').map((c) => c.check);
-      const otherFlow = flow === 'redirect' ? ['dc-api-request', 'expected-origins'] : ['request-by-reference', 'request-object', 'state'];
-      expect(skipped.sort(), query).toEqual([...otherFlow, ...(query.endsWith('_trusted_authorities') ? [] : ['trusted-authorities'])].sort());
+      const otherFlow = flow === 'redirect' ? ['dc-api-request', 'expected-origins'] : ['request-by-reference', 'request-object', 'state', 'invocation-scheme', 'request-uri-content-type'];
+      // A single GET of request_uri: the checks of a second retrieval and of a POST with wallet_nonce do not apply.
+      const retrieval = ['request-uri-refetch', 'wallet-nonce'];
+      expect(skipped.sort(), query).toEqual([...otherFlow, ...retrieval, ...(query.endsWith('_trusted_authorities') ? [] : ['trusted-authorities'])].sort());
+      if (flow === 'redirect') {
+        for (const requestUri of ['twice', 'post'] as const) {
+          const retrieved = await fixture.validateRequests(flow, query, { requestUri });
+          expect(retrieved.failures, `${query} ${requestUri}`).toEqual([]);
+          expect(retrieved.checks.find((c) => c.check === (requestUri === 'twice' ? 'request-uri-refetch' : 'wallet-nonce'))?.status).toBe('pass');
+        }
+      }
     }
   });
 
