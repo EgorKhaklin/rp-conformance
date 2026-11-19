@@ -19,6 +19,7 @@ import {
   type RelyingPartyResult,
   type StartAction,
   type StepDefinition,
+  type TestBookItem,
   type TestCaseDefinition,
   type TrustListAction,
   type Verdict,
@@ -111,12 +112,21 @@ export interface RunReport {
     error?: string;
   };
   results: TestCaseRecord[];
+  /** The selected test book items, each REVIEW with its method: inspections the harness cannot execute. */
+  testBook?: TestBookRecord[];
+}
+
+/** A test book item in the report: always REVIEW, with the method of the inspection. */
+export interface TestBookRecord extends TestBookItem {
+  verdict: 'REVIEW';
 }
 
 export interface RunOptions {
   adapter: RelyingPartyAdapter;
   ics: Ics;
   definitions: TestCaseDefinition[];
+  /** The test book items, reported as REVIEW (`only` selects them like test cases). */
+  testBook?: TestBookItem[];
   /** Test case IDs or patterns with `*`. */
   only?: string[];
   flows?: Flow[];
@@ -142,10 +152,10 @@ const matches = (id: string, pattern: string) =>
  * Selects the executable test cases and adds the positive controls they depend on, controls first (harness design
  * section 4.1). Text-only definitions are left out.
  */
-export function selectTestCases(all: TestCaseDefinition[], only?: string[]): TestCaseDefinition[] {
+export function selectTestCases(all: TestCaseDefinition[], only?: string[], testBook: TestBookItem[] = []): TestCaseDefinition[] {
   const definitions = all.filter(isExecutable);
   const selected = only?.length ? definitions.filter((d) => only.some((p) => matches(d.id, p))) : [...definitions];
-  if (only?.length && selected.length === 0) {
+  if (only?.length && selected.length === 0 && selectTestBook(testBook, only).length === 0) {
     const textOnly = all.filter((d) => !isExecutable(d) && only.some((p) => matches(d.id, p)));
     throw new Error(`no executable test case matches ${only.join(', ')}${textOnly.length ? ` (text only: ${textOnly.map((d) => d.id).join(', ')})` : ''}`);
   }
@@ -156,6 +166,11 @@ export function selectTestCases(all: TestCaseDefinition[], only?: string[]): Tes
     for (const control of controls) if (!selected.includes(control)) selected.push(control);
   }
   return [...selected.filter((d) => !d.control), ...selected.filter((d) => d.control)];
+}
+
+/** Selects the test book items `only` names; all of them without `only`. */
+export function selectTestBook(items: TestBookItem[], only?: string[]): TestBookItem[] {
+  return only?.length ? items.filter((item) => only.some((p) => matches(item.id, p))) : [...items];
 }
 
 export { durationMs };
@@ -198,7 +213,11 @@ export async function runConformance(options: RunOptions): Promise<{ report: Run
   };
   try {
     log(`run ${runId}: harness services at ${harness.status.baseUrl} (status) and ${harness.trust.baseUrl} (trust)`);
-    const selected = selectTestCases(options.definitions, options.only);
+    const selected = selectTestCases(options.definitions, options.only, options.testBook);
+    report.testBook = selectTestBook(options.testBook ?? [], options.only).map((item) => ({ ...item, verdict: 'REVIEW' }));
+    for (const item of report.testBook) log(`${item.verdict.padEnd(14)} ${item.id} (test book) ${item.method}`);
+    // Only test book items selected: nothing to execute against the Relying Party.
+    if (selected.length === 0) return await writeReport(report, runDir);
     try {
       await options.adapter.setUp(harness.env, namespace);
     } catch (error) {

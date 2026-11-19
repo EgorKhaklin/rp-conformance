@@ -11,7 +11,7 @@ import {
   type TrustListAction,
 } from '@rp-conformance/core';
 import { createPublicKey, verify } from 'node:crypto';
-import { defaultEntitiesOf, trustedListEntitiesOf } from '@rp-conformance/forge';
+import { defaultEntitiesOf, faultySigner, isSignerFault, mdocValidity, trustedListEntitiesOf } from '@rp-conformance/forge';
 import { base64url, type CborMap, decodeCbor, decodeEmbedded, embedded, encodeCbor, jwkThumbprint as jwkThumbprintOf, readCose, sigStructure } from '@rp-conformance/forge';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { MDOC_IDENTIFIER_LIST_CHECKS, MDOC_STATUS_LIST_CHECKS, openid4vpSessionTranscript, SD_JWT_VC_CHECKS, TRUST_RULES } from '../src/index';
@@ -266,6 +266,24 @@ describe('fault self-validation', () => {
     const binding = FAULT_IDS.filter((fault) => ['key-binding', 'kb-freshness'].includes(faultInfo(fault).target ?? ''));
     expect(binding.filter((fault) => !BINDING_REASONS[fault])).toEqual([]);
   });
+
+  // A signer fault that is not about the validity of the signing certificate keeps the MSO `signed` time within that
+  // validity: the reference validator checks the signed date only once the path is valid, so a faulted path hides it,
+  // while an RP that checks the date first rejects the credential for it and passes the test case for the wrong reason.
+  const VALIDITY_FAULTS = new Set<FaultId>(['mdoc.signer-expired', 'mdoc.signer-not-yet-valid', 'mdoc.signed-after-ds-expiry']);
+  it.each(FAULT_IDS.filter((fault) => faultInfo(fault).format === 'mso_mdoc' && isSignerFault(fault) && !VALIDITY_FAULTS.has(fault)))(
+    '%s signs within the validity of its document signer certificate',
+    async (fault) => {
+      const now = new Date();
+      const signer = await faultySigner(fault, fixture.pki.entities[faultInfo(fault).issuer ?? 'PP-A'], 'mso_mdoc', fixture.pki, now);
+      const leaf = signer.certificate;
+      for (const short of [false, true]) {
+        const { signed } = mdocValidity(now, short);
+        expect(leaf.notBefore.getTime()).toBeLessThanOrEqual(signed.getTime());
+        expect(leaf.notAfter.getTime()).toBeGreaterThanOrEqual(signed.getTime());
+      }
+    },
+  );
 
   // The ES256K faults are genuine device authentication with another algorithm: the credential is bound to the
   // secp256k1 key, and the signature verifies with it.

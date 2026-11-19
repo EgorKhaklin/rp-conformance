@@ -48,7 +48,10 @@ export interface RunOutcome {
   resolved: string[];
 }
 
-/** Classifies the results of a run against the known findings of the Relying Party under test. */
+/**
+ * Classifies the results of a run against the known findings of the Relying Party under test. The test book items
+ * (`report.testBook`) are always REVIEW and never fail the run; a REVIEW result of a test case does.
+ */
 export function runOutcome(report: RunReport, findings: KnownFinding[]): RunOutcome {
   const unexpected: string[] = report.run.error ? [`run error: ${report.run.error}`] : [];
   const known: string[] = [];

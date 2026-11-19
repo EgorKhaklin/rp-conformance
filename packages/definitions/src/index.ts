@@ -47,3 +47,6 @@ export const definitions: TestCaseDefinition[] = [
 
 /** The definitions the harness can execute. */
 export const executableDefinitions = definitions.filter(isExecutable);
+
+/** The test book items (class `RP_TB`): inspections, reported as REVIEW with their method in every run. */
+export { testBook } from './test_book/TestBook';
