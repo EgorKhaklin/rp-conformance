@@ -1,3 +1,4 @@
+import type { KeyedCertificate, PublishedTrustList } from '../environment';
 import type { Flow } from './definition';
 
 /**
@@ -48,32 +49,6 @@ export function categoryOfQuery(query: DefaultQueryId): CredentialCategory {
   if (query.startsWith('default_query_pubeaa')) return 'pub-eaa';
   if (query.startsWith('default_query_eaa')) return 'eaa';
   return 'pid';
-}
-
-/** A certificate with its private key, as the harness hands it to the Relying Party under test. */
-export interface KeyedCertificate {
-  /** PEM of the certificate. */
-  certificatePem: string;
-  /** Base64 DER of the certificate, as used in `x5c`. */
-  certificate: string;
-  /** PEM of the certificate chain without the trust anchor, leaf first. */
-  chainPem: string[];
-  /** Private key as JWK (EC P-256). */
-  privateJwk: JsonWebKey;
-  /** Private key as PKCS#8 PEM. */
-  privateKeyPem: string;
-}
-
-/** A list of `default_trust_configuration_rp` as published by the Test Trust Infrastructure. */
-export interface PublishedTrustList {
-  /** `TL-PID`, `TL-PUB`, `TL-WP`, `TL-AC` or `TL-RC`. */
-  id: string;
-  /** ETSI TS 119 602 `LoTEType`. */
-  loteType: string;
-  /** Where the Relying Party fetches the list. */
-  url: string;
-  /** The scheme operator certificate (PEM) the Relying Party trusts for this list. */
-  schemeOperatorCertificatePem: string;
 }
 
 /**

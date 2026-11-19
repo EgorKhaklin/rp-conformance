@@ -3,7 +3,7 @@
 // `null` marks a variant that must pass every check. `text` is the FCAF wording of the difference, so a test case
 // names a fault and describes it in one place. The implementations are in packages/forge/src/faults.
 import type { CheckId } from './checks';
-import type { Flow } from './definition';
+import type { Flow } from './rp/definition';
 
 /**
  * Where a fault is applied: the issued credential, the status list or identifier list the Test Status Provider serves,
