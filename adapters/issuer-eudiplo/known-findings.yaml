@@ -9,5 +9,6 @@
 #   reference: EUDIPLO/eudiplo#<n>
 #
 # Remove an entry once EUDIPLO fixes it; the run names a known finding whose test case passed. No issuer test case is
-# executable yet (issue 17 adds the first), so the list is empty. The README lists the FAILs expected against 9.1.0.
+# executable yet (issue 17 adds the first), so the list is empty. The README lists the FAILs expected against the pinned
+# reference image (reference.env).
 []
