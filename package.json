@@ -9,6 +9,7 @@
   },
   "scripts": {
     "test": "vitest run",
+    "test:issuer-wallet:eudiplo": "vitest run --root . --config packages/issuer-wallet/vitest.integration.config.ts",
     "types:check": "tsc --noEmit -p tsconfig.json",
     "rp-conformance": "node packages/controller/bin/rp-conformance.mjs",
     "fcaf:render": "tsx packages/fcaf-render/src/cli.ts",
