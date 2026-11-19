@@ -19,6 +19,7 @@ import {
   type ListSource,
   type MdocValidation,
   type SdJwtVcValidation,
+  type StatusListFreshness,
   TRUST_RULES,
   TrustStore,
   validateAuthorizationResponse,
@@ -55,7 +56,10 @@ export interface ReferenceRpOptions extends ServerOptions {
   /** Cache Status List Tokens for their `ttl` (ICS RP.R.5). */
   cacheStatusLists?: boolean;
   /** Timeout of a status list or identifier list retrieval (ICS RP.R.6), milliseconds; default 5000. */
-  statusTimeoutMs?: number;
+  statusTimeoutMs?: number;  /** Freshness policy for Status List Tokens (ICS RP.R.7, RP.R.8). */
+  statusListFreshness?: StatusListFreshness;
+  /** Reject a PID whose administrative expiry date has passed (ICS RP.P.11). */
+  rejectPastExpiryDate?: boolean;
 }
 
 export type TransactionStatus = 'pending' | 'success' | 'failure';
@@ -385,6 +389,8 @@ export class ReferenceRelyingParty {
         // reference Relying Party declares RP.R.2 Reject.
         requireStatus: true,
         maxStatusListBytes: this.options.maxStatusListBytes,
+        statusListFreshness: this.options.statusListFreshness,
+        rejectPastExpiryDate: this.options.rejectPastExpiryDate,
         validStatuses: this.options.validStatuses,
         trustedAuthorities: credentialQuery.trusted_authorities,
       };

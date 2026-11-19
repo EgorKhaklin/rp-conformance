@@ -14,6 +14,7 @@ import {
   encodeCbor,
   MDOC_DS_EXTENDED_KEY_USAGE,
   type Oid4vpHandover,
+  PID_NAMESPACE,
   readCose,
   sha256,
   sigStructure,
@@ -25,7 +26,7 @@ import { parseCertificate } from '@owf/x509';
 import { describeKey } from './disclosures';
 import { CheckRecorder, type ValidationMode, type ValidationResult } from './checks';
 import { evaluateIdentifierList } from './identifier-list';
-import { attempt, base64Of, evaluateStatusList, type FetchedStatusList, fail, isUri } from './status-list';
+import { attempt, base64Of, evaluateStatusList, type FetchedStatusList, fail, isUri, type StatusListFreshness } from './status-list';
 import type { MatchedIssuer, TrustRule, TrustStore } from './trust';
 
 /** The checks of an mdoc presentation that references a Status List Token in CWT format. */
@@ -67,6 +68,10 @@ export interface MdocValidationOptions {
   fetchIdentifierList: (uri: string) => Promise<FetchedStatusList>;
   mode?: ValidationMode;
   now?: Date;
+  /** Freshness policy for Status List Tokens (ICS RP.R.7, RP.R.8). */
+  statusListFreshness?: StatusListFreshness;
+  /** Reject a PID whose administrative expiry date has passed (ICS RP.P.11 Reject). */
+  rejectPastExpiryDate?: boolean;
 }
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -236,6 +241,9 @@ export async function validateMdocPresentation(presentation: string, options: Md
       if (now.getTime() < validFrom.getTime() - skewMs) fail(`not yet valid: validFrom ${validFrom.toISOString()}, T_skew ${options.skewSeconds} s`);
       // expectedUpdate is informative (ISO/IEC 18013-5 section 9.1.2.4): Validity_012.
       const expectedUpdate = dateOf(validityInfo.get('expectedUpdate'));
+      // RP_WS_SM_Validity_020: the administrative expiry date of a PID, under the policy of ICS RP.P.11.
+      const expiry = claims?.[PID_NAMESPACE]?.expiry_date;
+      if (options.rejectPastExpiryDate && typeof expiry === 'string' && expiry < now.toISOString().slice(0, 10)) fail(`the administrative expiry date ${expiry} has passed`);
       if (expectedUpdate && expectedUpdate < now) return `expectedUpdate ${expectedUpdate.toISOString()} has passed (informative)`;
     });
 
@@ -280,7 +288,9 @@ export async function validateMdocPresentation(presentation: string, options: Md
         const idx = entry.get('idx');
         if (typeof idx !== 'number' || !Number.isInteger(idx) || idx < 0) fail(`idx ${JSON.stringify(jsonOf(idx))} is not an unsigned integer`);
         if (!isUri(entry.get('uri'))) fail(`uri ${JSON.stringify(entry.get('uri'))} is not a URI`);
-        statusListReference = { idx: idx as number, uri: entry.get('uri') as string };
+        const certificate = entry.get('certificate');
+        if (certificate !== undefined && !(certificate instanceof Uint8Array)) fail('the status_list certificate is not a byte string');
+        statusListReference = { idx: idx as number, uri: entry.get('uri') as string, ...(certificate ? { certificate: certificate as Uint8Array } : {}) };
       }
       if (identifierList !== undefined) {
         const entry = asMap(identifierList, 'identifier_list');
@@ -308,6 +318,7 @@ export async function validateMdocPresentation(presentation: string, options: Md
         onFetched: () => {
           statusListFetched = true;
         },
+        freshness: options.statusListFreshness,
       });
     }
     if (hasIdentifierList) {

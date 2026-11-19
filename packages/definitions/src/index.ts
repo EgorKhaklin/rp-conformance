@@ -15,6 +15,9 @@ import { definitions as trustMechanisms } from './wallet_solution/SecurityMechan
 import { definitions as validity } from './wallet_solution/SecurityMechanisms/Validity';
 import { definitions as encoding } from './wallet_solution/Shared/Encoding';
 import { definitions as supportive } from './pid_provider/Interaction/Supportive';
+import { definitions as revocationPolicy } from './pid_provider/SecurityMechanisms/RevocationPolicy';
+import { definitions as revocationMechanisms } from './wallet_solution/SecurityMechanisms/RevocationMechanisms';
+import { definitions as validityPolicy } from './wallet_solution/SecurityMechanisms/ValidityPolicy';
 
 /** The 121 baseline test definitions, in the order of the baseline lists. */
 export const baselineDefinitions: TestCaseDefinition[] = [
@@ -43,6 +46,9 @@ export const definitions: TestCaseDefinition[] = [
   ...rpIntegrity,
   ...encoding,
   ...supportive,
+  ...revocationPolicy,
+  ...revocationMechanisms,
+  ...validityPolicy,
 ];
 
 /** The definitions the harness can execute. */

@@ -556,6 +556,22 @@ export const FAULTS = {
     'issuer-trust',
     'the `x5chain` of its `IssuerAuth` carries 50 certificates: its document signer certificate followed by 49 self-signed CA certificates that are not part of `default_trust_configuration_rp`',
   ),
+
+  // Single objectives of issue 32 (packages/forge/src/policy-faults.ts): faults whose outcome the policy the Relying
+  // Party declares decides (RP_PP_SM_Revocation_014), that it records only (RP_WS_SM_Validity_004), or that a valid
+  // credential may carry (RP_PP_SM_Revocation_031).
+  'status-list.iat-future': statusList('status-list-validity', 'its `iat` claim is set to the current time plus `T_skew` plus one hour'),
+  'status-list.iat-old': statusList('status-list-validity', 'its `iat` claim lies 30 days in the past, while its `exp` claim lies one day in the future'),
+  'status-list-cwt.iat-future': statusListCwt('status-list-validity', 'its issued at claim (6) is set to the current time plus `T_skew` plus one hour'),
+  'status-list-cwt.iat-old': statusListCwt(
+    'status-list-validity',
+    'its issued at claim (6) lies 30 days in the past, while its expiration time (4) lies one day in the future',
+  ),
+  'credential.iat-future': credential(null, 'its Issuer-signed JWT carries an `iat` claim set to the current time plus `T_skew` plus one hour'),
+  'mdoc.status-certificate': mdoc(
+    null,
+    'the `status_list` map in the `status` element of its MSO additionally carries `certificate`: the DER encoding of the certificate that signs the referenced Status List Token, issued under the revocation anchor of `PP-A`',
+  ),
 } as const satisfies Record<string, FaultInfo>;
 
 export type FaultId = keyof typeof FAULTS;

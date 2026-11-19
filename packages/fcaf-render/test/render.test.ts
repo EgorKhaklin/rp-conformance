@@ -11,7 +11,7 @@ const overlay = fileURLToPath(new URL('../../../fcaf-overlay/docs/fcaf/', import
 describe('FCAF rendering', () => {
   it('there are 121 baseline test cases and 25 test cases of the remaining catalogue areas', () => {
     expect(baselineDefinitions).toHaveLength(121);
-    expect(definitions).toHaveLength(238);
+    expect(definitions).toHaveLength(245);
     expect(definitions.slice(0, 121)).toEqual(baselineDefinitions);
   });
 

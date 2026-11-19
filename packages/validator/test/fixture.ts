@@ -67,6 +67,8 @@ export const KB_MAX_AGE = 300;
 export const MAX_STATUS_LIST_BYTES = 1 << 20;
 /** The maximum response size of the reference validator in the self-validation (ICS RP.P.10 of the reference Relying Party). */
 export const MAX_RESPONSE_BYTES = 1 << 20;
+/** The freshness policy for Status List Tokens of the reference validator in the self-validation (ICS RP.R.7, RP.R.8). */
+export const STATUS_LIST_FRESHNESS = { maxAgeSeconds: 7 * 24 * 3600, refuseFutureIat: true };
 export const RESPONSE_URI = 'https://rp.rp-test/self-validation/response';
 /** The Origin of the Relying Party's page in the DC API flow. */
 export const ORIGIN = 'https://rp.rp-test';
@@ -293,6 +295,9 @@ export class Fixture {
       skewSeconds: SKEW,
       requireStatus: true,
       maxStatusListBytes: MAX_STATUS_LIST_BYTES,
+      // The policies of the reference Relying Party (ICS RP.R.7, RP.R.8, RP.P.11).
+      statusListFreshness: STATUS_LIST_FRESHNESS,
+      rejectPastExpiryDate: true,
       trustedAuthorities: credentialQuery.trusted_authorities,
       mode,
     };

@@ -39,6 +39,11 @@ export class ReferenceAdapter implements RelyingPartyAdapter {
       maxResponseBytes: Number(env.ics.items['RP.P.10'] ?? 0) || undefined,
       cacheStatusLists: env.ics.items['RP.R.5'] === 'Yes',
       statusTimeoutMs: durationMs(String(env.ics.items['RP.R.6'] ?? '')),
+      statusListFreshness: {
+        maxAgeSeconds: (durationMs(String(env.ics.items['RP.R.7'] ?? '')) ?? Number.NaN) / 1000 || undefined,
+        refuseFutureIat: env.ics.items['RP.R.8'] === 'Yes',
+      },
+      rejectPastExpiryDate: /^reject/i.test(String(env.ics.items['RP.P.11'] ?? '')),
     }).start();
     const failed = (await this.rp.refreshTrust()).filter((list) => list.error);
     if (failed.length > 0) throw new Error(`reference RP could not load: ${failed.map((l) => l.error).join('; ')}`);

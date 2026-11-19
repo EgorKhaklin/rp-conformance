@@ -1,4 +1,14 @@
-import type { CredentialCategory, DcqlQuery, Expectation, ExpectationCode, Ics, RelyingPartyResult, Verdict } from '@rp-conformance/core';
+import {
+  type CredentialCategory,
+  type DcqlQuery,
+  durationMs,
+  type Expectation,
+  type ExpectationCode,
+  type Ics,
+  type PolicyReference,
+  type RelyingPartyResult,
+  type Verdict,
+} from '@rp-conformance/core';
 import { icsAnswer, statusMeanings } from './ics';
 
 export interface Evaluation {
@@ -106,6 +116,7 @@ export function evaluateNoStatus(args: EvaluationInput): Evaluation {
 export function evaluatePolicy(expectation: Expectation, args: EvaluationInput): Evaluation {
   const policy = expectation.policy;
   if (!policy) return { verdict: 'INCONCLUSIVE', reason: 'the expected result names no ICS item' };
+  if (policy.item !== 'RP.R.3') return evaluateDeclaredPolicy(policy, args);
   const hex = `0x${policy.status.toString(16).padStart(2, '0')}`;
   const meaning = statusMeanings(args.ics).get(policy.status);
   if (meaning === undefined) return withPrefix(`${policy.item} declares no meaning for ${hex}`, evaluateReject(args.result, args.responseStatus, args.delivered));
@@ -179,6 +190,8 @@ export function evaluate(expectation: Expectation, args: EvaluationInput): Evalu
         return evaluateNoDetails(args);
       case 'STATUS_REQUEST':
         return evaluateStatusRequest(args);
+      case 'INFO':
+        return evaluateInfo(args);
       default:
         return { verdict: 'INCONCLUSIVE', reason: `expected result ${code} does not apply to a presentation step` };
     }
@@ -255,4 +268,44 @@ export function evaluateStatusRequest(args: EvaluationInput): Evaluation {
   if (problems.length) return { verdict: 'FAIL', reason: `the status list request carries ${problems.join('; ')}` };
   const accepts = [...new Set(entries.map((e) => String(e.headers.accept ?? '(none)')))].join(', ');
   return { verdict: 'PASS', reason: `${entries.length} GET request(s) of the status URI without authentication or transaction data (Accept: ${accepts})` };
+}
+
+/**
+ * `POLICY` against the ICS items of issue 32: `RP.R.7`, the maximum age of a Status List Token (a token at least that
+ * old gives no reliable status, `NOSTAT`; `None` or a longer age accepts); `RP.R.8`, whether a token issued in the future
+ * is refused (`Yes`: `NOSTAT`, `No`: accepted); `RP.P.11`, a PID whose administrative expiry date has passed (`Reject`
+ * or `Accept`).
+ */
+export function evaluateDeclaredPolicy(policy: Exclude<PolicyReference, { item: 'RP.R.3' }>, args: EvaluationInput): Evaluation {
+  const declared = String(icsAnswer(args.ics, policy.item) ?? '').trim();
+  const accept = (why: string) => withPrefix(`${policy.item} ${why}`, evaluateAccept(args.result, args.query, args.issuedClaims, args.responseStatus, args.delivered));
+  const refuse = (why: string) => withPrefix(`${policy.item} ${why}`, evaluateNoStatus(args));
+  const undeclared = (): Evaluation => ({ verdict: 'INCONCLUSIVE', reason: `${policy.item} is not declared (${declared || 'missing'})` });
+  switch (policy.item) {
+    case 'RP.R.7': {
+      if (/^none$/i.test(declared)) return accept('declares no maximum age');
+      const maxMs = durationMs(declared);
+      if (maxMs === undefined) return undeclared();
+      return maxMs <= policy.ageSeconds * 1000 ? refuse(`declares a maximum age of ${declared}`) : accept(`declares a maximum age of ${declared}, more than the token's`);
+    }
+    case 'RP.R.8':
+      if (/^yes$/i.test(declared)) return refuse('Yes');
+      if (/^no$/i.test(declared)) return accept('No');
+      return undeclared();
+    case 'RP.P.11':
+      if (/^reject/i.test(declared)) return withPrefix(`${policy.item} ${declared}`, evaluateReject(args.result, args.responseStatus, args.delivered));
+      if (/^accept/i.test(declared)) return accept(declared);
+      return undeclared();
+  }
+}
+
+/**
+ * `INFO` (RP_WS_SM_Validity_004): the outcome is recorded without a verdict on it. The step passes whenever the Relying
+ * Party decided without an HTTP 5xx; an answer that never arrived leaves it inconclusive.
+ */
+export function evaluateInfo(args: EvaluationInput): Evaluation {
+  if (args.delivered === false) return { verdict: 'INCONCLUSIVE', reason: 'the Authorization Response was not delivered' };
+  if (args.responseStatus !== undefined && args.responseStatus >= 500) return { verdict: 'FAIL', reason: `the Relying Party answered HTTP ${args.responseStatus}` };
+  const outcome = args.result.outcome === 'success' ? 'accepted' : args.result.outcome === 'failure' ? 'rejected' : 'left pending';
+  return { verdict: 'PASS', reason: `recorded: the Relying Party ${outcome} the presentation${args.responseStatus !== undefined ? ` (HTTP ${args.responseStatus})` : ''}` };
 }

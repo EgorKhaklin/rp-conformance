@@ -80,6 +80,8 @@ export interface CredentialSpec {
   signedUnder?: 'issuance' | 'revocation';
   /** Named faults (at most one); empty for a valid credential. */
   faults: FaultId[];
+  /** A PID whose administrative expiry date (`date_of_expiry`, mdoc `expiry_date`) lies seven days in the past. */
+  expiryDatePast?: boolean;
 }
 
 /** A Status List Token the Test Status Provider serves for the step's credential: JWT for SD-JWT VC, CWT for mdoc. */
@@ -220,7 +222,8 @@ export type ExpectationCode =
   | 'STALE'
   | 'CONF'
   | RobustnessExpectationCode
-  | RetrievalExpectationCode;
+  | RetrievalExpectationCode
+  | InformativeExpectationCode;
 
 /**
  * Expected-result codes of `RP_WS_SH_Encoding`: `HTTP_4XX`, the `response_uri` answers the Authorization Response with
@@ -236,12 +239,24 @@ export type RobustnessExpectationCode = 'HTTP_4XX' | 'NO_DETAILS';
  */
 export type RetrievalExpectationCode = 'STATUS_REQUEST';
 
-/** The ICS declaration a `POLICY` expectation is compared with. */
-export interface PolicyReference {
-  /** `RP.R.3`: the meaning the Relying Party assigns to an application-specific status value. */
-  item: 'RP.R.3';
-  status: number;
-}
+/** `INFO` (catalogue section 2.5): the outcome is recorded in the report, without a verdict on it. */
+export type InformativeExpectationCode = 'INFO';
+
+/**
+ * The ICS declaration a `POLICY` expectation is compared with: `RP.R.3`, the meaning the Relying Party assigns to an
+ * application-specific status value; `RP.R.7`, the maximum age of a Status List Token, for a token `ageSeconds` old;
+ * `RP.R.8`, whether it refuses a Status List Token issued in the future; `RP.P.11`, its policy for a PID whose
+ * administrative expiry date has passed.
+ */
+export type PolicyReference =
+  | {
+      /** `RP.R.3`: the meaning the Relying Party assigns to an application-specific status value. */
+      item: 'RP.R.3';
+      status: number;
+    }
+  | { item: 'RP.R.7'; ageSeconds: number }
+  | { item: 'RP.R.8' }
+  | { item: 'RP.P.11' };
 
 /** An expected result of an RP test case. */
 export interface Expectation extends ExpectationOf<ExpectationCode> {

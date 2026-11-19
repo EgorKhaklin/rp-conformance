@@ -3,7 +3,7 @@ import { base64url, sha256, verifyEs256 } from '@rp-conformance/forge';
 import { describeKey, processDisclosures } from './disclosures';
 import { parseCertificate } from '@owf/x509';
 import { CheckRecorder, type ValidationMode, type ValidationResult } from './checks';
-import { decodeSegment, evaluateStatusList, type FetchedStatusList, fail, isUri, leafJwk } from './status-list';
+import { decodeSegment, evaluateStatusList, type FetchedStatusList, fail, isUri, leafJwk, type StatusListFreshness } from './status-list';
 import type { MatchedIssuer, TrustRule, TrustStore } from './trust';
 import { duplicateMember } from './json-members';
 
@@ -50,6 +50,10 @@ export interface SdJwtVcValidationOptions {
   fetchStatusList: (uri: string) => Promise<FetchedStatusList>;
   mode?: ValidationMode;
   now?: Date;
+  /** Freshness policy for Status List Tokens (ICS RP.R.7, RP.R.8). */
+  statusListFreshness?: StatusListFreshness;
+  /** Reject a PID whose administrative expiry date has passed (ICS RP.P.11 Reject). */
+  rejectPastExpiryDate?: boolean;
 }
 
 const DAY = 24 * 60 * 60;
@@ -143,6 +147,9 @@ export async function validateSdJwtVcPresentation(presentation: string, options:
       if (typeof payload.exp === 'number' && nowSeconds > payload.exp + skew) fail(`expired: exp ${payload.exp}, now ${nowSeconds}, T_skew ${skew}`);
       if (typeof payload.nbf === 'number' && nowSeconds < payload.nbf - skew) fail(`not yet valid: nbf ${payload.nbf}, now ${nowSeconds}, T_skew ${skew}`);
       // A credential iat in the future is recorded only (catalogue decision 5).
+      // RP_WS_SM_Validity_020: the administrative expiry date of a PID, under the policy of ICS RP.P.11.
+      const expiry = claims?.date_of_expiry;
+      if (options.rejectPastExpiryDate && typeof expiry === 'string' && expiry < now.toISOString().slice(0, 10)) fail(`the administrative expiry date ${expiry} has passed`);
       if (typeof payload.iat === 'number' && payload.iat > nowSeconds + skew) return `iat ${payload.iat} lies in the future (informative)`;
     });
 
@@ -205,6 +212,7 @@ export async function validateSdJwtVcPresentation(presentation: string, options:
       onFetched: () => {
         statusListFetched = true;
       },
+      freshness: options.statusListFreshness,
     });
   });
   return { ...result, claims: result.failures.includes('disclosures') ? undefined : claims, issuer: issuer?.name, statusListFetched, trustListStale };

@@ -12,6 +12,7 @@ import { decodeJws, flipBitInSegment, resignJws } from './jose';
 import { type CertifiedKey, createEndEntity, createSelfSignedCa, createSelfSignedSigner, type TestEntity, type TestPki } from './pki';
 import { foreignSigner, isSignerFault } from './signers';
 import { isRobustSdJwtCredentialFault, robustResponse, robustSdJwtCredential } from './robustness';
+import { isPolicyCredentialFault, isPolicyStatusListFault, policySdJwtCredential, policyStatusListJwt } from './policy-faults';
 
 const HOUR = 3600;
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -185,6 +186,7 @@ const join = (parts: SdJwtParts) => `${[parts.jwt, ...parts.disclosures].join('~
 export async function applyCredentialFault(fault: FaultId, sdJwt: string, ctx: CredentialFaultContext): Promise<string> {
   ensurePoint(fault, 'credential', 'dc+sd-jwt');
   if (isRobustSdJwtCredentialFault(fault)) return robustSdJwtCredential(sdJwt, fault, ctx.signer);
+  if (isPolicyCredentialFault(fault)) return policySdJwtCredential(sdJwt, ctx.signer, ctx.now, ctx.skewSeconds);
   const [issuerJwt, ...rest] = sdJwt.split('~');
   const parts: SdJwtParts = { jwt: issuerJwt, disclosures: rest.filter(Boolean) };
   // A signer fault is applied when the credential is issued (forgePresentation).
@@ -346,6 +348,7 @@ async function secp256k1Signer(ctx: StatusListFaultContext) {
 export async function applyStatusListFault(fault: FaultId, token: string, ctx: StatusListFaultContext): Promise<ServedStatusList> {
   ensurePoint(fault, 'status-list', 'jwt');
   const jwt = (body: string) => ({ body, contentType: STATUS_LIST_JWT });
+  if (isPolicyStatusListFault(fault)) return jwt(await policyStatusListJwt(fault, token, ctx.signer, ctx.now, ctx.skewSeconds));
   const resign = async (change: Parameters<typeof resignJws>[1], key = ctx.signer.key.privateKey) => jwt(await resignJws(token, change, key));
   const removeFromList = (member: string) => resign(({ payload }) => void delete (payload.status_list as Record<string, unknown>)[member]);
   const setLst = (lst: string) => resign(({ payload }) => void ((payload.status_list as Record<string, unknown>).lst = lst));

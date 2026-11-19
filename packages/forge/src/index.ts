@@ -21,3 +21,4 @@ export * from './step';
 export * from './trust-list-version';
 export * from './trusted-list';
 export * from './robustness';
+export * from './policy-faults';
