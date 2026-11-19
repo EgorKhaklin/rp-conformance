@@ -318,6 +318,28 @@ importers:
         specifier: ^6.2.15
         version: 6.2.15
 
+  packages/wallet-provider:
+    dependencies:
+      '@owf/x509':
+        specifier: ^0.7.0
+        version: 0.7.0
+      '@rp-conformance/forge':
+        specifier: workspace:*
+        version: link:../forge
+      '@rp-conformance/status-provider':
+        specifier: workspace:*
+        version: link:../status-provider
+      '@rp-conformance/trust-infrastructure':
+        specifier: workspace:*
+        version: link:../trust-infrastructure
+    devDependencies:
+      '@owf/token-status-list':
+        specifier: ^0.7.0
+        version: 0.7.0
+      '@rp-conformance/validator':
+        specifier: workspace:*
+        version: link:../validator
+
 packages:
 
   '@cbor-extract/cbor-extract-darwin-arm64@2.2.3':
