@@ -59,11 +59,15 @@ The remaining catalogue areas are written as test cases one area at a time (harn
 | `RP_WS_MS_Metadata` | 5 | 0 |
 | `RP_WS_MS_CredentialFormats` | 8 | 0 |
 | `RP_WS_SM_RpIntegrity` | 7 | 0 |
-| **Total** | **97** | **66** |
+| `RP_WS_IA_Engagement` | 2 | 0 |
+| `RP_WS_IA_ProtocolFlow` | 14 | 8 |
+| **Total** | **113** | **74** |
 
 Variant letters are the credential format, as in the baseline. Most of these test cases are for one format and run in every presentation flow; `SessionBinding_002` and `_008` are for redirects, `_006`, `_007` and `_009` for the W3C Digital Credentials API, because the audience of a KB-JWT and the handover of an mdoc differ between the flows. The request-side test cases (`RP_WS_MS_*`, `RP_WS_SM_RpIntegrity`) check the requests the Relying Party sends, without answering them; `ProtocolMessages_001`, `_002` and `_004` are for redirects, `ProtocolMessages_005` and `RpIntegrity_007` for the W3C Digital Credentials API. The `RP_Inf` test cases, in the new class directory `infrastructure/`, publish a new version of `TL-PID` or `TL-QEAA` and present a credential whose acceptance depends on it.
 
 Catalogue objectives in these areas that are not written: `RP_WS_SM_SessionBinding_010`, `RP_WS_SM_DeviceBinding_012`, `RP_WS_SM_RpIntegrity_010` and `_011` (ISO/IEC 18013-5 proximity, which the harness does not cover); `RP_WS_SM_IssuerIntegrity_035` (a signing certificate revoked by a CRL: an optional check, and the harness serves no CRLs); `RP_Inf_SM_TrustMechanisms_007` (changes reach every Relying Party Instance: the harness observes one), `_010` and `_011` (covered by other test cases); `RP_WS_MS_ProtocolMessages_006` (ISO/IEC 18013-7 Annex C); `RP_WS_SM_RpIntegrity_008` (several services) and `_009` (intermediaries).
+
+`RP_WS_IA_Engagement` and `RP_WS_IA_ProtocolFlow` (issue 29) cover how the Relying Party invokes the wallet and handles the steps around the presentation. `Engagement_001` and `ProtocolFlow_001` to `_003` are request-side test cases; `ProtocolFlow_002` retrieves the request object twice, `_003` with POST and `wallet_nonce` and applies only when the Relying Party sets `request_uri_method` to `post` (ICS RP.P.8). `ProtocolFlow_004_UF` retrieves the `request_uri` of a completed and of an unknown transaction; `_005` checks the `redirect_uri` with its response code; `_006_UF` to `_009_UF` open the `redirect_uri` in the user agent that started the transaction, in a fresh one, twice, or with a forged response code, and apply only when the Relying Party redeems the response code at its own front end (ICS RP.P.9); `_010` and `_014` send the wallet's error response; `_011_UF` sends the Authorization Response after the transaction lifetime `T_tx` (ICS RP.P.7), in both flows; `_012_UF` sends it twice; `_013_UF` changes or removes its `state`. Not written: `RP_WS_IA_Engagement_002` (the cross-device QR code encodes the same request as same-device): the harness receives one invocation URI per transaction and does not read the QR code the Relying Party renders in its user interface. The catalogue rows of `Engagement_001`, `ProtocolFlow_003`, `_004_UF`, `_006_UF` to `_009_UF` and `_014` were changed to what is executable; each row says why.
 
 ## Rendering
 

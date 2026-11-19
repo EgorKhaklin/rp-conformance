@@ -21,9 +21,9 @@ describe('run against the reference Relying Party', () => {
     expect(notPassed).toEqual([]);
     const runs = (results: { testCase: string; flow: string }[]) => results.map((r) => `${r.testCase} ${r.flow}`).sort();
     expect(runs(report.results)).toEqual(runs(definitions.flatMap((d) => flowsOf(d).map((flow) => ({ testCase: d.id, flow })))));
-    // 186 test cases in both flows, 16 only via redirects and 16 only via the DC API.
-    expect(report.results.filter((r) => r.flow === 'redirect')).toHaveLength(202);
-    expect(report.results.filter((r) => r.flow === 'dc-api')).toHaveLength(202);
+    // 187 test cases in both flows, 29 only via redirects and 18 only via the DC API.
+    expect(report.results.filter((r) => r.flow === 'redirect')).toHaveLength(216);
+    expect(report.results.filter((r) => r.flow === 'dc-api')).toHaveLength(205);
     const written = JSON.parse(await readFile(reportPath, 'utf8'));
     const control = (flow: string) =>
       written.results.find((r: { testCase: string; flow: string }) => r.testCase === 'RP_WS_IA_MainInteraction_001a' && r.flow === flow);

@@ -100,6 +100,10 @@ export const REQUEST_CHECKS = [
   'access-certificate',
   'registration-certificate',
   'registered-attributes',
+  'invocation-scheme',
+  'request-uri-content-type',
+  'request-uri-refetch',
+  'wallet-nonce',
 ] as const;
 
 export type CredentialCheck = (typeof CREDENTIAL_CHECKS)[number];
