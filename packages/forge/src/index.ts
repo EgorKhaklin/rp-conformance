@@ -1,6 +1,7 @@
 export * from './attestation';
 export * from './cbor';
 export * from './crypto';
+export * from './csr';
 export * from './faults';
 export * from './jose';
 export * from './identifier-list';
@@ -12,6 +13,7 @@ export * from './pki';
 export * from './presentation';
 export * from './queries';
 export * from './registration';
+export * from './registrar';
 export * from './request';
 export * from './status-list';
 export * from './signers';

@@ -62,14 +62,16 @@ describe('LOTL and TL-QEAA in ETSI TS 119 612 format', () => {
       ['QP-A', EAA_SERVICE_TYPE.qualified, SERVICE_STATUS.granted, 'CN=CA-QP-A,O=QP-A,C=DE'],
       ['QP-N', EAA_SERVICE_TYPE.notQualified, SERVICE_STATUS.recognisedAtNationalLevel, 'CN=CA-QP-N,O=QP-N,C=DE'],
       ['QP-W', EAA_SERVICE_TYPE.qualified, SERVICE_STATUS.withdrawn, 'CN=CA-QP-W,O=QP-W,C=DE'],
+      // The entity of a QEAA Provider under test (issuer catalogue section 3.2), enrolled by the Test Registrar.
+      ['QP-T', EAA_SERVICE_TYPE.qualified, SERVICE_STATUS.granted, 'CN=CA-QP-T,O=QP-T,C=DE'],
     ]);
     // The withdrawn service keeps its granted status in its history (clause 5.5.10).
     const qpW = tl.providers.find((p) => p.name === 'QP-W')?.services[0];
     expect(qpW?.history?.map((h) => h.serviceStatus)).toEqual([SERVICE_STATUS.granted]);
-    // Only QP-A has an active qualified service for the issuance of QEAAs.
+    // Only QP-A (and QP-T, the Provider under test) have an active qualified service for the issuance of QEAAs.
     expect(
       getTrustAnchors(tl, { serviceStatus: ACTIVE_SERVICE_STATUSES, serviceTypeIdentifier: [EAA_SERVICE_TYPE.qualified] }).map((a) => a.providerName),
-    ).toEqual(['QP-A']);
+    ).toEqual(['QP-A', 'QP-T']);
   });
 
   it.each(['LOTL', 'TL-QEAA'] as const)('%s carries an enveloped XAdES-B-B signature as TS 119 612 Annex B requires', (list) => {
