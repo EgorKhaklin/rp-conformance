@@ -79,6 +79,18 @@ const PUB_EAA_NOTIFIED = 'http://uri.etsi.org/19602/PubEAAProvidersList/SvcStatu
 
 const der = (key: CertifiedKey) => Buffer.from(key.certificate.der).toString('base64');
 
+/**
+ * The ServiceName of a service: for a Wallet Provider's issuance services the Wallet Solution's `wallet_name` (WIA) or
+ * the WSCD type (KA), as TS3 section 3.2 maps them; otherwise the entity and the last segment of the service type.
+ */
+function serviceNameOf(entity: TestEntity, type: string, anchor: CertifiedKey, profile: ListProfile): string {
+  const solution = entity.spec.walletSolution;
+  if (solution && type === profile.issuanceServiceType) {
+    return anchor === entity.keyAttestation?.anchor && solution.keyAttestationService ? solution.keyAttestationService : solution.name;
+  }
+  return `${entity.spec.id} ${type.split('/').pop()}`;
+}
+
 function buildEntity(entity: TestEntity, profile: ListProfile, restoreIssuance = false) {
   const informationUri = `${profile.informationUriPrefix}DE`;
   const builder = trustedEntity()
@@ -91,8 +103,10 @@ function buildEntity(entity: TestEntity, profile: ListProfile, restoreIssuance =
     ...(entity.spec.issuanceWithdrawn && !restoreIssuance ? [] : [[profile.issuanceServiceType, entity.anchors.issuance] as [string, CertifiedKey]]),
     [profile.revocationServiceType, entity.anchors.revocation],
   ];
+  // A Wallet Provider's separate KA anchor is a second issuance service, withdrawn with the first (TS3 section 3.2).
+  if (entity.keyAttestation && services[0][0] === profile.issuanceServiceType) services.splice(1, 0, [profile.issuanceServiceType, entity.keyAttestation.anchor]);
   for (const [type, anchor] of services) {
-    const svc = service().name(`${entity.spec.id} ${type.split('/').pop()}`).type(type).addCertificate(der(anchor));
+    const svc = service().name(serviceNameOf(entity, type, anchor, profile)).type(type).addCertificate(der(anchor));
     if (profile.pubEaa) svc.status(PUB_EAA_NOTIFIED);
     builder.addService(svc.build());
   }
