@@ -6,7 +6,14 @@ import { type CredentialFormat, holderCurveOf, type PresentationAction } from '@
 import { applyCredentialFault, applyStatusListFault, type ServedStatusList, type StatusListFaultContext } from './faults';
 import { applyIdentifierListFault, applyMdocFault, applyStatusListCwtFault, bindMdocToSecp256k1Key } from './faults-cose';
 import { buildIdentifierListCwt, IDENTIFIER_LIST_CWT_TYPE } from './identifier-list';
-import { CREDENTIAL_A_DOCTYPE, issueCredentialAMdoc, issueCredentialASdJwtVc } from './attestation';
+import {
+  CREDENTIAL_A_DOCTYPE,
+  identifyingClaims,
+  issueCredentialAMdoc,
+  issueCredentialAMdocWith,
+  issueCredentialASdJwtVc,
+  issueCredentialASdJwtVcWith,
+} from './attestation';
 import { issuePidMdoc, newMdocIdentifier, PID_DOCTYPE } from './mdoc';
 import { issuePidSdJwtVc } from './pid';
 import { type CertifiedKey, createDocumentSigner, documentSignerValidity, type TestEntity, type TestPki } from './pki';
@@ -145,7 +152,8 @@ export async function forgePresentation(action: PresentationAction, ctx: StepFor
   const pid = spec.defaultCredential === 'default_credential_pid' || short;
   const [fault] = spec.faults;
   if (spec.format === 'mso_mdoc') {
-    const issued = await (pid ? issuePidMdoc : issueCredentialAMdoc)({
+    const issueA = spec.identifying ? issueCredentialAMdocWith(identifyingClaims(spec.identifying, 'mso_mdoc')) : issueCredentialAMdoc;
+    const issued = await (pid ? issuePidMdoc : issueA)({
       signer,
       holderPublicJwk: ctx.holderPublicJwk,
       status:
@@ -166,7 +174,8 @@ export async function forgePresentation(action: PresentationAction, ctx: StepFor
     return { format: spec.format, credential, claims: issued.claims, signer, statusList, identifierList, ...(documentDocType ? { documentDocType } : {}) };
   }
 
-  const issued = await (pid ? issuePidSdJwtVc : issueCredentialASdJwtVc)({
+  const issueA = spec.identifying ? issueCredentialASdJwtVcWith(identifyingClaims(spec.identifying, 'dc+sd-jwt')) : issueCredentialASdJwtVc;
+  const issued = await (pid ? issuePidSdJwtVc : issueA)({
     signer,
     issuer: issuer.issuerUri,
     holderPublicJwk: secp256k1 ? (ctx.holderSecp256k1PublicJwk as JsonWebKey) : ctx.holderPublicJwk,

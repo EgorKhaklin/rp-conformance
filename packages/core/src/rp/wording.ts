@@ -45,7 +45,7 @@ export const queries = {
 };
 
 /** A Relying Party test case ID: `RP_<class>_<layer>_<area>_<nnn><variant>[_UF]`. */
-export const testCaseId = (sutClass: 'WS' | 'PP' | 'Inf', layer: 'IA' | 'SM' | 'MS', area: string, number: number, variant = '', unhappyFlow = false) =>
+export const testCaseId = (sutClass: 'WS' | 'PP' | 'Inf', layer: 'IA' | 'SM' | 'MS' | 'UC', area: string, number: number, variant = '', unhappyFlow = false) =>
   `RP_${sutClass}_${layer}_${area}_${String(number).padStart(3, '0')}${variant}${unhappyFlow ? '_UF' : ''}`;
 
 export interface FormatWording {

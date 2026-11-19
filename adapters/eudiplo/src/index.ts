@@ -1,6 +1,6 @@
 import {
   type CredentialCategory,
-  categoryOfQuery,
+  categoryOfCredentialQuery,
   type DcqlQuery,
   type DefaultQueryId,
   type Flow,
@@ -166,9 +166,10 @@ export class EudiploAdapter implements RelyingPartyAdapter {
       // The ICS declares RP.P.3 No: EUDIPLO is configured with trusted_authorities of its own (etsi_tl below), so the
       // aki-restricted variant of default_query_pid (TrustMechanisms_016) is not configured.
       if (query.credentials.some((credential) => credential.trusted_authorities)) continue;
-      const values = authorities[categoryOfQuery(id as DefaultQueryId)];
+      // Each credential query gets the root of trust of its own category; a combined query (UC_Presentation) has several.
+      const categories = query.credentials.map((credential) => categoryOfCredentialQuery(credential.id));
       // A category the ICS does not declare is not requested.
-      if (!values) continue;
+      if (categories.some((category) => !authorities[category])) continue;
       await this.call('POST', '/api/verifier/config', {
         id,
         description: `FCAF ${id}`,
@@ -176,8 +177,9 @@ export class EudiploAdapter implements RelyingPartyAdapter {
           // EUDIPLO 9.1.0 rejects require_cryptographic_holder_binding; its DCQL default is true (OpenID4VP 1.0 section 6.1).
           credentials: query.credentials.map(({ require_cryptographic_holder_binding: _required, ...credential }) => ({
             ...credential,
-            trusted_authorities: [{ type: 'etsi_tl', values }],
+            trusted_authorities: [{ type: 'etsi_tl', values: authorities[categoryOfCredentialQuery(credential.id)] }],
           })),
+          ...(query.credential_sets ? { credential_sets: query.credential_sets } : {}),
         },
         registration_cert: { jwt: env.registrationCertificate },
         accessKeyChainId,
@@ -283,15 +285,23 @@ export class EudiploAdapter implements RelyingPartyAdapter {
    * flat map over all namespaces; each element goes back under the namespace the query requested it in, and an element
    * the query did not request under the first requested namespace, so the evaluation still sees it.
    */
-  private releasedAttributes(transactionId: string, values: Record<string, unknown>): Record<string, unknown> {
+  private releasedAttributes(transactionId: string, credentials: NonNullable<EudiploSession['credentials']>): Record<string, unknown> {
     const query = this.queries?.[this.transactionQueries.get(transactionId) ?? 'default_query_pid'];
-    const credential = query?.credentials[0];
-    if (credential?.format !== 'mso_mdoc') return values;
-    const paths = (credential.claims ?? []).map((claim) => claim.path.map(String));
-    const released: Record<string, Record<string, unknown>> = {};
-    for (const [element, value] of Object.entries(values)) {
-      const namespace = paths.find((path) => path[1] === element)?.[0] ?? paths[0]?.[0] ?? 'unknown';
-      (released[namespace] ??= {})[element] = value;
+    const released: Record<string, unknown> = {};
+    for (const presented of credentials) {
+      const values: Record<string, unknown> = Object.assign({}, ...presented.values);
+      // A combined presentation (UC_Presentation) reports one entry per credential query; an entry for an id that is
+      // not in the query is released as for the first credential query.
+      const credential = query?.credentials.find((c) => c.id === presented.id) ?? query?.credentials[0];
+      if (credential?.format !== 'mso_mdoc') {
+        Object.assign(released, values);
+        continue;
+      }
+      const paths = (credential.claims ?? []).map((claim) => claim.path.map(String));
+      for (const [element, value] of Object.entries(values)) {
+        const namespace = paths.find((path) => path[1] === element)?.[0] ?? paths[0]?.[0] ?? 'unknown';
+        ((released[namespace] ??= {}) as Record<string, unknown>)[element] = value;
+      }
     }
     return released;
   }
@@ -306,8 +316,7 @@ export class EudiploAdapter implements RelyingPartyAdapter {
     } while (Date.now() < deadline);
     if (PENDING.has(session.status)) return { outcome: 'pending', raw: session };
     if (session.status === 'completed') {
-      const values = Object.assign({}, ...(session.credentials ?? []).flatMap((c) => c.values));
-      return { outcome: 'success', releasedAttributes: this.releasedAttributes(transactionId, values), raw: session };
+      return { outcome: 'success', releasedAttributes: this.releasedAttributes(transactionId, session.credentials ?? []), raw: session };
     }
     return { outcome: 'failure', raw: session };
   }

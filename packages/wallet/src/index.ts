@@ -4,19 +4,19 @@
 import { createHash, X509Certificate } from 'node:crypto';
 import { type CallbackContext, type Jwk, setGlobalConfig } from '@openid4vc/oauth2';
 import { Openid4vpClient } from '@openid4vc/openid4vp';
-import { type CapturedRequest, type CredentialFormat, type FaultId, faultInfo } from '@rp-conformance/core';
+import { type CapturedRequest, type DcqlQuery, type FaultId, faultInfo } from '@rp-conformance/core';
 import {
   base64url,
   buildAuthorizationResponse,
   buildDcApiResponse,
   buildPresentation,
+  buildVpToken,
   type EcKeyPair,
   generateEcKeyPair,
   generateSecp256k1KeyPair,
   type HeldCredential,
   jwkThumbprint,
   type Oid4vpHandover,
-  requestedElements,
   type Secp256k1KeyPair,
   verifyEs256,
 } from '@rp-conformance/forge';
@@ -52,6 +52,8 @@ export interface PresentationEvidence {
   /** The encryption key from the request's `client_metadata`. */
   encryptionKey?: JWK;
   presentation?: string;
+  /** The `vp_token` the wallet sent, with every presentation of a combined presentation. */
+  vpToken?: Record<string, string[]>;
   /** The `response` parameter, when there is one. */
   responseJwe?: string;
   /** Every form parameter posted to `response_uri`. */
@@ -93,6 +95,8 @@ export interface ResponseOptions {
   /** `T_skew` and `T_kb`, seconds, for the KB-JWT time faults; default 0 and 300. */
   skewSeconds?: number;
   kbMaxAgeSeconds?: number;
+  /** A combined presentation (UC_Presentation): further credentials, each for the credential query it names. */
+  alongside?: HeldCredential[];
 }
 
 type Finding = (severity: WalletFinding['severity'], code: string, message: string) => void;
@@ -275,38 +279,37 @@ export class ConformanceWallet {
     evidence: PresentationEvidence,
     options: ResponseOptions,
   ) {
-    const query = request.dcql_query as { credentials: { id: string; format: CredentialFormat; claims?: { path: (string | number | null)[] }[] }[] };
-    const credentialQuery = query.credentials.find((c) => c.format === credential.format);
-    if (!credentialQuery) throw new Error(`the request asks for no credential in ${credential.format} format`);
+    const query = request.dcql_query as DcqlQuery;
+    if (!query?.credentials) throw new Error('the request has no dcql_query');
     if (!evidence.encryptionKey) throw new Error('client_metadata has no encryption key');
-    if (options.fault === 'presentation.replay') {
-      if (!options.replayedPresentation) throw new Error('presentation.replay needs the presentation of another transaction');
-      evidence.presentation = options.replayedPresentation;
-    } else {
-      evidence.presentation = await buildPresentation(
-        credential,
-        {
-          disclose: [...new Set((credentialQuery.claims ?? []).map((claim) => String(claim.path[0])))],
-          elements: requestedElements(credentialQuery.claims),
-        },
-        {
-          audience: binding.audience,
-          clientId: binding.clientId,
-          nonce: request.nonce as string,
-          handover: binding.handover,
-          jwkThumbprint: await jwkThumbprint(evidence.encryptionKey as JsonWebKey),
-        },
-        { holder: this.holderKey, secp256k1: this.secp256k1Key },
-        {
-          fault: options.fault && faultInfo(options.fault).point === 'presentation' ? options.fault : undefined,
-          skewSeconds: options.skewSeconds ?? 0,
-          kbMaxAgeSeconds: options.kbMaxAgeSeconds ?? 300,
-        },
-      );
-    }
+    if (options.fault === 'presentation.replay' && !options.replayedPresentation) throw new Error('presentation.replay needs the presentation of another transaction');
+    const thumbprint = await jwkThumbprint(evidence.encryptionKey as JsonWebKey);
+    const pointOf = (fault: FaultId | undefined) => (fault ? faultInfo(fault).point : undefined);
+    const built = await buildVpToken(
+      query,
+      [credential, ...(options.alongside ?? [])],
+      async (held, requested, primary) => {
+        if (primary && options.fault === 'presentation.replay') return options.replayedPresentation as string;
+        return buildPresentation(
+          held,
+          requested,
+          { audience: binding.audience, clientId: binding.clientId, nonce: request.nonce as string, handover: binding.handover, jwkThumbprint: thumbprint },
+          { holder: this.holderKey, secp256k1: this.secp256k1Key },
+          {
+            // The presentation fault applies to the step's own credential, and only to its entry.
+            fault: primary && pointOf(options.fault) === 'presentation' ? options.fault : undefined,
+            skewSeconds: options.skewSeconds ?? 0,
+            kbMaxAgeSeconds: options.kbMaxAgeSeconds ?? 300,
+          },
+        );
+      },
+      pointOf(options.fault) === 'vp-token' ? options.fault : undefined,
+    );
+    evidence.presentation = built.presentation;
+    evidence.vpToken = built.vpToken;
     const metadata = request.client_metadata as { encrypted_response_enc_values_supported?: string[] };
     const enc = options.enc ?? metadata.encrypted_response_enc_values_supported?.find((e) => SUPPORTED_ENC.includes(e)) ?? 'A128GCM';
-    const payload = { vp_token: { [credentialQuery.id]: [evidence.presentation] }, ...(binding.state ? { state: binding.state } : {}) };
+    const payload = { vp_token: built.vpToken, ...(binding.state ? { state: binding.state } : {}) };
     return { payload, recipient: evidence.encryptionKey, enc, walletKey: this.holderKey, otherTransactionKey: options.otherTransactionKey };
   }
 

@@ -25,7 +25,7 @@ import {
   controlsOf,
   durationMs,
 } from '@rp-conformance/core';
-import { base64url, defaultEntitiesOf, forgePresentation, requestAnchorKeyIds, trustedListEntitiesOf } from '@rp-conformance/forge';
+import { base64url, credentialQueryOf, defaultEntitiesOf, forgePresentations, heldCredentialOf, requestAnchorKeyIds, trustedListEntitiesOf } from '@rp-conformance/forge';
 import { DcApiShim, type DcApiOutcome, type DcApiRun } from '@rp-conformance/dc-api-shim';
 import { validateRequests } from '@rp-conformance/validator';
 import { ConformanceWallet, type DcApiAnswer, type HeldCredential, type PresentationEvidence } from '@rp-conformance/wallet';
@@ -453,29 +453,35 @@ async function runPresentation(
 ) {
   const skewSeconds = Number(ctx.ics.items['RP.P.4'] ?? 0);
   const kbMaxAgeSeconds = Number(ctx.ics.items['RP.P.6'] ?? 300);
-  // Every credential gets a unique status URL (harness design section 4.6).
-  const forged = await forgePresentation(action, {
+  // Every credential gets a unique status URL (harness design section 4.6). A combined presentation (UC_Presentation)
+  // forges every credential of the step; the first is the step's own, to which its fault applies.
+  const credentials = await forgePresentations(action, {
     pki: ctx.harness.pki,
     holderPublicJwk: ctx.wallet.holderKey.publicJwk,
     holderSecp256k1PublicJwk: ctx.wallet.secp256k1Key.publicJwk,
     allocateStatusUri: () => ctx.harness.status.allocate(ctx.harness.env.runId),
     skewSeconds,
   });
+  const forged = credentials[0].forged;
   const mdoc = forged.format === 'mso_mdoc';
-  if (forged.statusList) {
-    const { served, validToken } = forged.statusList;
-    ctx.harness.status.register(forged.statusList.uri, served.body, { contentType: served.contentType });
-    const extension = mdoc ? 'cwt' : 'jwt';
-    await save(/json|cbor/.test(served.contentType) ? `status-list.${mdoc ? 'cbor' : 'json'}` : `status-list.${extension}`, served.body);
-    if (!sameBody(served.body, validToken)) await save(`status-list.valid.${extension}`, validToken);
+  for (const [i, { forged: credential }] of credentials.entries()) {
+    const prefix = i === 0 ? '' : `alongside-${i}.`;
+    const isMdoc = credential.format === 'mso_mdoc';
+    if (credential.statusList) {
+      const { served, validToken } = credential.statusList;
+      ctx.harness.status.register(credential.statusList.uri, served.body, { contentType: served.contentType });
+      const extension = isMdoc ? 'cwt' : 'jwt';
+      await save(/json|cbor/.test(served.contentType) ? `${prefix}status-list.${isMdoc ? 'cbor' : 'json'}` : `${prefix}status-list.${extension}`, served.body);
+      if (!sameBody(served.body, validToken)) await save(`${prefix}status-list.valid.${extension}`, validToken);
+    }
+    if (credential.identifierList) {
+      const { served, validToken } = credential.identifierList;
+      ctx.harness.status.register(credential.identifierList.uri, served.body, { contentType: served.contentType });
+      await save(`${prefix}identifier-list.cwt`, served.body);
+      if (!sameBody(served.body, validToken)) await save(`${prefix}identifier-list.valid.cwt`, validToken);
+    }
+    await save(isMdoc ? `${prefix}credential.issuer-signed.cbor` : `${prefix}credential.sd-jwt`, credential.credential);
   }
-  if (forged.identifierList) {
-    const { served, validToken } = forged.identifierList;
-    ctx.harness.status.register(forged.identifierList.uri, served.body, { contentType: served.contentType });
-    await save('identifier-list.cwt', served.body);
-    if (!sameBody(served.body, validToken)) await save('identifier-list.valid.cwt', validToken);
-  }
-  await save(mdoc ? 'credential.issuer-signed.cbor' : 'credential.sd-jwt', forged.credential);
 
   const query = ctx.harness.env.queries[action.query];
   const stepStart = new Date();
@@ -483,9 +489,7 @@ async function runPresentation(
   state.rpReached = true;
   const otherKey = action.response.keyOfStep ? state.encryptionKeys.get(action.response.keyOfStep) : undefined;
   if (action.response.keyOfStep && !otherKey) throw new Error(`step ${action.response.keyOfStep} recorded no encryption key`);
-  const held: HeldCredential = mdoc
-    ? { format: 'mso_mdoc', value: forged.credential as Uint8Array, ...(forged.documentDocType ? { docType: forged.documentDocType } : {}) }
-    : { format: 'dc+sd-jwt', value: forged.credential as string };
+  const [held, ...alongside]: HeldCredential[] = credentials.map(heldCredentialOf);
   const replayed = action.response.presentationOfStep ? state.presentations.get(action.response.presentationOfStep) : undefined;
   if (action.response.presentationOfStep && !replayed) throw new Error(`step ${action.response.presentationOfStep} recorded no presentation`);
   const responseOptions = {
@@ -495,6 +499,7 @@ async function runPresentation(
     replayedPresentation: replayed,
     skewSeconds,
     kbMaxAgeSeconds,
+    ...(alongside.length ? { alongside } : {}),
   };
 
   let evidence: PresentationEvidence;
@@ -538,10 +543,15 @@ async function runPresentation(
   const listUri = forged.statusList?.uri ?? forged.identifierList?.uri;
   record.statusLog = listUri ? ctx.harness.status.requestsFor(listUri, stepStart).map(({ url, at, status }) => ({ url, at, status })) : [];
 
+  // `ACC` compares the released attributes with the credential queries the presented credentials answer, and their
+  // issued values; in a combined presentation that may be a part of the query (credential_sets, optional queries).
+  const answered = credentials.map(({ forged: credential, answers }) => credentialQueryOf(query, { format: credential.format, query: answers }).id);
+  const presentedQuery = { ...query, credentials: query.credentials.filter((c) => answered.includes(c.id)) };
+  const issuedClaims = Object.assign({}, ...credentials.map(({ forged: credential }) => credential.claims)) as Record<string, unknown>;
   const evaluation = evaluate(step.expect, {
     result: record.rpResult,
-    query,
-    issuedClaims: forged.claims,
+    query: presentedQuery,
+    issuedClaims,
     delivered,
     responseStatus: record.rpResponse?.status,
     ics: ctx.ics,

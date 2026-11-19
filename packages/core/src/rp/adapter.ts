@@ -19,7 +19,13 @@ export type DefaultQueryId =
   | 'default_query_pubeaa'
   | 'default_query_pubeaa_mdoc'
   | 'default_query_eaa'
-  | 'default_query_eaa_mdoc';
+  | 'default_query_eaa_mdoc'
+  | 'default_query_pid_eaa'
+  | 'default_query_pid_eaa_mdoc'
+  | 'default_query_pid_or_eaa'
+  | 'default_query_pid_or_eaa_mdoc'
+  | 'default_query_pid_eaa_identifying'
+  | 'default_query_pid_eaa_identifying_mdoc';
 
 /** Every default query, in the order the adapters configure them. */
 export const DEFAULT_QUERY_IDS: DefaultQueryId[] = [
@@ -34,6 +40,12 @@ export const DEFAULT_QUERY_IDS: DefaultQueryId[] = [
   'default_query_pubeaa_mdoc',
   'default_query_eaa',
   'default_query_eaa_mdoc',
+  'default_query_pid_eaa',
+  'default_query_pid_eaa_mdoc',
+  'default_query_pid_or_eaa',
+  'default_query_pid_or_eaa_mdoc',
+  'default_query_pid_eaa_identifying',
+  'default_query_pid_eaa_identifying_mdoc',
 ];
 
 /**
@@ -102,7 +114,11 @@ export interface DcqlQuery {
     claims?: { id?: string; path: (string | number | null)[] }[];
     require_cryptographic_holder_binding?: boolean;
     trusted_authorities?: { type: string; values: string[] }[];
+    /** OpenID4VP 1.0 section 6.1: whether more than one presentation may answer the query; default false. */
+    multiple?: boolean;
   }[];
+  /** OpenID4VP 1.0 section 6.2: sets of credential query ids, each satisfied by one of its options. */
+  credential_sets?: { options: string[][]; required?: boolean }[];
 }
 
 export type Outcome = 'success' | 'failure' | 'pending';
@@ -143,4 +159,16 @@ export interface RelyingPartyAdapter {
 export interface Ics {
   /** For example `RP.G.1: Yes`, `RP.P.4: 60`. */
   items: Record<string, string | number | boolean>;
+}
+
+/**
+ * The category of the credential a credential query of a default query asks for, by its `id`: `qeaa`, `pubeaa` and
+ * `eaa` ask for `default_credential_A` of that category, every other id (`pid`) for a PID. A combined default query
+ * (`default_query_pid_eaa`) holds credential queries of several categories, each with its own root of trust.
+ */
+export function categoryOfCredentialQuery(id: string): CredentialCategory {
+  if (id === 'qeaa') return 'qeaa';
+  if (id === 'pubeaa') return 'pub-eaa';
+  if (id === 'eaa') return 'eaa';
+  return 'pid';
 }

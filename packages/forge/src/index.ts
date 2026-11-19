@@ -20,3 +20,4 @@ export * from './signers';
 export * from './step';
 export * from './trust-list-version';
 export * from './trusted-list';
+export * from './combined';
