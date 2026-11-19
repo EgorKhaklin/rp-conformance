@@ -65,6 +65,10 @@ Variant letters are the credential format, as in the baseline. Most of these tes
 
 Catalogue objectives in these areas that are not written: `RP_WS_SM_SessionBinding_010`, `RP_WS_SM_DeviceBinding_012`, `RP_WS_SM_RpIntegrity_010` and `_011` (ISO/IEC 18013-5 proximity, which the harness does not cover); `RP_WS_SM_IssuerIntegrity_035` (a signing certificate revoked by a CRL: an optional check, and the harness serves no CRLs); `RP_Inf_SM_TrustMechanisms_007` (changes reach every Relying Party Instance: the harness observes one), `_010` and `_011` (covered by other test cases); `RP_WS_MS_ProtocolMessages_006` (ISO/IEC 18013-7 Annex C); `RP_WS_SM_RpIntegrity_008` (several services) and `_009` (intermediaries).
 
+## Test book
+
+The 10 test book items of the catalogue (`RP_TB_001` to `_010`, [rp-test-catalogue.md](../rp-test-catalogue.md) section 5.4) are not rendered and stay in the catalogue only. The FCAF names test books as one of its elements ("structured collections of manual or non-automatable test cases", `introduction.md` of `submitted` at `0ed4ab1`), but defines no format, template, test class or location for them: its only template is the test specification template, whose test scenario and expected results an inspection does not have, and the FCAF identifiers and the lint require a layer and an area. The definitions are in [../packages/definitions/src/test_book](../packages/definitions/src/test_book); every run lists them as REVIEW with their method in `report.json`, `summary.md` and the JUnit XML, and they never fail a run. They can be rendered once the FCAF defines a test book format.
+
 ## Rendering
 
 The files are rendered; do not edit them here. The test cases come from the executable definitions in [../packages/definitions](../packages/definitions), the shared pages from [../packages/fcaf-render/pages](../packages/fcaf-render/pages), and the modified FCAF pages from their originals in [../packages/fcaf-render/upstream](../packages/fcaf-render/upstream) (`submitted` at `0ed4ab1`). From the repository root:

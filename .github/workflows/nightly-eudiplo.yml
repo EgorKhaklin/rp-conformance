@@ -2,7 +2,8 @@ name: Nightly EUDIPLO
 
 # Runs every executable test case against EUDIPLO's latest main image (harness design section 8). A FAIL listed in
 # adapters/eudiplo/known-findings.yaml shows in the report and the JUnit XML as a known finding but does not fail the
-# job; any other FAIL, an INCONCLUSIVE or REVIEW result, or a harness error does.
+# job; any other FAIL, an INCONCLUSIVE or REVIEW result, or a harness error does. The test book items (RP_TB_*) are
+# listed as REVIEW with their method and never fail it.
 
 on:
   schedule:
