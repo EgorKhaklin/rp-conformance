@@ -13,10 +13,9 @@ trust list, and nothing else. It accepts credentials whose path a conforming val
 
 In each case the session ends `completed` with `{"result": "success", ...}` and the PID claims are released.
 
-The mdoc variants of the first two (`_034b_UF`, `_037b_UF`) are accepted as well. In this suite's current release
-they still show as PASS, because their test document signers start one day before the run while the MSO is signed two
-days before, and EUDIPLO rejects the MSO for that ("The MSO signed date ... must be within the validity period of the
-certificate"). With that fixed in the suite, EUDIPLO accepts both. So the gap covers both formats.
+EUDIPLO also accepts the mdoc variants of the first two, `RP_WS_SM_IssuerIntegrity_034b_UF` (document signer under a
+certificate without `cA`) and `_037b_UF` (document signer with the unknown critical extension). So the gap covers both
+formats.
 
 ## What the specification says
 
@@ -34,11 +33,12 @@ more signers; an unknown critical extension may carry a restriction EUDIPLO does
 ## How to reproduce
 
 ```bash
-pnpm rp-conformance run --adapter eudiplo --only 'RP_WS_SM_IssuerIntegrity_027_UF,RP_WS_SM_IssuerIntegrity_034a_UF,RP_WS_SM_IssuerIntegrity_037a_UF'
+pnpm rp-conformance run --adapter eudiplo --only 'RP_WS_SM_IssuerIntegrity_027_UF,RP_WS_SM_IssuerIntegrity_034*_UF,RP_WS_SM_IssuerIntegrity_037*_UF'
 ```
 
-All three FAIL in both flows: "attributes were released" (run `r20261119T222700-cfa8a7`; the credential with its `x5c`
-or `x5chain` and EUDIPLO's session are in `artifacts/<test case>/redirect/step-<n>/`). The positive controls in the same
+All five FAIL: "attributes were released" (`_027_UF`, `_034a_UF`, `_037a_UF` in both flows in run
+`r20261119T222700-cfa8a7`, `_034b_UF` and `_037b_UF` in the redirect flow in run `r20261119T223120-4f4e0e`; the
+credential with its `x5c` or `x5chain` and EUDIPLO's session are in `artifacts/<test case>/redirect/step-<n>/`). The positive controls in the same
 run (a PID under `PP-I`'s regular intermediate CA, a PID with the regular document signer) pass, and the rejections
 of the same suite for expired or not yet valid certificates in the path pass too.
 

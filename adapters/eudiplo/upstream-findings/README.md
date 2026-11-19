@@ -14,7 +14,7 @@ data of the suite's test PKI.
 | --- | --- |
 | [dc-api-request-response-uri.md](dc-api-request-response-uri.md) | `RP_WS_MS_ProtocolMessages_005` |
 | [dcql-credential-type-not-checked.md](dcql-credential-type-not-checked.md) | `RP_WS_SM_IssuerIntegrity_013_UF`, `_025_UF` |
-| [certificate-path-constraints.md](certificate-path-constraints.md) | `RP_WS_SM_IssuerIntegrity_027_UF`, `_034a_UF`, `_037a_UF` |
+| [certificate-path-constraints.md](certificate-path-constraints.md) | `RP_WS_SM_IssuerIntegrity_027_UF`, `_034a_UF`, `_037a_UF` (and `_034b_UF`, `_037b_UF`, see #47) |
 | [trust-list-invalid-seal-discards-last-valid.md](trust-list-invalid-seal-discards-last-valid.md) | `RP_Inf_SM_TrustMechanisms_002_UF`, `_003_UF` |
 | [lote-type-not-checked.md](lote-type-not-checked.md) | `RP_Inf_SM_TrustMechanisms_006_UF` |
 
