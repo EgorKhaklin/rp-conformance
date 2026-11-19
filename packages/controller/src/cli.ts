@@ -3,7 +3,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
 import { type Flow, isExecutable, type RelyingPartyAdapter } from '@rp-conformance/core';
-import { definitions } from '@rp-conformance/definitions';
+import { definitions, testBook } from '@rp-conformance/definitions';
 import { loadIcs } from './ics';
 import { loadKnownFindings, runOutcome } from './known-findings';
 import { runConformance } from './runner';
@@ -16,15 +16,16 @@ const ADAPTERS: Record<string, { load: () => Promise<{ createAdapter(): RelyingP
 const usage = `Usage: rp-conformance run --adapter <${Object.keys(ADAPTERS).join('|')}> [options]
 
 Options:
-  --only <id>            Test case ID or pattern with *, repeatable or comma separated
+  --only <id>            Test case or test book item ID or pattern with *, repeatable or comma separated
   --ics <file>           ICS file (YAML); default: the adapter's ics.yaml
   --flows <list>         Flows to run, comma separated: redirect, dc-api; default: both
   --report-dir <dir>     Where reports go; default: reports
   --harness-host <host>  Host name under which the RP reaches the harness services
   --known-findings <file>
                          Known findings of the RP (YAML). A FAIL listed there is reported as known and does not fail
-                         the run; any other FAIL, INCONCLUSIVE, REVIEW or a run error does (exit code 1)
-  --list                 List the test definitions and exit
+                         the run; any other FAIL, INCONCLUSIVE, REVIEW or a run error does (exit code 1). The test
+                         book items (RP_TB_*) are always REVIEW and never fail the run
+  --list                 List the test definitions and test book items and exit
 
 The report goes to <report-dir>/<run>/: report.json, summary.md, junit.xml and the artifacts of every step.
 `;
@@ -50,6 +51,7 @@ async function main() {
       const notes = [!d.control && 'positive control', !isExecutable(d) && 'text only'].filter(Boolean);
       process.stdout.write(`${d.id}${notes.length ? ` (${notes.join(', ')})` : ''}\n`);
     }
+    for (const item of testBook) process.stdout.write(`${item.id} (test book)\n`);
     return;
   }
   if (positionals[0] !== 'run' || !values.adapter) {
@@ -67,6 +69,7 @@ async function main() {
     adapter,
     ics,
     definitions,
+    testBook,
     only: values.only?.flatMap((v) => v.split(',')),
     flows: values.flows?.split(',') as Flow[] | undefined,
     reportDir: resolve(values['report-dir']),
@@ -75,7 +78,9 @@ async function main() {
     log: (line) => process.stdout.write(`${line}\n`),
   });
   const summary = Object.entries(report.run.summary).map(([k, v]) => `${k} ${v}`).join(', ');
-  process.stdout.write(`\n${summary || 'no test case ran'}\nreport: ${reportPath}\n`);
+  process.stdout.write(`\n${summary || 'no test case ran'}\n`);
+  if (report.testBook?.length) process.stdout.write(`test book: REVIEW ${report.testBook.length} (inspections; they do not fail the run)\n`);
+  process.stdout.write(`report: ${reportPath}\n`);
   if (!knownFindings) {
     if (report.run.error || report.results.some((r) => r.verdict === 'FAIL' || r.verdict === 'INCONCLUSIVE')) process.exitCode = 1;
     return;

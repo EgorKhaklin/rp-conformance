@@ -9,6 +9,7 @@
   },
   "scripts": {
     "test": "vitest run",
+    "test:issuer-eudiplo": "vitest run --config adapters/issuer-eudiplo/vitest.integration.config.ts --root .",
     "test:issuer-wallet:eudiplo": "vitest run --root . --config packages/issuer-wallet/vitest.integration.config.ts",
     "types:check": "tsc --noEmit -p tsconfig.json",
     "rp-conformance": "node packages/controller/bin/rp-conformance.mjs",
