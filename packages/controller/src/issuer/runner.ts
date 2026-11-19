@@ -1,0 +1,416 @@
+// The runner of the issuer suite (issuer harness design sections 4 and 6): a PID Provider or Attestation Provider as
+// system under test. Same conventions as the RP runner: selection with the positive controls first, gating of every
+// `_UF` test case on its control in the same variant, one record per test case and variant, `report.json`,
+// `summary.md` and JUnit XML. Per run it starts the harness services, the Test Wallet Provider, enrols the Provider
+// through the Test Registrar and the adapter, and sets the adapter up once; then it executes the steps.
+import { randomBytes } from 'node:crypto';
+import { mkdir, writeFile } from 'node:fs/promises';
+import { join, relative } from 'node:path';
+import {
+  type CheckResult,
+  controlsOf,
+  type IssuanceAction,
+  type IssuerAdapter,
+  type IssuerIcs,
+  type IssuerStepDefinition,
+  type IssuerTestCaseDefinition,
+  isExecutable,
+  type Verdict,
+  variantOf,
+} from '@rp-conformance/core';
+import { type HttpExchange, IssuanceClient, type IssuanceEvidence, oauthErrorOf, walletUnitOf } from '@rp-conformance/issuer-wallet';
+import { validateIssuedSdJwtVc } from '@rp-conformance/validator';
+import { worst } from '../evaluate';
+import { harnessInfo } from '../info';
+import { evaluateIssuance, type IssuanceObservation } from './evaluate';
+import { type IssuerHarness, PID_TRUST_RULE, startIssuerHarness } from './harness';
+import { issuerApplicability, resolveConfigurations, usesTxCode } from './ics';
+import { describeIssuerFinding, type IssuerKnownFinding, issuerKnownFindingOf } from './known-findings';
+import { writeIssuerJUnit, writeIssuerSummary } from './report';
+
+/** The validator's clock tolerance on the issuer side: the catalogue's cap of `T_skew` (section 3.5). */
+export const ISSUER_SKEW_SECONDS = 300;
+/** Upper bound of a decompressed status list the reference validator reads. */
+const MAX_STATUS_LIST_BYTES = 10 << 20;
+
+/** A credential the Provider issued (`OBS-CRED`), with what it is bound to and the reference validator's result. */
+export interface IssuedCredentialRecord {
+  configuration: string;
+  format: string;
+  /** As received. */
+  credential: string;
+  /** The proof key the Conformance Wallet sent, public part. */
+  proofKey: JsonWebKey;
+  /** The KA the proof carried. */
+  keyAttestation: string;
+  valid: boolean;
+  /** The trusted entity the issuer matched, for example `PP-T`. */
+  issuer?: string;
+  /** Issuer-signed claims with the disclosed values. */
+  claims?: Record<string, unknown>;
+  checks: CheckResult[];
+}
+
+export interface IssuerStepRecord {
+  step: number;
+  /** The step action, for example `issuance`. */
+  action: string;
+  text: string;
+  /** Expected-result codes, for example `ISS` or `REJ`. */
+  expected: string;
+  expectedResult: string;
+  /** The named fault of the step, `null` for valid material. */
+  fault: string | null;
+  walletUnit?: string;
+  subject?: string;
+  /** The offer the adapter created (`OBS-ADM`). */
+  offer?: { sessionId: string; offer: string; byReference: boolean; txCode: boolean; configurations: string[] };
+  /** Every request to the Provider and its answer, with headers (`OBS-HTTP`). */
+  exchanges: HttpExchange[];
+  /** Whether the Provider issued an access token, and its type. */
+  token?: { tokenType: string };
+  credentials: IssuedCredentialRecord[];
+  /** Why the flow stopped before a credential arrived. */
+  error?: string;
+  artifacts: string[];
+  verdict: Verdict;
+  reason: string;
+}
+
+export interface IssuerTestCaseRecord {
+  testCase: string;
+  /** The variant, for example `SD+PA` (`variantOf`). */
+  variant: string;
+  verdict: Verdict;
+  reason?: string;
+  /** For a FAIL that is a known finding of the Provider: the finding and where it is tracked. */
+  knownFinding?: string;
+  durationMs?: number;
+  control: { id: string; verdict: Verdict } | null;
+  steps: IssuerStepRecord[];
+}
+
+export interface IssuerRunReport {
+  run: {
+    id: string;
+    /** The kind of system under test. */
+    sut: 'issuer';
+    startedAt: string;
+    finishedAt?: string;
+    adapter: string;
+    /** What the adapter reports about the Provider under test, for example its version. */
+    provider?: Record<string, string>;
+    ics: IssuerIcs;
+    harness: ReturnType<typeof harnessInfo>;
+    environment: {
+      namespace: string;
+      statusProvider: string;
+      trustInfrastructure: string;
+      trustLists: { id: string; url: string }[];
+      /** How the Test Registrar enrolled the Provider (issuer harness design section 5.3). */
+      enrolment?: { entity: string; method: 'csr' | 'generated'; credentialSigners: number; statusListSigner: boolean };
+      walletProviderStatusLists: { id: string; uri: string }[];
+    };
+    summary: Partial<Record<Verdict, number>>;
+    /** Why the run could not execute its test cases, if it could not. */
+    error?: string;
+  };
+  results: IssuerTestCaseRecord[];
+}
+
+export interface IssuerRunOptions {
+  adapter: IssuerAdapter;
+  ics: IssuerIcs;
+  definitions: IssuerTestCaseDefinition[];
+  /** Test case IDs or patterns with `*`. */
+  only?: string[];
+  reportDir: string;
+  /** Host name under which the Provider reaches the harness services. */
+  harnessHost: string;
+  knownFindings?: IssuerKnownFinding[];
+  log?: (line: string) => void;
+}
+
+const matches = (id: string, pattern: string) =>
+  new RegExp(`^${pattern.split('*').map((p) => p.replace(/[.+?^${}()|[\]\\]/g, '\\$&')).join('.*')}$`).test(id);
+
+/**
+ * Selects the executable issuer definitions `only` names (all without it) and adds the positive controls they depend
+ * on, controls first, as on the RP side. A test case has one definition per variant; all of them are selected.
+ */
+export function selectIssuerTestCases(all: IssuerTestCaseDefinition[], only?: string[]): IssuerTestCaseDefinition[] {
+  const definitions = all.filter(isExecutable);
+  const selected = only?.length ? definitions.filter((d) => only.some((p) => matches(d.id, p))) : [...definitions];
+  if (only?.length && selected.length === 0) {
+    const textOnly = all.filter((d) => !isExecutable(d) && only.some((p) => matches(d.id, p)));
+    throw new Error(`no executable issuer test case matches ${only.join(', ')}${textOnly.length ? ` (text only: ${textOnly.map((d) => d.id).join(', ')})` : ''}`);
+  }
+  for (const definition of [...selected]) {
+    const ids = controlsOf(definition);
+    const controls = definitions.filter((d) => ids.includes(d.id));
+    if (ids.length && controls.length === 0) throw new Error(`${definition.id}: control ${ids.join(' or ')} has no definition`);
+    for (const control of controls) if (!selected.includes(control)) selected.push(control);
+  }
+  return [...selected.filter((d) => !d.control), ...selected.filter((d) => d.control)];
+}
+
+export async function runIssuerConformance(options: IssuerRunOptions): Promise<{ report: IssuerRunReport; reportPath: string }> {
+  const log = options.log ?? (() => {});
+  const runId = `i${new Date().toISOString().replace(/[-:]/g, '').slice(0, 15)}-${randomBytes(3).toString('hex')}`;
+  const runDir = join(options.reportDir, runId);
+  const namespace = runId;
+  const selected = selectIssuerTestCases(options.definitions, options.only);
+  const harness = await startIssuerHarness({ runId, namespace, harnessHost: options.harnessHost, ics: options.ics });
+  const report: IssuerRunReport = {
+    run: {
+      id: runId,
+      sut: 'issuer',
+      startedAt: new Date().toISOString(),
+      adapter: options.adapter.name,
+      ics: options.ics,
+      harness: harnessInfo(),
+      environment: {
+        namespace,
+        statusProvider: harness.status.baseUrl,
+        trustInfrastructure: harness.trust.baseUrl,
+        trustLists: [],
+        walletProviderStatusLists: Object.values(harness.twp.statusLists).map(({ id, uri }) => ({ id, uri })),
+      },
+      summary: {},
+    },
+    results: [],
+  };
+  try {
+    log(`issuer run ${runId}: harness services at ${harness.status.baseUrl} (status) and ${harness.trust.baseUrl} (trust)`);
+    try {
+      const env = await harness.enrol(options.adapter);
+      report.run.environment.trustLists = env.trustLists.map(({ id, url }) => ({ id, url }));
+      const enrolment = harness.enrolment;
+      if (enrolment) {
+        report.run.environment.enrolment = {
+          entity: enrolment.entity,
+          method: enrolment.method,
+          credentialSigners: enrolment.credentialSigners.length,
+          statusListSigner: Boolean(enrolment.statusListSigner),
+        };
+      }
+      await options.adapter.setUp(env, namespace);
+    } catch (error) {
+      // Without an enrolled and configured Provider no test case can produce a verdict.
+      report.run.error = `enrolment or adapter set-up failed: ${(error as Error).message}`;
+      for (const definition of selected) {
+        report.results.push({ testCase: definition.id, variant: variantOf(definition), verdict: 'INCONCLUSIVE', reason: report.run.error, control: null, steps: [] });
+      }
+      log(report.run.error);
+      return await writeIssuerReport(report, runDir);
+    }
+    report.run.provider = await options.adapter.describe?.().catch(() => undefined);
+    log(`adapter ${options.adapter.name} set up${report.run.provider ? ` (${Object.entries(report.run.provider).map(([k, v]) => `${k} ${v}`).join(', ')})` : ''}`);
+    for (const definition of selected) {
+      const started = Date.now();
+      const record = await runIssuerTestCase(definition, { ...options, harness, runDir, report });
+      record.durationMs = Date.now() - started;
+      const finding = record.verdict === 'FAIL' ? issuerKnownFindingOf(options.knownFindings ?? [], record.testCase, record.variant) : undefined;
+      if (finding) record.knownFinding = describeIssuerFinding(finding);
+      report.results.push(record);
+      log(`${record.verdict.padEnd(14)} ${record.testCase} [${record.variant}]${record.knownFinding ? ' (known finding)' : ''}${record.reason ? ` ${record.reason}` : ''}`);
+      for (const step of record.steps) log(`    step ${step.step} ${step.verdict}: ${step.reason}`);
+    }
+  } finally {
+    await options.adapter.tearDown?.().catch(() => {});
+    await harness.stop();
+  }
+  return writeIssuerReport(report, runDir);
+}
+
+async function writeIssuerReport(report: IssuerRunReport, runDir: string): Promise<{ report: IssuerRunReport; reportPath: string }> {
+  report.run.finishedAt = new Date().toISOString();
+  report.run.summary = {};
+  for (const result of report.results) report.run.summary[result.verdict] = (report.run.summary[result.verdict] ?? 0) + 1;
+  await mkdir(runDir, { recursive: true });
+  const reportPath = join(runDir, 'report.json');
+  await writeFile(reportPath, `${JSON.stringify(report, null, 2)}\n`);
+  await writeIssuerSummary(report, join(runDir, 'summary.md'));
+  await writeIssuerJUnit(report, join(runDir, 'junit.xml'));
+  return { report, reportPath };
+}
+
+interface Context extends IssuerRunOptions {
+  harness: IssuerHarness;
+  runDir: string;
+  report: IssuerRunReport;
+}
+
+/** State shared by the steps of one test case: one issuance client (one DPoP key) per Wallet Unit (design section 5.1). */
+interface TestCaseState {
+  clients: Map<string, IssuanceClient>;
+}
+
+async function runIssuerTestCase(definition: IssuerTestCaseDefinition, ctx: Context): Promise<IssuerTestCaseRecord> {
+  const variant = variantOf(definition);
+  const base = { testCase: definition.id, variant };
+  const outcomes = controlsOf(definition).map((id) => ({
+    id,
+    verdict: ctx.report.results.find((r) => r.testCase === id && r.variant === variant)?.verdict ?? ('INCONCLUSIVE' as Verdict),
+  }));
+  const control = outcomes.find((o) => o.verdict === 'PASS') ?? outcomes[0] ?? null;
+  const end = (verdict: Verdict, reason: string): IssuerTestCaseRecord => ({ ...base, verdict, reason, control, steps: [] });
+  const unmet = issuerApplicability(definition, ctx.ics);
+  if (unmet.length) return end('NOT APPLICABLE', `profile not met: ${unmet.join('; ')}`);
+  if (control && control.verdict !== 'PASS') return end('INCONCLUSIVE', `positive control ${outcomes.map((o) => o.id).join(' or ')} did not pass in ${variant}`);
+  const state: TestCaseState = { clients: new Map() };
+  const steps: IssuerStepRecord[] = [];
+  for (const [index, step] of definition.steps.entries()) steps.push(await runIssuerStep(definition, variant, index + 1, step, ctx, state));
+  return { ...base, verdict: worst(steps.map((s) => s.verdict)), control, steps };
+}
+
+async function runIssuerStep(
+  definition: IssuerTestCaseDefinition,
+  variant: string,
+  index: number,
+  step: IssuerStepDefinition,
+  ctx: Context,
+  state: TestCaseState,
+): Promise<IssuerStepRecord> {
+  const faults = step.run?.kind === 'issuance' ? step.run.faults : [];
+  const record: IssuerStepRecord = {
+    step: index,
+    action: step.run?.kind ?? 'none',
+    text: step.text,
+    expected: step.expect.codes.join(' + '),
+    expectedResult: step.expect.text,
+    fault: faults.length ? faults.join(', ') : null,
+    exchanges: [],
+    credentials: [],
+    artifacts: [],
+    verdict: 'INCONCLUSIVE',
+    reason: '',
+  };
+  const dir = join(ctx.runDir, 'artifacts', definition.id, variant, `step-${index}`);
+  const save = async (name: string, content: string) => {
+    await mkdir(dir, { recursive: true });
+    await writeFile(join(dir, name), content);
+    record.artifacts.push(relative(ctx.runDir, join(dir, name)));
+  };
+  try {
+    if (step.run?.kind === 'issuance') await runIssuance(step, step.run, record, save, ctx, state);
+    else record.reason = step.run ? `the step action ${step.run.kind} is not implemented yet` : 'the step is text only';
+  } catch (error) {
+    record.verdict = 'INCONCLUSIVE';
+    record.reason = `the harness could not execute the step: ${(error as Error).message}`;
+  }
+  return record;
+}
+
+/** What the issuance client and the issuance action support so far; anything else leaves the step INCONCLUSIVE. */
+function unsupported(action: IssuanceAction): string | undefined {
+  if (action.grant !== 'pre-authorized_code') return 'the issuance client implements the pre-authorized code flow only';
+  if (action.faults.length) return `issuer faults are not implemented yet (${action.faults.join(', ')})`;
+  const options: string[] = (['stopAfterToken', 'deferred', 'encryption', 'credentialIdentifier'] as const).filter((option) => action[option]);
+  if ((action.batchSize ?? 1) > 1) options.push('batchSize');
+  return options.length ? `the issuance option(s) ${options.join(', ')} are not implemented yet` : undefined;
+}
+
+/** `SCN-I` (issuer catalogue section 3.7): offer from the adapter, the grant by the issuance client, `OBS-CRED`. */
+async function runIssuance(
+  step: IssuerStepDefinition,
+  action: IssuanceAction,
+  record: IssuerStepRecord,
+  save: (name: string, content: string) => Promise<void>,
+  ctx: Context,
+  state: TestCaseState,
+): Promise<void> {
+  const missing = unsupported(action);
+  if (missing) {
+    record.reason = missing;
+    return;
+  }
+  const unit = action.walletUnit ?? 'CW-1';
+  const subject = action.subject ?? 'SUBJ-1';
+  record.walletUnit = unit;
+  record.subject = subject;
+  const configurations = resolveConfigurations(action.configurations, ctx.ics);
+  const txCode = usesTxCode(ctx.ics);
+  const byReference = action.offerByReference ?? false;
+  const offer = await ctx.adapter.createOffer({ subject, configurations, grant: action.grant, byReference, txCode });
+  record.offer = { sessionId: offer.sessionId, offer: offer.offer, byReference, txCode: offer.txCode !== undefined, configurations };
+
+  let client = state.clients.get(unit);
+  if (!client) {
+    client = await IssuanceClient.create(walletUnitOf(ctx.harness.twp, unit), { allowInsecureUrls: true });
+    state.clients.set(unit, client);
+  }
+  const evidence = await client.issue({ offer: offer.offer, ...(offer.txCode !== undefined ? { txCode: offer.txCode } : {}), credentialConfigurationId: configurations[0] });
+  record.exchanges = evidence.exchanges;
+  if (evidence.token) record.token = { tokenType: evidence.token.tokenType };
+  if (evidence.error) record.error = evidence.error;
+  record.credentials = await validateCredentials(evidence, ctx);
+  for (const [i, credential] of record.credentials.entries()) await save(`credential-${i + 1}.txt`, credential.credential);
+  await save('issuance.json', `${JSON.stringify({ offer: record.offer, offerObject: evidence.offer, metadata: evidence.metadata, exchanges: evidence.exchanges }, null, 2)}\n`);
+
+  const evaluation = evaluateIssuance(step.expect, observationOf(evidence, record.credentials));
+  record.verdict = evaluation.verdict;
+  record.reason = evaluation.reason;
+}
+
+/** `OBS-CRED`: every credential the step received through the reference validator, with the suite's trust configuration. */
+async function validateCredentials(evidence: IssuanceEvidence, ctx: Context): Promise<IssuedCredentialRecord[]> {
+  const trust = ctx.harness.trustStore;
+  if (!trust) throw new Error('the reference validator has no trust configuration (no enrolment)');
+  const records: IssuedCredentialRecord[] = [];
+  for (const issued of evidence.credentials) {
+    const configuration = evidence.metadata?.result.credentialIssuer.credential_configurations_supported[issued.credentialConfigurationId] as { vct?: string } | undefined;
+    const base = {
+      configuration: issued.credentialConfigurationId,
+      format: issued.format,
+      credential: issued.credential,
+      proofKey: issued.proofKey.publicJwk,
+      keyAttestation: issued.keyAttestation,
+    };
+    if (issued.format !== 'dc+sd-jwt') {
+      records.push({ ...base, valid: false, checks: [{ check: 'format', status: 'fail', detail: `the reference validator checks dc+sd-jwt only, not ${issued.format}` }] });
+      continue;
+    }
+    const validation = await validateIssuedSdJwtVc(issued.credential, {
+      trust,
+      trustRule: PID_TRUST_RULE,
+      issuerEntity: ctx.harness.enrolment?.entity ?? 'PP-T',
+      expectedVct: configuration?.vct ? [configuration.vct] : [],
+      proofKeys: [issued.proofKey.publicJwk],
+      keyAttestations: [issued.keyAttestation],
+      skewSeconds: ISSUER_SKEW_SECONDS,
+      requireStatus: true,
+      maxStatusListBytes: MAX_STATUS_LIST_BYTES,
+      fetchStatusList: async (uri) => {
+        const response = await ctx.harness.fetch(uri, { headers: { accept: 'application/statuslist+jwt' } });
+        return { status: response.status, body: await response.text(), contentType: response.headers.get('content-type') };
+      },
+    });
+    records.push({
+      ...base,
+      valid: validation.valid,
+      ...(validation.issuer ? { issuer: validation.issuer } : {}),
+      ...(validation.claims ? { claims: validation.claims } : {}),
+      checks: validation.checks,
+    });
+  }
+  return records;
+}
+
+/** What the evaluators need of the evidence: every exchange with its status and OAuth error, and the checks. */
+export function observationOf(evidence: Pick<IssuanceEvidence, 'exchanges' | 'token' | 'error'>, credentials: { checks: CheckResult[] }[]): IssuanceObservation {
+  return {
+    exchanges: evidence.exchanges.map((exchange) => {
+      const error = exchange.response && exchange.response.status >= 400 ? oauthErrorOf(exchange.response) : undefined;
+      return {
+        step: exchange.step,
+        ...(exchange.response ? { status: exchange.response.status } : {}),
+        ...(error ? { error } : {}),
+        ...(exchange.error ? { transportError: exchange.error } : {}),
+      };
+    }),
+    tokenIssued: evidence.token !== undefined,
+    credentials: credentials.map((c) => ({ checks: c.checks })),
+    ...(evidence.error ? { error: evidence.error } : {}),
+  };
+}

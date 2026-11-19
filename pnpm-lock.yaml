@@ -66,6 +66,9 @@ importers:
       '@rp-conformance/adapter-eudiplo':
         specifier: workspace:*
         version: link:../../adapters/eudiplo
+      '@rp-conformance/adapter-issuer-eudiplo':
+        specifier: workspace:*
+        version: link:../../adapters/issuer-eudiplo
       '@rp-conformance/adapter-reference':
         specifier: workspace:*
         version: link:../../adapters/reference
@@ -78,6 +81,12 @@ importers:
       '@rp-conformance/forge':
         specifier: workspace:*
         version: link:../forge
+      '@rp-conformance/issuer-definitions':
+        specifier: workspace:*
+        version: link:../issuer-definitions
+      '@rp-conformance/issuer-wallet':
+        specifier: workspace:*
+        version: link:../issuer-wallet
       '@rp-conformance/status-provider':
         specifier: workspace:*
         version: link:../status-provider
@@ -90,6 +99,9 @@ importers:
       '@rp-conformance/wallet':
         specifier: workspace:*
         version: link:../wallet
+      '@rp-conformance/wallet-provider':
+        specifier: workspace:*
+        version: link:../wallet-provider
       tsx:
         specifier: ^4.23.15
         version: 4.23.15
@@ -190,6 +202,16 @@ importers:
       xpath:
         specifier: 0.0.36
         version: 0.0.36
+
+  packages/issuer-definitions:
+    dependencies:
+      '@rp-conformance/core':
+        specifier: workspace:*
+        version: link:../core
+    devDependencies:
+      yaml:
+        specifier: ^2.9.1
+        version: 2.9.1
 
   packages/issuer-wallet:
     dependencies:

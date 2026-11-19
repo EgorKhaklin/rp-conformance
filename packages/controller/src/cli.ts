@@ -28,6 +28,8 @@ Options:
   --list                 List the test definitions and test book items and exit
 
 The report goes to <report-dir>/<run>/: report.json, summary.md, junit.xml and the artifacts of every step.
+
+The issuer suite (a PID Provider or Attestation Provider as system under test): rp-conformance issuer --help
 `;
 
 async function main() {
@@ -92,7 +94,13 @@ async function main() {
   if (!outcome.ok) process.exitCode = 1;
 }
 
-main().catch((error: unknown) => {
+// `rp-conformance issuer ...` runs the issuer suite (packages/controller/src/issuer/cli.ts).
+const issuer = () =>
+  import('./issuer/cli').then(async ({ issuerMain }) => {
+    process.exitCode = await issuerMain(process.argv.slice(3), { out: (text) => process.stdout.write(text), err: (text) => process.stderr.write(text) });
+  });
+
+(process.argv[2] === 'issuer' ? issuer() : main()).catch((error: unknown) => {
   process.stderr.write(`${(error as Error).stack ?? error}\n`);
   process.exitCode = 1;
 });
