@@ -1,7 +1,7 @@
 import { writeFile } from 'node:fs/promises';
 import { hostname } from 'node:os';
 import { parseTestCaseId } from '@rp-conformance/core';
-import type { RunReport, TestCaseRecord } from './runner';
+import type { RunReport, TestBookRecord, TestCaseRecord } from './runner';
 
 /** XML 1.0 text: escaped, without the control characters XML does not allow. */
 const xml = (value: string) =>
@@ -42,7 +42,7 @@ function testCase(record: TestCaseRecord): string {
 /**
  * JUnit XML of a run, next to report.json: one test suite per flow, one test case per FCAF test case. FAIL is a
  * failure (type `known-finding` for a known finding of the Relying Party), INCONCLUSIVE and REVIEW are errors, NOT
- * APPLICABLE is skipped.
+ * APPLICABLE is skipped. The test book items form a test suite of their own, each skipped as REVIEW with its method.
  */
 export function junitXml(report: RunReport): string {
   const { run } = report;
@@ -74,12 +74,40 @@ export function junitXml(report: RunReport): string {
       '  </testsuite>',
     ].join('\n');
   });
+  const testBook = report.testBook ?? [];
+  if (testBook.length) {
+    const counts = { tests: testBook.length, failures: 0, errors: 0, skipped: testBook.length, time: seconds(0) };
+    suites.push(
+      [
+        `  <testsuite name="${xml(`${run.adapter} test book`)}" ${attributes(counts)} timestamp="${xml(run.startedAt)}" hostname="${xml(hostname())}">`,
+        ...testBook.map(testBookCase),
+        '  </testsuite>',
+      ].join('\n'),
+    );
+  }
+  const total = count(report.results);
+  total.tests += testBook.length;
+  total.skipped += testBook.length;
   return [
     '<?xml version="1.0" encoding="UTF-8"?>',
-    `<testsuites name="${xml(`rp-conformance ${run.id}`)}" ${attributes(count(report.results))}>`,
+    `<testsuites name="${xml(`rp-conformance ${run.id}`)}" ${attributes(total)}>`,
     ...suites,
     '</testsuites>',
     '',
+  ].join('\n');
+}
+
+/**
+ * A test book item: skipped with the message `REVIEW: <method>`, since the harness cannot execute an inspection; an
+ * error would count against the run, which a test book item never does.
+ */
+function testBookCase(item: TestBookRecord): string {
+  const text = [`Objective: ${item.objective}`, `Method: ${item.method}`, `References: ${item.references.join('; ')}`, `Relevancy: ${item.relevancy}`].join('\n');
+  return [
+    `    <testcase classname="${xml(item.id.replace(/_\d+$/, ''))}" name="${xml(item.id)}" time="${seconds(0)}">`,
+    `      <skipped message="${xml(`${item.verdict}: ${item.method}`)}"/>`,
+    `      <system-out>${xml(text)}</system-out>`,
+    '    </testcase>',
   ].join('\n');
 }
 
