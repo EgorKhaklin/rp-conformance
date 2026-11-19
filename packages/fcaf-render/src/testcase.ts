@@ -18,6 +18,7 @@ export const AREA_TITLE: Record<string, string> = {
   CredentialFormats: 'Credential Formats',
   RpIntegrity: 'Relying Party Integrity',
   Encoding: 'Encoding',
+  Supportive: 'Supportive',
 };
 
 const numbered = (items: string[]) => items.map((text, i) => `${i + 1}. ${text}`).join('\n');

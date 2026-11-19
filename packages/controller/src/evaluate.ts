@@ -132,6 +132,12 @@ export interface EvaluationInput {
   responseEndpoint?: 'response_uri' | 'dc-api-forward';
   /** The body of the answer to the Authorization Response, if the harness saw it. */
   responseBody?: string;
+  /** The requests the Test Status Provider logged for the step's status list, with method, target and headers. */
+  statusEntries?: { method: string; url: string; target?: string; headers: Record<string, string | string[] | undefined> }[];
+  /** The Relying Party's identifier of the transaction. */
+  transactionId?: string;
+  /** The format of the step's Status List Token. */
+  statusFormat?: 'jwt' | 'cwt';
 }
 
 const ORDER: Verdict[] = ['FAIL', 'INCONCLUSIVE', 'REVIEW', 'PASS'];
@@ -171,6 +177,8 @@ export function evaluate(expectation: Expectation, args: EvaluationInput): Evalu
         return evaluateClientError(args);
       case 'NO_DETAILS':
         return evaluateNoDetails(args);
+      case 'STATUS_REQUEST':
+        return evaluateStatusRequest(args);
       default:
         return { verdict: 'INCONCLUSIVE', reason: `expected result ${code} does not apply to a presentation step` };
     }
@@ -219,4 +227,32 @@ export function evaluateNoDetails(args: EvaluationInput): Evaluation {
   const found = INTERNAL_DETAILS.filter(({ pattern }) => pattern.test(body)).map(({ name, pattern }) => `${name} (${pattern.exec(body)?.[0]})`);
   if (found.length) return { verdict: 'FAIL', reason: `the answer reveals internal details: ${found.join('; ')}` };
   return { verdict: 'PASS', reason: `the answer (HTTP ${args.responseStatus}, ${body.length} characters) reveals no internal details` };
+}
+
+/**
+ * `STATUS_REQUEST` (RP_PP_IA_Supportive_001, Token Status List section 8.1, ARF VCR_16): every logged request for the
+ * step's status list is a `GET` of exactly its URI (no query component), carries no `Authorization` or `Cookie` header
+ * and not the transaction's identifier, and has an `Accept` header, if any, that admits the token's media type.
+ */
+export function evaluateStatusRequest(args: EvaluationInput): Evaluation {
+  const entries = args.statusEntries ?? [];
+  if (entries.length === 0) return { verdict: 'FAIL', reason: 'the Relying Party did not retrieve the status list' };
+  const mediaType = `application/statuslist+${args.statusFormat ?? 'jwt'}`;
+  const problems = entries.flatMap((entry, i) => {
+    const found: string[] = [];
+    const header = (name: string) => entry.headers[name];
+    if (entry.method !== 'GET') found.push(`method ${entry.method}`);
+    if (entry.target !== undefined && entry.target.includes('?')) found.push(`a query component (${entry.target})`);
+    if (header('authorization') !== undefined) found.push('an Authorization header');
+    if (header('cookie') !== undefined) found.push('a Cookie header');
+    const accept = header('accept');
+    const types = (Array.isArray(accept) ? accept.join(',') : (accept ?? '')).split(',').map((t) => t.split(';')[0]?.trim().toLowerCase());
+    if (accept !== undefined && !types.some((t) => t === mediaType || t === '*/*' || t === 'application/*')) found.push(`Accept ${String(accept)}`);
+    const id = args.transactionId;
+    if (id && (entry.target?.includes(id) || Object.values(entry.headers).some((v) => String(v).includes(id)))) found.push('the transaction identifier');
+    return found.map((f) => `request ${i + 1}: ${f}`);
+  });
+  if (problems.length) return { verdict: 'FAIL', reason: `the status list request carries ${problems.join('; ')}` };
+  const accepts = [...new Set(entries.map((e) => String(e.headers.accept ?? '(none)')))].join(', ');
+  return { verdict: 'PASS', reason: `${entries.length} GET request(s) of the status URI without authentication or transaction data (Accept: ${accepts})` };
 }

@@ -77,4 +77,6 @@ export interface RequestLogEntry {
   status: number;
   /** The version of a list the Test Trust Infrastructure served. */
   version?: number;
+  /** The request target as received, with its query component (Test Status Provider). */
+  target?: string;
 }

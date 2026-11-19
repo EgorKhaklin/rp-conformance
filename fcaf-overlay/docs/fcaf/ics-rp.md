@@ -39,6 +39,8 @@ Items with the ID `N/A` are surrogate ICS items that select test cases through t
 | RP.R.2 | Policy for a QEAA, PuB-EAA or non-qualified EAA without reliable revocation status. | Reject / Accept and flag as status unknown | [ARF] Annex 2, VCR_14. A PID without reliable revocation status is always rejected. |
 | RP.R.3 | Meaning assigned to application-specific status values. | Values and meaning, or None | [Token Status List] section 7.1. |
 | RP.R.4 | Maximum decompressed size of a status list. | Bytes | |
+| RP.R.5 | Relying Party caches Status List Tokens. | Yes/No | [ARF] Annex 2, VCR_15; [Token Status List] section 13.7. A cached token is used until its `ttl` or `exp` has passed. |
+| RP.R.6 | Timeout for retrieving a status list or an identifier list. | Duration | After the timeout the Relying Party has no reliable revocation status ([ARF] Annex 2, VCR_14). |
 | N/A | Status List Token in JWT format. | Yes/No | Follows RP.G.1 and RP.R.1. |
 | N/A | Status List Token in CWT format. | Yes/No | Follows RP.G.2 and RP.R.1. |
 | N/A | Identifier list in CWT format. | Yes/No | Follows RP.G.2 and RP.R.1. |

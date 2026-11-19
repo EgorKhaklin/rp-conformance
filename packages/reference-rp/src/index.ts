@@ -12,7 +12,7 @@ import type {
   ServerOptions,
 } from '@rp-conformance/core';
 import { categoryOfQuery, sendJson, sendText, startServer } from '@rp-conformance/core';
-import { base64url, jwkThumbprint, type Oid4vpHandover, PID_DOCTYPE, PID_VCT, signCompactJws } from '@rp-conformance/forge';
+import { base64url, decodeCbor, jwkThumbprint, type Oid4vpHandover, PID_DOCTYPE, PID_VCT, readCose, signCompactJws } from '@rp-conformance/forge';
 import type { CheckResult } from '@rp-conformance/core';
 import {
   type FetchedStatusList,
@@ -52,6 +52,10 @@ export interface ReferenceRpOptions extends ServerOptions {
   graceMs?: number;
   /** The maximum size of an Authorization Response (ICS RP.P.10), bytes; a larger request body is refused with 413. */
   maxResponseBytes?: number;
+  /** Cache Status List Tokens for their `ttl` (ICS RP.R.5). */
+  cacheStatusLists?: boolean;
+  /** Timeout of a status list or identifier list retrieval (ICS RP.R.6), milliseconds; default 5000. */
+  statusTimeoutMs?: number;
 }
 
 export type TransactionStatus = 'pending' | 'success' | 'failure';
@@ -93,9 +97,24 @@ export interface ReferenceRpResult {
 
 const hash: CallbackContext['hash'] = (data, alg) => createHash(alg.replace('-', '').toLowerCase()).update(data).digest();
 
+/**
+ * Whether a host is an address the reference Relying Party never requests a status list from: a link-local or private
+ * IPv4 or IPv6 literal (RP_PP_IA_Supportive_006). Loopback stays allowed, since the harness itself runs on 127.0.0.1.
+ */
+export function isBlockedHost(hostname: string): boolean {
+  const host = hostname.replace(/^\[(.*)\]$/, '$1').toLowerCase();
+  const v4 = /^(\d+)\.(\d+)\.(\d+)\.(\d+)$/.exec(host)?.slice(1).map(Number);
+  if (v4) {
+    const [a, b] = v4 as [number, number];
+    return a === 10 || (a === 169 && b === 254) || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168) || a === 0;
+  }
+  return /^fe[89ab][0-9a-f]:/.test(host) || /^f[cd][0-9a-f]{2}:/.test(host);
+}
+
 /** Fetches a status list or identifier list: text for a JWT, bytes for a CWT. */
-async function fetchList(uri: string, accept: string): Promise<FetchedStatusList> {
-  const fetched = await fetch(uri, { headers: { accept }, signal: AbortSignal.timeout(5000) });
+async function fetchList(uri: string, accept: string, timeoutMs = 5000): Promise<FetchedStatusList> {
+  if (isBlockedHost(new URL(uri).hostname)) throw new Error(`the status list URI names the link-local or private address ${new URL(uri).hostname}`);
+  const fetched = await fetch(uri, { headers: { accept }, signal: AbortSignal.timeout(timeoutMs) });
   const bytes = new Uint8Array(await fetched.arrayBuffer());
   return { status: fetched.status, body: accept.endsWith('+jwt') ? new TextDecoder().decode(bytes) : bytes, contentType: fetched.headers.get('content-type') };
 }
@@ -119,6 +138,8 @@ export class ReferenceRelyingParty {
   readonly trust: TrustStore;
   readonly clientId: string;
   private accessKey?: CryptoKey;
+  /** Status List Tokens by URI, until their `ttl` has passed (ICS RP.R.5). */
+  private readonly statusCache = new Map<string, { fetched: FetchedStatusList; expiresAt: number }>();
 
   constructor(private readonly options: ReferenceRpOptions) {
     this.trust = new TrustStore({
@@ -153,6 +174,16 @@ export class ReferenceRelyingParty {
 
   async refreshTrust() {
     return this.trust.refresh();
+  }
+
+  /** A Status List Token from the cache while its `ttl` lasts, otherwise retrieved (ICS RP.R.5, RP.R.6). */
+  private async fetchStatusList(uri: string, accept: string): Promise<FetchedStatusList> {
+    const cached = this.statusCache.get(uri);
+    if (cached && cached.expiresAt > Date.now()) return cached.fetched;
+    const fetched = await fetchList(uri, accept, this.options.statusTimeoutMs);
+    const ttl = this.options.cacheStatusLists && fetched.status === 200 ? ttlOf(fetched.body) : undefined;
+    if (ttl) this.statusCache.set(uri, { fetched, expiresAt: Date.now() + ttl * 1000 });
+    return fetched;
   }
 
   private async route(method: string, rawUrl: string, body: Buffer, res: import('node:http').ServerResponse) {
@@ -365,15 +396,15 @@ export class ReferenceRelyingParty {
               handover: binding.handover,
               // OpenID4VP Appendix B.2.6: the thumbprint of the key the response was encrypted to.
               jwkThumbprint: await jwkThumbprint(tx.encryptionJwk as JsonWebKey),
-              fetchStatusList: (uri) => fetchList(uri, 'application/statuslist+cwt'),
-              fetchIdentifierList: (uri) => fetchList(uri, 'application/identifierlist+cwt'),
+              fetchStatusList: (uri) => this.fetchStatusList(uri, 'application/statuslist+cwt'),
+              fetchIdentifierList: (uri) => fetchList(uri, 'application/identifierlist+cwt', this.options.statusTimeoutMs),
             })
           : await validateSdJwtVcPresentation(entries[0], {
               ...common,
               expectedVct: (credentialQuery.meta?.vct_values as string[] | undefined) ?? [PID_VCT],
               audience: binding.audience,
               kbMaxAgeSeconds: this.options.kbMaxAgeSeconds,
-              fetchStatusList: (uri) => fetchList(uri, 'application/statuslist+jwt'),
+              fetchStatusList: (uri) => this.fetchStatusList(uri, 'application/statuslist+jwt'),
             });
       validations.push(validation);
       tx.validations = validations;
@@ -422,4 +453,19 @@ try {
 </body>
 </html>
 `;
+}
+
+/** The `ttl` of a Status List Token in JWT or CWT format (claim 65534), seconds, or undefined. */
+function ttlOf(body: string | Uint8Array): number | undefined {
+  try {
+    if (typeof body === 'string') {
+      const ttl = base64url.decodeJson<{ ttl?: unknown }>(body.trim().split('.')[1] ?? '').ttl;
+      return typeof ttl === 'number' && ttl > 0 ? ttl : undefined;
+    }
+    const payload = readCose(decodeCbor(body)).payload;
+    const ttl = payload ? decodeCbor<Map<number, unknown>>(payload).get(65534) : undefined;
+    return typeof ttl === 'number' && ttl > 0 ? ttl : undefined;
+  } catch {
+    return undefined;
+  }
 }

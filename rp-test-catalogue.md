@@ -498,12 +498,12 @@ Every objective in this class also applies to class `RP_AP` with the same number
 
 | ID | Objective | Stimulus | Expected | References | Var | Rel |
 | --- | --- | --- | --- | --- | --- | --- |
-| `RP_PP_IA_Supportive_001` | The RP fetches the status list with GET, `Accept: application/statuslist+jwt` or `+cwt`, without authentication and without data identifying the user or transaction. | `SCN-S`, inspect TSP log | CONF | Token Status List §8.1, §12.3; VCR_16 | SD, MD | G/R |
+| `RP_PP_IA_Supportive_001` | The RP fetches the status list with GET of exactly its URI, without authentication and without data identifying the user or transaction; an `Accept` header, if sent, admits `application/statuslist+jwt` or `+cwt`. | `SCN-S`, inspect TSP log | CONF | Token Status List §8.1, §12.3; VCR_16 | SD, MD | G/R |
 | `RP_PP_IA_Supportive_002` | Two presentations referencing the same list within `ttl` cause at most one fetch. | Two transactions | CONF | VCR_15; Token Status List §11.5, §13.7 | SD, MD; `P-CACHE` | S/O |
 | `RP_PP_IA_Supportive_003` | After `ttl` or `exp` has passed, the RP fetches a fresh list before deciding; a revocation set in between is detected. | Revoke between transactions, wait `ttl` | First ACC, second REJ | Token Status List §8.3 step 4d | SD, MD; `P-CACHE` | G/R |
-| `RP_PP_IA_Supportive_004_UF` | Status endpoint unreachable or failing gives no positive status statement, and the RP decides within its declared timeout. | Timeout; connection refused; 404; 500 | NOSTAT | Token Status List §8.3; VCR_14 | SD, MD | S/R |
-| `RP_PP_IA_Supportive_005_UF` | Redirect loops and redirects to non-https or internal targets are bounded. | 3xx loop; 3xx to `http://127.0.0.1` | NOSTAT, RP stays available | Token Status List §11.4; RFC 9110 §15.4 | SD, MD | G/R |
-| `RP_PP_IA_Supportive_006_UF` | A status `uri` pointing to a loopback, link-local or private address, or with a non-https scheme, is not fetched. | `uri` = `http://169.254.169.254/…` | REJ, no request to that address | Token Status List §6.2; OWASP SSRF | SD, MD | G/R |
+| `RP_PP_IA_Supportive_004_UF` | Status endpoint unreachable or failing gives no positive status statement, and the RP decides within its declared timeout. | Timeout (a valid token after the declared timeout plus 10 s); connection refused; 404; 500; 503 with an HTML page | NOSTAT | Token Status List §8.3; VCR_14 | SD, MD | S/R |
+| `RP_PP_IA_Supportive_005_UF` | Redirect loops are bounded. | 3xx loop (302 to the same URI) | NOSTAT, RP stays available | Token Status List §11.4; RFC 9110 §15.4 | SD, MD | G/R |
+| `RP_PP_IA_Supportive_006_UF` | A credential whose status `uri` points to a link-local address is rejected. | `uri` = `http://169.254.169.254/…` | REJ | Token Status List §6.2; OWASP SSRF | SD, MD | G/R |
 
 ##### RP_PP_SM_Revocation (Status List Token and identifier list validation)
 

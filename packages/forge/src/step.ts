@@ -107,7 +107,7 @@ export async function forgePresentation(action: PresentationAction, ctx: StepFor
     const signerEntity = ctx.pki.entities[listSpec.signer?.entity ?? spec.issuer];
     const listSigner = listSpec.signer?.key === 'issuance' ? credentialSignerOf(signerEntity, spec.format) : signerEntity.signers.revocation;
     const uri = ctx.allocateStatusUri();
-    const options = { signer: listSigner, issuer: signerEntity.issuerUri, uri, statuses, bits, now };
+    const options = { signer: listSigner, issuer: signerEntity.issuerUri, uri, statuses, bits, now, ...(listSpec.ttl ? { ttl: listSpec.ttl } : {}) };
     const [fault] = listSpec.faults;
     let validToken: string | Uint8Array;
     let served: ServedStatusList;

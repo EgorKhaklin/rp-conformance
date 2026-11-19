@@ -37,6 +37,8 @@ export class ReferenceAdapter implements RelyingPartyAdapter {
       allowInsecureUrls: true,
       graceMs: durationMs(String(env.ics.items['RP.T.2'] ?? '')) ?? 0,
       maxResponseBytes: Number(env.ics.items['RP.P.10'] ?? 0) || undefined,
+      cacheStatusLists: env.ics.items['RP.R.5'] === 'Yes',
+      statusTimeoutMs: durationMs(String(env.ics.items['RP.R.6'] ?? '')),
     }).start();
     const failed = (await this.rp.refreshTrust()).filter((list) => list.error);
     if (failed.length > 0) throw new Error(`reference RP could not load: ${failed.map((l) => l.error).join('; ')}`);

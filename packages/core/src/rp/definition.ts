@@ -32,6 +32,7 @@ export const ics = {
     text: 'Relying Party keeps using a trust list for a grace period greater than zero after its `NextUpdate`.',
     equals: 'Yes',
   },
+  cachesStatusLists: { item: 'RP.R.5', text: 'Relying Party caches Status List Tokens.', equals: 'Yes' },
 } as const satisfies Record<string, IcsCondition>;
 
 /** The ICS items that declare support for a flow. */
@@ -96,7 +97,26 @@ export interface StatusListSpec {
   signer?: { entity: string; key: 'revocation' | 'issuance' };
   /** Named faults (at most one); empty for a valid token. */
   faults: FaultId[];
+  /** The `ttl` claim, seconds; default 300. */
+  ttl?: number;
+  /** The credential references the status list URI of this earlier step (1-based) instead of a new one. */
+  uriOfStep?: number;
+  /** How the Test Status Provider answers for the status list; default: it serves the token. */
+  endpoint?: StatusEndpoint;
 }
+
+/**
+ * How the Test Status Provider answers for a status list (RP_PP_IA_Supportive): with an HTTP status (and optionally
+ * another body and content type), with the valid token only after the Relying Party's declared timeout (ICS RP.R.6)
+ * plus ten seconds, with a redirect to the same URI, or not at all: `refused` puts the URI at a port of the harness
+ * host on which nothing listens, `address` makes the credential reference `uri`, which the harness never requests.
+ */
+export type StatusEndpoint =
+  | { kind: 'status'; status: number; contentType?: string; body?: string }
+  | { kind: 'slow' }
+  | { kind: 'redirect-loop' }
+  | { kind: 'refused' }
+  | { kind: 'address'; uri: string };
 
 /**
  * An identifier list (ISO/IEC 18013-5 second edition section 12.3.6.4, CWT) the Test Status Provider serves for the
@@ -135,6 +155,8 @@ export interface PresentationAction {
   /** The identifier list of an mdoc; left out or `null` when it has none. */
   identifierList?: IdentifierListSpec | null;
   response: ResponseSpec;
+  /** Seconds the controller waits after the Test Status Provider serves the step's list, before the presentation starts. */
+  delaySeconds?: number;
 }
 
 /** Start a presentation and fetch its request, but send no response (SessionEncryption_005, transaction T1). */
@@ -197,7 +219,8 @@ export type ExpectationCode =
   | 'ENC_KEY'
   | 'STALE'
   | 'CONF'
-  | RobustnessExpectationCode;
+  | RobustnessExpectationCode
+  | RetrievalExpectationCode;
 
 /**
  * Expected-result codes of `RP_WS_SH_Encoding`: `HTTP_4XX`, the `response_uri` answers the Authorization Response with
@@ -205,6 +228,13 @@ export type ExpectationCode =
  * W3C Digital Credentials API the response returns to the Relying Party's own page, so both apply to redirects only.
  */
 export type RobustnessExpectationCode = 'HTTP_4XX' | 'NO_DETAILS';
+
+/**
+ * Expected-result code of `RP_PP_IA_Supportive`: `STATUS_REQUEST`, every request the Test Status Provider logged for the
+ * step's status list is a `GET` of exactly its URI without authentication, cookies or the transaction's identifier,
+ * with an `Accept` header, if any, that admits the token's media type.
+ */
+export type RetrievalExpectationCode = 'STATUS_REQUEST';
 
 /** The ICS declaration a `POLICY` expectation is compared with. */
 export interface PolicyReference {

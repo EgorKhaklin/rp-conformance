@@ -244,7 +244,8 @@ export class Fixture {
       allocateStatusUri: () => `https://status.rp-test/self-validation/${randomUUID()}`,
       skewSeconds: SKEW,
     });
-    if (forged.statusList) this.statusLists.set(forged.statusList.uri, forged.statusList.served);
+    // A status list the Test Status Provider does not serve as a token (RP_PP_IA_Supportive) cannot be retrieved.
+    if (forged.statusList && !action.statusList?.endpoint) this.statusLists.set(forged.statusList.uri, forged.statusList.served);
     if (forged.identifierList) this.statusLists.set(forged.identifierList.uri, forged.identifierList.served);
     const tx = await this.transaction();
     const query = this.queries[action.query];
