@@ -185,7 +185,26 @@ export type StepAction = PresentationAction | StartAction | TrustListAction | Re
  * `STALE`: the verification result signals that a trust list it depends on is stale (`trust-list-stale`). `CONF`: the
  * captured requests pass the request checks the expectation names.
  */
-export type ExpectationCode = 'ACC' | 'REJ' | 'REJ_OR_ACC' | 'NOSTAT' | 'NOFETCH' | 'FETCHED' | 'POLICY' | 'LIST_RETRIEVED' | 'ENC_KEY' | 'STALE' | 'CONF';
+export type ExpectationCode =
+  | 'ACC'
+  | 'REJ'
+  | 'REJ_OR_ACC'
+  | 'NOSTAT'
+  | 'NOFETCH'
+  | 'FETCHED'
+  | 'POLICY'
+  | 'LIST_RETRIEVED'
+  | 'ENC_KEY'
+  | 'STALE'
+  | 'CONF'
+  | RobustnessExpectationCode;
+
+/**
+ * Expected-result codes of `RP_WS_SH_Encoding`: `HTTP_4XX`, the `response_uri` answers the Authorization Response with
+ * HTTP 4xx; `NO_DETAILS`, that answer reveals no internal details (stack traces, source paths, exception names). Via the
+ * W3C Digital Credentials API the response returns to the Relying Party's own page, so both apply to redirects only.
+ */
+export type RobustnessExpectationCode = 'HTTP_4XX' | 'NO_DETAILS';
 
 /** The ICS declaration a `POLICY` expectation is compared with. */
 export interface PolicyReference {

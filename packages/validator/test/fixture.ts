@@ -65,6 +65,8 @@ export const AUDIENCE = 'x509_hash:self-validation';
 export const SKEW = 60;
 export const KB_MAX_AGE = 300;
 export const MAX_STATUS_LIST_BYTES = 1 << 20;
+/** The maximum response size of the reference validator in the self-validation (ICS RP.P.10 of the reference Relying Party). */
+export const MAX_RESPONSE_BYTES = 1 << 20;
 export const RESPONSE_URI = 'https://rp.rp-test/self-validation/response';
 /** The Origin of the Relying Party's page in the DC API flow. */
 export const ORIGIN = 'https://rp.rp-test';
@@ -274,9 +276,10 @@ export class Fixture {
       enc: action.response.enc ?? 'A128GCM',
       walletKey: this.walletKey,
       otherTransactionKey: options.other?.key.publicJwk,
+      maxResponseBytes: MAX_RESPONSE_BYTES,
     };
     const form = flow === 'dc-api' ? await buildDcApiResponse(input, responseFault) : await buildAuthorizationResponse(input, responseFault);
-    const response = await validateAuthorizationResponse(form, { keys: [tx.key], encValues, state, mode });
+    const response = await validateAuthorizationResponse(form, { keys: [tx.key], encValues, state, mode, maxResponseBytes: MAX_RESPONSE_BYTES });
     const presented = (response.payload?.vp_token as Record<string, string[]> | undefined)?.[credentialQuery.id]?.[0];
     const fetchList = async (uri: string): Promise<FetchedStatusList> => {
       const served = this.statusLists.get(uri);

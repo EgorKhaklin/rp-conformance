@@ -50,6 +50,8 @@ export interface ReferenceRpOptions extends ServerOptions {
   allowInsecureUrls?: boolean;
   /** The grace period `G` after the `NextUpdate` of a trust list (ICS RP.T.2), milliseconds; default 0. */
   graceMs?: number;
+  /** The maximum size of an Authorization Response (ICS RP.P.10), bytes; a larger request body is refused with 413. */
+  maxResponseBytes?: number;
 }
 
 export type TransactionStatus = 'pending' | 'success' | 'failure';
@@ -156,6 +158,12 @@ export class ReferenceRelyingParty {
   private async route(method: string, rawUrl: string, body: Buffer, res: import('node:http').ServerResponse) {
     const path = new URL(rawUrl, 'http://localhost').pathname;
     let match: RegExpExecArray | null;
+    // An Authorization Response above the declared maximum size is refused before it is parsed (RP_WS_SH_Encoding_004).
+    if (method === 'POST' && this.options.maxResponseBytes && body.length > this.options.maxResponseBytes) {
+      const tx = this.transactions.get(/^\/oid4vp\/([^/]+)\//.exec(path)?.[1] ?? '');
+      if (tx?.status === 'pending') Object.assign(tx, { status: 'failure', error: 'the Authorization Response is too large' });
+      return sendJson(res, 413, { error: 'invalid_request', error_description: 'the request is too large' });
+    }
     if (method === 'POST' && path === '/api/presentations') {
       const { query = 'default_query_pid', flow = 'redirect' } = JSON.parse(body.toString() || '{}');
       if (flow !== 'redirect' && flow !== 'dc-api') return sendJson(res, 400, { error: 'unsupported_flow' });
@@ -323,6 +331,7 @@ export class ReferenceRelyingParty {
       keys: [{ kid: tx.encryptionJwk.kid as string, privateKey: tx.encryptionKey }],
       encValues: metadata.encrypted_response_enc_values_supported,
       state: binding.state,
+      maxResponseBytes: this.options.maxResponseBytes,
     });
     tx.response = response.checks;
     if (!response.valid || !response.payload) return `${response.failed}: ${response.checks.at(-1)?.detail}`;

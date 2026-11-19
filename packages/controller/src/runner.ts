@@ -495,6 +495,7 @@ async function runPresentation(
     replayedPresentation: replayed,
     skewSeconds,
     kbMaxAgeSeconds,
+    maxResponseBytes: Number(ctx.ics.items['RP.P.10'] ?? 0) || undefined,
   };
 
   let evidence: PresentationEvidence;
@@ -544,6 +545,8 @@ async function runPresentation(
     issuedClaims: forged.claims,
     delivered,
     responseStatus: record.rpResponse?.status,
+    responseEndpoint: record.rpResponse?.endpoint,
+    responseBody: record.rpResponse?.body,
     ics: ctx.ics,
     category: categoryOfQuery(action.query),
     statusRequests: record.statusLog.length,

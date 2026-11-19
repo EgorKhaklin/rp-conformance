@@ -482,11 +482,11 @@ Certificate path, both formats:
 
 | ID | Objective | Stimulus | Expected | References | Var | Rel |
 | --- | --- | --- | --- | --- | --- | --- |
-| `RP_WS_SH_Encoding_001_UF` | Malformed `response` is rejected cleanly. | Wrong segment count; invalid base64url | REJ, 4xx, no stack trace | RFC 7516 §9 | RD, DC | G/R |
-| `RP_WS_SH_Encoding_002_UF` | Malformed SD-JWT is rejected. | No trailing `~`; empty segment; invalid JSON in a disclosure | REJ | RFC 9901 §4 | SD | G/R |
-| `RP_WS_SH_Encoding_003_UF` | Malformed CBOR DeviceResponse is rejected. | Truncated; wrong major type; deep nesting; indefinite lengths | REJ | RFC 8949; ISO/IEC 18013-5 §8.3.2.1.2.2 | MD | G/R |
+| `RP_WS_SH_Encoding_001_UF` | Malformed `response` is rejected cleanly. | Wrong segment count; invalid base64url | REJ; via redirects 4xx without internal details (via the DC API the answer goes to the RP's own page, see `_007`) | RFC 7516 §7.1, §9 | RD, DC | G/R |
+| `RP_WS_SH_Encoding_002_UF` | Malformed SD-JWT, or a KB-JWT whose payload is not valid JSON, is rejected. | No `~` between the last disclosure and the KB-JWT; empty segment; invalid JSON in a disclosure; `NaN` in the KB-JWT payload | REJ | RFC 9901 §4; RFC 8259 §6 | SD | G/R |
+| `RP_WS_SH_Encoding_003_UF` | Malformed CBOR DeviceResponse is rejected. | Truncated; wrong major type; deep nesting; indefinite-length map without its `break` | REJ | RFC 8949 §3.2.1; ISO/IEC 18013-5 §8.3.2.1.2.2 | MD | G/R |
 | `RP_WS_SH_Encoding_004_UF` | Oversized response is rejected without exhausting resources. | Response above ICS-17 limit | REJ, RP stays available | ICS-17 | RD, DC | G/R |
-| `RP_WS_SH_Encoding_005_UF` | Duplicate member names in JOSE headers or JWT claims are rejected. | Duplicate `alg`; duplicate `nonce` | REJ | RFC 7515 §4; RFC 7519 §4; FCAF Shared_JSON | SD, RD, DC | G/R |
+| `RP_WS_SH_Encoding_005_UF` | Duplicate member names in JOSE headers or JWT claims are rejected. | Duplicate `alg` in the KB-JWT header; duplicate `nonce` in the KB-JWT payload; the last value is the wrong one | REJ | RFC 7515 §4; RFC 7519 §4; FCAF Shared_JSON | SD, RD, DC | G/R |
 | `RP_WS_SH_Encoding_006_UF` | Excessive `x5c` / `x5chain` length is bounded. | 50 certificates | REJ, RP stays available | RFC 5280 §6.1 | SD, MD | G/R |
 | `RP_WS_SH_Encoding_007` | Error responses to the wallet reveal no internal details. | Any `_UF` above | CONF | OID4VP §15.9 | RD | G/O |
 

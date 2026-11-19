@@ -128,6 +128,10 @@ export interface EvaluationInput {
   category: CredentialCategory;
   /** Requests the Test Status Provider logged for the step's status list URI, from the step's start to the verdict. */
   statusRequests: number;
+  /** Where the Authorization Response was delivered: `response_uri` (redirects) or the page's forwarding (DC API). */
+  responseEndpoint?: 'response_uri' | 'dc-api-forward';
+  /** The body of the answer to the Authorization Response, if the harness saw it. */
+  responseBody?: string;
 }
 
 const ORDER: Verdict[] = ['FAIL', 'INCONCLUSIVE', 'REVIEW', 'PASS'];
@@ -163,10 +167,56 @@ export function evaluate(expectation: Expectation, args: EvaluationInput): Evalu
         return args.result.flags?.includes('trust-list-stale')
           ? { verdict: 'PASS', reason: 'the verification result signals trust-list-stale' }
           : { verdict: 'FAIL', reason: 'the verification result does not signal trust-list-stale' };
+      case 'HTTP_4XX':
+        return evaluateClientError(args);
+      case 'NO_DETAILS':
+        return evaluateNoDetails(args);
       default:
         return { verdict: 'INCONCLUSIVE', reason: `expected result ${code} does not apply to a presentation step` };
     }
   });
   const verdict = worst(evaluations.map((e) => e.verdict));
   return { verdict, reason: evaluations.map((e) => e.reason).join('; ') };
+}
+
+/**
+ * `HTTP_4XX` (RP_WS_SH_Encoding_001): the `response_uri` answers the faulty Authorization Response with HTTP 4xx. Via
+ * the W3C Digital Credentials API the response returns to the Relying Party's page, and how the page passes it on to its
+ * backend is the Relying Party's own matter (OpenID4VP 1.0 Appendix A), so the code applies to redirects only.
+ */
+export function evaluateClientError(args: EvaluationInput): Evaluation {
+  if (args.responseEndpoint === 'dc-api-forward') return { verdict: 'PASS', reason: 'via the DC API the status of the page forwarding the response is not evaluated' };
+  if (args.delivered === false || args.responseStatus === undefined) return { verdict: 'INCONCLUSIVE', reason: 'the harness saw no answer to the Authorization Response' };
+  if (args.responseStatus >= 400 && args.responseStatus < 500) return { verdict: 'PASS', reason: `the response_uri answered HTTP ${args.responseStatus}` };
+  return { verdict: 'FAIL', reason: `the response_uri answered HTTP ${args.responseStatus}, not 4xx` };
+}
+
+/**
+ * Marks of internal details in an error answer (RP_WS_SH_Encoding_007, OpenID4VP section 15.9): stack frames of
+ * JavaScript, Java, Python, .NET and Go, source file paths with a line number, module directories, exception class
+ * names followed by their message, and SQL error states.
+ */
+export const INTERNAL_DETAILS: { name: string; pattern: RegExp }[] = [
+  { name: 'a JavaScript stack frame', pattern: /\bat (?:async )?[\w$.<>[\]]+ \(?[^\s()]+:\d+:\d+\)?/ },
+  { name: 'a Java or .NET stack frame', pattern: /\bat [\w$.]+\([\w$]*\.(?:java|kt|scala|cs):\d+\)/ },
+  { name: 'a Python traceback', pattern: /Traceback \(most recent call last\)/ },
+  { name: 'a Go panic', pattern: /\bgoroutine \d+ \[/ },
+  { name: 'a source file with a line number', pattern: /[\w./-]+\.(?:[cm]?[jt]s|java|kt|py|rb|go|cs|php):\d+/ },
+  { name: 'a module directory', pattern: /\b(?:node_modules|site-packages|vendor\/bundle)\// },
+  { name: 'a stack member', pattern: /"stack(?:Trace)?"\s*:/ },
+  { name: 'an exception class with its message', pattern: /\b(?:[A-Z]\w*(?:Error|Exception)): / },
+  { name: 'an SQL error state', pattern: /\bSQLSTATE\b|\bQueryFailedError\b/ },
+];
+
+/**
+ * `NO_DETAILS` (RP_WS_SH_Encoding_007): the answer to the faulty Authorization Response reveals no internal details.
+ * Via the W3C Digital Credentials API the answer goes to the Relying Party's own page, not to the wallet.
+ */
+export function evaluateNoDetails(args: EvaluationInput): Evaluation {
+  if (args.responseEndpoint === 'dc-api-forward') return { verdict: 'PASS', reason: 'via the DC API no answer of the Relying Party reaches the wallet' };
+  if (args.delivered === false || args.responseStatus === undefined) return { verdict: 'INCONCLUSIVE', reason: 'the harness saw no answer to the Authorization Response' };
+  const body = args.responseBody ?? '';
+  const found = INTERNAL_DETAILS.filter(({ pattern }) => pattern.test(body)).map(({ name, pattern }) => `${name} (${pattern.exec(body)?.[0]})`);
+  if (found.length) return { verdict: 'FAIL', reason: `the answer reveals internal details: ${found.join('; ')}` };
+  return { verdict: 'PASS', reason: `the answer (HTTP ${args.responseStatus}, ${body.length} characters) reveals no internal details` };
 }

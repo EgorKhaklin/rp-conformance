@@ -502,6 +502,60 @@ export const FAULTS = {
   'response.jws': response('response-format', 'the `response` parameter is a JWS signed with a key of the Conformance Wallet instead of a JWE'),
   'response.alg-none': response('response-format', 'the `response` parameter is an unsecured JWT with `alg` `none` instead of a JWE'),
   'response.extra-member': response(null, 'its decrypted payload additionally contains the member `foo` with the value `bar`'),
+
+  // RP_WS_SH_Encoding: malformed encodings of the Authorization Response, the presentation and the credential, built
+  // from the valid artifact (packages/forge/src/robustness.ts).
+  'response.jwe-four-segments': response('response-format', 'its `response` parameter is the JWE without its last segment, the authentication tag, so it has four segments instead of five'),
+  'response.jwe-not-base64url': response(
+    'response-format',
+    'the protected header segment of the JWE in its `response` parameter contains the characters `*` and `!`, which are not in the base64url alphabet',
+  ),
+  'response.oversized': response(
+    'response-format',
+    'its decrypted payload additionally carries the member `padding`, a string long enough that the `response` parameter exceeds the maximum response size the Relying Party declares in its ICS by one MiB',
+  ),
+  'presentation.sd-jwt-no-separator': kbJwt(
+    'format',
+    'the `~` that separates the last disclosure from the KB-JWT is missing, so the last disclosure and the KB-JWT form one segment',
+  ),
+  'presentation.sd-jwt-empty-disclosure': kbJwt(
+    'disclosures',
+    'it carries an empty segment between two disclosures (`~~`), while the `sd_hash` of its KB-JWT is computed over the presented SD-JWT with that segment',
+  ),
+  'presentation.kb-payload-nan': kbJwt('format', 'the payload of its KB-JWT is not valid JSON: its `iat` member has the value `NaN`, while the KB-JWT is signed over that payload'),
+  'presentation.kb-duplicate-alg': kbJwt(
+    'key-binding',
+    'the header of its KB-JWT carries the member `alg` twice: first `ES256`, with which it is signed, and last `none`',
+  ),
+  'presentation.kb-duplicate-nonce': kbJwt(
+    'key-binding',
+    'the payload of its KB-JWT carries the member `nonce` twice: first the `nonce` of the request and last a newly generated random value',
+  ),
+  'presentation.device-response-truncated': deviceAuth('format', 'its DeviceResponse is cut after half of its bytes'),
+  'presentation.device-response-documents-map': deviceAuth(
+    'format',
+    'the `documents` member of its DeviceResponse is a map (major type 5) whose key 0 holds the document, instead of an array (major type 4)',
+  ),
+  'presentation.device-response-deep-nesting': deviceAuth(
+    'format',
+    'the `documents` member of its DeviceResponse is 10,000 arrays nested in each other, the innermost one empty, instead of the array of documents',
+  ),
+  'presentation.device-response-unterminated': deviceAuth(
+    'format',
+    'its DeviceResponse is encoded as a map of indefinite length (initial byte 0xbf) without the terminating `break` byte (0xff), so it is not well-formed CBOR',
+  ),
+  'credential.disclosure-invalid-json': credential(
+    'disclosures',
+    'its disclosure of `family_name` is replaced by a disclosure whose base64url decoding is not valid JSON (the closing bracket of the array is missing), and the `_sd` array of its Issuer-signed JWT carries the digest of that disclosure',
+  ),
+  'credential.x5c-50': credential(
+    'issuer-trust',
+    'the `x5c` header of its Issuer-signed JWT carries 50 certificates: its signing certificate followed by 49 self-signed CA certificates that are not part of `default_trust_configuration_rp`',
+  ),
+  'mdoc.x5chain-50': mdoc(
+    'issuer-trust',
+    'the `x5chain` of its `IssuerAuth` carries 50 certificates: its document signer certificate followed by 49 self-signed CA certificates that are not part of `default_trust_configuration_rp`',
+  ),
 } as const satisfies Record<string, FaultInfo>;
 
 export type FaultId = keyof typeof FAULTS;

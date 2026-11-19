@@ -25,6 +25,7 @@ Items with the ID `N/A` are surrogate ICS items that select test cases through t
 | RP.P.4 | Clock tolerance `T_skew`. | Seconds | At most 300. |
 | RP.P.5 | Relying Party applies a clock tolerance greater than zero. | Yes/No | |
 | RP.P.6 | Freshness window `T_kb` for key binding JWTs and device authentication. | Seconds | At most 300. |
+| RP.P.10 | Maximum size of an Authorization Response the Relying Party accepts. | Bytes | A larger response is rejected without being processed. |
 | N/A | Presentation via redirects with response mode `direct_post.jwt`. | Yes/No | [HAIP] section 5.1. |
 | N/A | Presentation via the W3C Digital Credentials API with response mode `dc_api.jwt`. | Yes/No | [HAIP] section 5.2. |
 | N/A | Presentation of a credential in IETF SD-JWT VC format. | Yes/No | Follows RP.G.1. |

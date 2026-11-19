@@ -13,6 +13,7 @@ import { definitions as sessionBinding } from './wallet_solution/SecurityMechani
 import { definitions as sessionEncryption } from './wallet_solution/SecurityMechanisms/SessionEncryption';
 import { definitions as trustMechanisms } from './wallet_solution/SecurityMechanisms/TrustMechanisms';
 import { definitions as validity } from './wallet_solution/SecurityMechanisms/Validity';
+import { definitions as encoding } from './wallet_solution/Shared/Encoding';
 
 /** The 121 baseline test definitions, in the order of the baseline lists. */
 export const baselineDefinitions: TestCaseDefinition[] = [
@@ -39,6 +40,7 @@ export const definitions: TestCaseDefinition[] = [
   ...metadata,
   ...credentialFormats,
   ...rpIntegrity,
+  ...encoding,
 ];
 
 /** The definitions the harness can execute. */

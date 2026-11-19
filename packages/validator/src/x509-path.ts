@@ -31,6 +31,9 @@ const KNOWN_EXTENSIONS = new Set([
   '1.3.6.1.5.5.7.1.3', // qcStatements
 ]);
 
+/** The most certificates a chain may carry: the test PKI's longest path has three (signer, intermediate CA, anchor). */
+export const MAX_CHAIN_LENGTH = 10;
+
 const sameCertificate = (a: Certificate, b: Certificate) => Buffer.from(a.der).equals(Buffer.from(b.der));
 
 function withinValidity(certificate: Certificate, now: Date): string | undefined {
@@ -47,6 +50,8 @@ function withinValidity(certificate: Certificate, now: Date): string | undefined
  */
 export async function validatePath(x5c: string[], anchors: Certificate[], now = new Date()): Promise<PathResult> {
   if (x5c.length === 0) return { ok: false, reason: 'x5c is empty' };
+  // A bound on the chain a presentation may make the Relying Party process (RP_WS_SH_Encoding_006).
+  if (x5c.length > MAX_CHAIN_LENGTH) return { ok: false, reason: `the chain carries ${x5c.length} certificates, more than ${MAX_CHAIN_LENGTH}` };
   let chain: Certificate[];
   try {
     chain = x5c.map((entry) => parseCertificate(entry));

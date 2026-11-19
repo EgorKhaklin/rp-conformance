@@ -25,6 +25,7 @@ import { decompressionBomb, otherSigner, type ServedStatusList, type StatusListF
 import type { CertifiedKey, TestEntity } from './pki';
 import { createHash } from 'node:crypto';
 import { foreignSigner, isSignerFault } from './signers';
+import { isRobustMdocCredentialFault, robustMdocCredential } from './robustness';
 
 const HOUR = 3600;
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -106,6 +107,7 @@ const MDOC_CHANGES: Partial<Record<FaultId, (mso: CborMap, ctx: MdocFaultContext
 /** Applies a credential fault to an issued mdoc (`IssuerSigned`, CBOR) and returns the changed `IssuerSigned`. */
 export async function applyMdocFault(fault: FaultId, issuerSignedBytes: Uint8Array, ctx: MdocFaultContext): Promise<Uint8Array> {
   ensure(fault, 'credential', 'mso_mdoc');
+  if (isRobustMdocCredentialFault(fault)) return robustMdocCredential(issuerSignedBytes, fault);
   const issuerSigned = decodeCbor<CborMap>(issuerSignedBytes);
   const issuerAuth = readCose(issuerSigned.get('issuerAuth'));
   const mso = decodeEmbedded<CborMap>(decodeCbor(issuerAuth.payload ?? new Uint8Array()));

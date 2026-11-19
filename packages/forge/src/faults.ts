@@ -11,6 +11,7 @@ import { base64url, type EcKeyPair, randomSerial, sha256, signEs256 } from './cr
 import { decodeJws, flipBitInSegment, resignJws } from './jose';
 import { type CertifiedKey, createEndEntity, createSelfSignedCa, createSelfSignedSigner, type TestEntity, type TestPki } from './pki';
 import { foreignSigner, isSignerFault } from './signers';
+import { isRobustSdJwtCredentialFault, robustResponse, robustSdJwtCredential } from './robustness';
 
 const HOUR = 3600;
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -183,6 +184,7 @@ const join = (parts: SdJwtParts) => `${[parts.jwt, ...parts.disclosures].join('~
 /** Applies a credential fault to an issued SD-JWT VC (issuer-signed JWT `~` disclosures `~`, without KB-JWT). */
 export async function applyCredentialFault(fault: FaultId, sdJwt: string, ctx: CredentialFaultContext): Promise<string> {
   ensurePoint(fault, 'credential', 'dc+sd-jwt');
+  if (isRobustSdJwtCredentialFault(fault)) return robustSdJwtCredential(sdJwt, fault, ctx.signer);
   const [issuerJwt, ...rest] = sdJwt.split('~');
   const parts: SdJwtParts = { jwt: issuerJwt, disclosures: rest.filter(Boolean) };
   // A signer fault is applied when the credential is issued (forgePresentation).
@@ -426,6 +428,8 @@ export interface ResponseInput {
   walletKey: EcKeyPair;
   /** For `response.other-transaction-key`: the encryption key recorded for another transaction. */
   otherTransactionKey?: JWK;
+  /** For `response.oversized`: the maximum response size the Relying Party declares (ICS RP.P.10), bytes. */
+  maxResponseBytes?: number;
 }
 
 /** Encrypts a response payload as `direct_post.jwt` or `dc_api.jwt` (ECDH-ES unless `alg` says otherwise). */
@@ -480,6 +484,8 @@ export async function buildDcApiResponse(input: ResponseInput, fault?: FaultId):
 async function buildEncryptedResponse(input: ResponseInput, fault?: FaultId): Promise<Record<string, string>> {
   const encrypted = (jwe: string) => ({ response: jwe });
   const valid = () => encryptResponse(input.payload, input.recipient, { enc: input.enc });
+  const robust = await robustResponse(fault, input.payload, (payload) => encryptResponse(payload, input.recipient, { enc: input.enc }), input.maxResponseBytes);
+  if (robust) return robust;
   switch (fault) {
     case undefined:
       return encrypted(await valid());

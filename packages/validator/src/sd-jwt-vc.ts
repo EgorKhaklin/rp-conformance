@@ -5,6 +5,7 @@ import { parseCertificate } from '@owf/x509';
 import { CheckRecorder, type ValidationMode, type ValidationResult } from './checks';
 import { decodeSegment, evaluateStatusList, type FetchedStatusList, fail, isUri, leafJwk } from './status-list';
 import type { MatchedIssuer, TrustRule, TrustStore } from './trust';
+import { duplicateMember } from './json-members';
 
 export type { FetchedStatusList };
 
@@ -149,6 +150,11 @@ export async function validateSdJwtVcPresentation(presentation: string, options:
     // typed, signed with ES256 by the key in cnf.jwk, over this presentation, for this request.
     await recorder.run('key-binding', ['format'], async () => {
       if (!kbJwt) fail('the presentation has no KB-JWT');
+      // RFC 7515 section 4 and RFC 7519 section 4: a member name occurs at most once.
+      for (const [index, part] of [[0, 'header'], [1, 'payload']] as const) {
+        const duplicate = duplicateMember(Buffer.from(kbJwt.split('.')[index] ?? '', 'base64url').toString('utf8'));
+        if (duplicate !== undefined) fail(`the KB-JWT ${part} carries the member ${duplicate} twice`);
+      }
       if (kbHeader.typ !== 'kb+jwt') fail(`KB-JWT typ is ${String(kbHeader.typ)}`);
       if (kbHeader.alg !== 'ES256') fail(`KB-JWT alg ${String(kbHeader.alg)} is not supported`);
       const jwk = (payload.cnf as { jwk?: JsonWebKey } | undefined)?.jwk;
