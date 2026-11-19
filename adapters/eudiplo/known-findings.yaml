@@ -54,4 +54,6 @@
     EUDIPLO answers an Authorization Response above its 10 MB body limit with HTTP 413 without the
     Access-Control-Allow-Origin header its other answers carry, and leaves the session active: the Relying Party's page
     sees only a network error, and the verification result never reports a failure
-  evidence: artifacts/RP_WS_SH_Encoding_004_UF/dc-api/step-1/dc-api-run.json (network, console), step-1/rp-result.json
+  evidence: >-
+    artifacts/RP_WS_SH_Encoding_004_UF/dc-api/step-1/dc-api-run.json (network: the POST fails with net::ERR_FAILED;
+    console: blocked by CORS policy) and step-1/rp-result.json (session active), run r20261119T231252-dc8385
