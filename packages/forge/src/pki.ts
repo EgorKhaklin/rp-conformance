@@ -130,7 +130,7 @@ function derOid(oid: string): Uint8Array {
 }
 
 /** The extensions of the ISO/IEC 18013-5 Annex B profiles that `@owf/x509` has no template field for. */
-const annexBExtensions = (uri: string, documentSigner: boolean): X509Extension[] => [
+export const annexBExtensions = (uri: string, documentSigner: boolean): X509Extension[] => [
   // IssuerAltName (2.5.29.18): GeneralNames with one uniformResourceIdentifier [6].
   { oid: '2.5.29.18', critical: false, value: der(0x30, der(0x86, new TextEncoder().encode(uri))) },
   // ExtendedKeyUsage (2.5.29.37), critical for a document signer.
@@ -394,6 +394,20 @@ async function createEntity(spec: EntitySpec, now: Date): Promise<TestEntity> {
 }
 
 /**
+ * The entities that stand for the Provider under test (issuer test catalogue section 3.2): `PP-T` on `TL-PID`, `QP-T`
+ * on `TL-QEAA`, `PB-T` on `TL-PUB`, and `EP-T` on no list (its anchor is configured as a rulebook anchor, `TA-EAA`).
+ * Their anchors are generated per run like those of every other entity; the leaf certificates the SUT signs with are
+ * issued by the Test Registrar (`enrolSut`) for the SUT's own keys. The `signers` the PKI generates for them are the
+ * harness's own and never the SUT's.
+ */
+export const SUT_ENTITIES: EntitySpec[] = [
+  { id: 'PP-T', list: 'TL-PID', separateRevocationAnchor: true, host: 'pp-t.rp-test' },
+  { id: 'QP-T', trustedList: 'TL-QEAA', qeaaService: 'granted', host: 'qp-t.rp-test' },
+  { id: 'PB-T', list: 'TL-PUB', separateRevocationAnchor: true, host: 'pb-t.rp-test' },
+  { id: 'EP-T', host: 'ep-t.rp-test' },
+];
+
+/**
  * Creates the test PKI of `default_trust_configuration_rp`: per entity its anchors and signing certificates,
  * the scheme operator certificates of the lists, and the Relying Party's access certificate under `AC-A`.
  * Material is generated per run.
@@ -402,6 +416,9 @@ export async function createTestPki(options: { now?: Date; relyingPartyHost?: st
   const now = options.now ?? new Date();
   const entities: Record<string, TestEntity> = {};
   for (const spec of ENTITIES) {
+    entities[spec.id] = await createEntity(spec, now);
+  }
+  for (const spec of SUT_ENTITIES) {
     entities[spec.id] = await createEntity(spec, now);
   }
   const schemeOperators = {} as Record<LoteListId, CertifiedKey>;
