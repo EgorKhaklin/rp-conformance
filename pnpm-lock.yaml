@@ -33,6 +33,22 @@ importers:
         specifier: workspace:*
         version: link:../../packages/core
 
+  adapters/issuer-eudiplo:
+    dependencies:
+      '@rp-conformance/core':
+        specifier: workspace:*
+        version: link:../../packages/core
+      yaml:
+        specifier: ^2.9.1
+        version: 2.9.1
+    devDependencies:
+      '@rp-conformance/forge':
+        specifier: workspace:*
+        version: link:../../packages/forge
+      '@rp-conformance/trust-infrastructure':
+        specifier: workspace:*
+        version: link:../../packages/trust-infrastructure
+
   adapters/reference:
     dependencies:
       '@rp-conformance/core':
