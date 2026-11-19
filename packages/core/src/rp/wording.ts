@@ -45,7 +45,7 @@ export const queries = {
 };
 
 /** A Relying Party test case ID: `RP_<class>_<layer>_<area>_<nnn><variant>[_UF]`. */
-export const testCaseId = (sutClass: 'WS' | 'PP' | 'Inf', layer: 'IA' | 'SM' | 'MS', area: string, number: number, variant = '', unhappyFlow = false) =>
+export const testCaseId = (sutClass: 'WS' | 'PP' | 'Inf', layer: 'IA' | 'SM' | 'MS' | 'DM', area: string, number: number, variant = '', unhappyFlow = false) =>
   `RP_${sutClass}_${layer}_${area}_${String(number).padStart(3, '0')}${variant}${unhappyFlow ? '_UF' : ''}`;
 
 export interface FormatWording {
@@ -140,9 +140,9 @@ const REJ_TEXT =
   'The Relying Party rejects the presentation: its verification result reports a failure and releases no attribute value from the presentation, and the endpoint receiving the Authorization Response does not answer with HTTP status 5xx.';
 
 /** `ACC`: the Relying Party accepts the presentation. */
-export const acc = (options: { credential?: string; query?: string } = {}): Expectation => ({
+export const acc = (options: { credential?: string; query?: string; extra?: string } = {}): Expectation => ({
   codes: ['ACC'],
-  text: `The Relying Party accepts the presentation: its verification result reports success and releases exactly the attributes requested in ${options.query ?? QUERY_PID}, with the values of ${options.credential ?? 'the presented credential'}.`,
+  text: `The Relying Party accepts the presentation: its verification result reports success and releases exactly the attributes requested in ${options.query ?? QUERY_PID}, with the values of ${options.credential ?? 'the presented credential'}.${options.extra ? ` ${options.extra}` : ''}`,
 });
 
 /** `REJ`: the Relying Party rejects the presentation. */

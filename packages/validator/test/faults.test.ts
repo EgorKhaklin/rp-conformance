@@ -35,7 +35,8 @@ const actionWith = (fault?: FaultId, format: 'dc+sd-jwt' | 'mso_mdoc' = 'dc+sd-j
   const credentialFormat = info?.format === 'mso_mdoc' || info?.format === 'cwt' ? 'mso_mdoc' : format;
   const only = (point: string) => (info?.point === point ? [fault as FaultId] : []);
   return presentation({
-    query: pidQueryOf(credentialFormat),
+    // An attribute variant of the PID is presented for the query that requests the changed attributes.
+    query: info?.query ?? pidQueryOf(credentialFormat),
     credential: pid.of(credentialFormat, { faults: only('credential'), ...(info?.issuer ? { issuer: info.issuer } : {}) }),
     ...(info?.point === 'identifier-list'
       ? { identifierList: identifierListToken.cwt({ contains: false, faults: only('identifier-list') }) }
@@ -251,6 +252,14 @@ describe('fault self-validation', () => {
     const query = fault === 'request.trusted-authorities-other' ? 'default_query_pid_trusted_authorities' : 'default_query_pid';
     const result = await fixture.validateRequests(flow as 'redirect' | 'dc-api', query, { fault });
     expect(result.failures).toEqual([faultInfo(fault).target]);
+  });
+
+  // The disclosure variants of the data model test cases apply to both formats.
+  it.each(['presentation.family-name-withheld', 'presentation.unrequested-disclosed'] as const)('%s fails exactly its target check in mdoc format too', async (fault) => {
+    const result = await fixture.validate(actionWith(fault, 'mso_mdoc'));
+    const target = faultInfo(fault).target;
+    expect(result.failures).toEqual(target ? [target] : []);
+    if (target) expect(reasonOf(result, target)).toMatch(/family_name is not disclosed/);
   });
 
   it('every fault that fails key-binding or kb-freshness has its own expected reason', () => {

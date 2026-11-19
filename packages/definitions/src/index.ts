@@ -1,6 +1,6 @@
 import { isExecutable, type TestCaseDefinition } from '@rp-conformance/core';
 import { definitions as ppRevocation } from './pid_provider/SecurityMechanisms/Revocation';
-import { definitions as mainInteraction } from './wallet_solution/Interaction/MainInteraction';
+import { definitions as mainInteraction, furtherDefinitions as furtherMainInteraction } from './wallet_solution/Interaction/MainInteraction';
 import { definitions as infTrustMechanisms } from './infrastructure/SecurityMechanisms/TrustMechanisms';
 import { definitions as credentialFormats } from './wallet_solution/MessageStructure/CredentialFormats';
 import { definitions as metadata } from './wallet_solution/MessageStructure/Metadata';
@@ -13,6 +13,8 @@ import { definitions as sessionBinding } from './wallet_solution/SecurityMechani
 import { definitions as sessionEncryption } from './wallet_solution/SecurityMechanisms/SessionEncryption';
 import { definitions as trustMechanisms } from './wallet_solution/SecurityMechanisms/TrustMechanisms';
 import { definitions as validity } from './wallet_solution/SecurityMechanisms/Validity';
+import { definitions as identifyingData } from './wallet_solution/DataModel/IdentifyingData';
+import { definitions as credentialMetadata } from './wallet_solution/DataModel/CredentialMetadata';
 
 /** The 121 baseline test definitions, in the order of the baseline lists. */
 export const baselineDefinitions: TestCaseDefinition[] = [
@@ -39,6 +41,9 @@ export const definitions: TestCaseDefinition[] = [
   ...metadata,
   ...credentialFormats,
   ...rpIntegrity,
+  ...furtherMainInteraction,
+  ...identifyingData,
+  ...credentialMetadata,
 ];
 
 /** The definitions the harness can execute. */

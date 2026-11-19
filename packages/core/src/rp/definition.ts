@@ -183,9 +183,22 @@ export type StepAction = PresentationAction | StartAction | TrustListAction | Re
  * `client_metadata`. `REJ_OR_ACC`: the Relying Party rejects the presentation, or accepts it and releases exactly the
  * requested attributes with their issuer-signed values (DeviceBinding_011: a device-signed element is ignored).
  * `STALE`: the verification result signals that a trust list it depends on is stale (`trust-list-stale`). `CONF`: the
- * captured requests pass the request checks the expectation names.
+ * captured requests pass the request checks the expectation names. `REJ_OR_INVALID`: the Relying Party rejects the
+ * presentation, or accepts it and flags an attribute as invalid (`attribute-invalid`, IdentifyingData_004).
  */
-export type ExpectationCode = 'ACC' | 'REJ' | 'REJ_OR_ACC' | 'NOSTAT' | 'NOFETCH' | 'FETCHED' | 'POLICY' | 'LIST_RETRIEVED' | 'ENC_KEY' | 'STALE' | 'CONF';
+export type ExpectationCode =
+  | 'ACC'
+  | 'REJ'
+  | 'REJ_OR_ACC'
+  | 'NOSTAT'
+  | 'NOFETCH'
+  | 'FETCHED'
+  | 'POLICY'
+  | 'LIST_RETRIEVED'
+  | 'ENC_KEY'
+  | 'STALE'
+  | 'CONF'
+  | 'REJ_OR_INVALID';
 
 /** The ICS declaration a `POLICY` expectation is compared with. */
 export interface PolicyReference {
@@ -302,6 +315,7 @@ export function presentation(
     if (!(points as readonly string[]).includes(info.point)) throw new Error(`fault ${fault} does not apply to the ${points.join(' or ')}`);
     if (info.format && info.format !== format) throw new Error(`fault ${fault} applies to ${info.format}, not ${format}`);
     if (info.issuer && info.issuer !== credential.issuer) throw new Error(`fault ${fault} needs a credential issued by ${info.issuer}`);
+    if (info.query && info.query !== result.query) throw new Error(`fault ${fault} is presented for ${info.query}, not ${result.query}`);
   }
   const replays = result.response.faults.includes('presentation.replay');
   if (replays !== (result.response.presentationOfStep !== undefined)) {
