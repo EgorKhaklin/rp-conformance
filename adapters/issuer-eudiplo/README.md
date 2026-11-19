@@ -41,7 +41,7 @@ EUDIPLO_PORT=3216 pnpm test:issuer-eudiplo
 docker compose -p rp-conformance-i16 -f adapters/eudiplo/docker-compose.yml down -v
 ```
 
-It enrols the SUT with the Test Registrar, publishes `TL-WP` and `TL-PID` on the Test Trust Infrastructure, runs
+It enrols the SUT with the Test Registrar, publishes `TL-WP` (as the Test Wallet Provider builds it, `publishTlWp`) and `TL-PID` on the Test Trust Infrastructure, runs
 `setUp`, checks the Credential Issuer metadata (the PID configuration, key attestation levels, batch size, nonce and
 notification endpoints, encryption), the authorization server metadata (`attest_jwt_client_auth`, DPoP), the signed
 metadata (`Accept: application/jwt`, `x5c` = the Registrar's access certificate chain), creates offers by value and by

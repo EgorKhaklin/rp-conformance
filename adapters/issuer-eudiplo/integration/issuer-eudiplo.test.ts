@@ -10,6 +10,7 @@
 // the tenant down. EUDIPLO_EXPECT_VERSION (default 9.1.0) is the version the test expects the instance to report.
 import { buildSealedLote, createTestPki, enrolSut, toEnrolledCertificate, type TestPki } from '@rp-conformance/forge';
 import { TrustInfrastructure } from '@rp-conformance/trust-infrastructure';
+import { publishTlWp, WALLET_PROVIDER_IDS } from '@rp-conformance/wallet-provider';
 import type { IssuerTestEnvironment, PublishedTrustList } from '@rp-conformance/core';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { EudiploError, IssuerEudiploAdapter, loadIssuerIcs, PID_SD_JWT_CONFIGURATION, PID_SUBJECTS, PID_VCT } from '../src/index';
@@ -51,16 +52,14 @@ describe('EUDIPLO issuer adapter', () => {
     });
     await trust.start({ port: 0, publicHost: harnessHost });
     const lists: PublishedTrustList[] = [];
-    for (const id of ['TL-WP', 'TL-PID'] as const) {
-      const { jws, document } = await buildSealedLote({ list: id, pki, distributionPoint: trust.urlOf(namespace, id) });
-      const { url } = trust.publish(namespace, id, jws);
-      lists.push({
-        id,
-        loteType: (document as { ListAndSchemeInformation?: { LoTEType?: string } }).ListAndSchemeInformation?.LoTEType ?? id,
-        url,
-        schemeOperatorCertificatePem: pki.schemeOperators[id].certificate.pem,
-      });
-    }
+    const loteTypeOf = (document: unknown, id: string) =>
+      (document as { LoTE?: { ListAndSchemeInformation?: { LoTEType?: string } } }).LoTE?.ListAndSchemeInformation?.LoTEType ?? id;
+    // TL-WP as the Test Wallet Provider publishes it: WP-A (separate WIA and KA anchors), WP-B, WP-W.
+    const tlWp = await publishTlWp(trust, namespace, pki);
+    lists.push({ id: 'TL-WP', loteType: loteTypeOf(tlWp.document, 'TL-WP'), url: tlWp.url, schemeOperatorCertificatePem: pki.schemeOperators['TL-WP'].certificate.pem });
+    const tlPid = await buildSealedLote({ list: 'TL-PID', pki, distributionPoint: trust.urlOf(namespace, 'TL-PID') });
+    const { url: tlPidUrl } = trust.publish(namespace, 'TL-PID', tlPid.jws);
+    lists.push({ id: 'TL-PID', loteType: loteTypeOf(tlPid.document, 'TL-PID'), url: tlPidUrl, schemeOperatorCertificatePem: pki.schemeOperators['TL-PID'].certificate.pem });
     env = {
       runId: namespace,
       trustLists: lists,
@@ -178,6 +177,17 @@ describe('EUDIPLO issuer adapter', () => {
 
   it('keeps status lists of 2 bits, 10 000 entries and the shortest lifetime, re-signed on every change', async () => {
     expect(await adapter.statusListSettings()).toMatchObject({ bits: 2, capacity: 10_000, ttl: 60, immediateUpdate: true });
+  });
+
+  it('is given the TL-WP of the Test Wallet Provider', async () => {
+    const tlWp = env.trustLists.find((list) => list.id === 'TL-WP');
+    const response = await fetch((tlWp?.url ?? '').replace(harnessHost, '127.0.0.1'));
+    expect(response.status).toBe(200);
+    const payload = decodeJwtPart(await response.text(), 1);
+    const names = (payload.LoTE?.TrustedEntitiesList ?? []).flatMap((e: { TrustedEntityInformation: { TEName: { value: string }[] } }) =>
+      e.TrustedEntityInformation.TEName.map((n) => n.value),
+    );
+    for (const id of WALLET_PROVIDER_IDS.filter((id) => id !== 'WP-C')) expect(names.join(' ')).toContain(id);
   });
 
   it('refreshes its trust list cache', async () => {

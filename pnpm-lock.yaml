@@ -48,6 +48,9 @@ importers:
       '@rp-conformance/trust-infrastructure':
         specifier: workspace:*
         version: link:../../packages/trust-infrastructure
+      '@rp-conformance/wallet-provider':
+        specifier: workspace:*
+        version: link:../../packages/wallet-provider
 
   adapters/reference:
     dependencies:
