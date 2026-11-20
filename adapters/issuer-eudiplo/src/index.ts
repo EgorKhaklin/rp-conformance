@@ -10,7 +10,8 @@ import type {
 import { icsList, icsNumber } from './ics';
 import { PID_FIELDS, PID_SUBJECTS } from './subjects';
 
-export { ICS_PATH, icsList, icsNumber, loadIssuerIcs } from './ics';
+export { durationSeconds, ICS_PATH, icsList, icsNumber, icsProblems, loadIssuerIcs } from './ics';
+export { REFERENCE_ENV_PATH, REFERENCE_EUDIPLO, type ReferenceEudiplo } from './reference';
 export { PID_FIELDS, PID_SUBJECTS } from './subjects';
 
 /** The ID of the PID credential configuration in SD-JWT VC format, as the Credential Issuer metadata names it. */
@@ -22,7 +23,7 @@ export const PID_VCT = 'urn:eudi:pid:1';
 /** The built-in authorization server of the tenant: the only one that redeems pre-authorized codes. */
 const BUILT_IN_AS = 'issuer-built-in';
 
-/** Shortest status list token lifetime EUDIPLO 9.1.0 accepts (`ttl`, `GET/PUT /api/status-list-config`, minimum 60). */
+/** Shortest status list token lifetime EUDIPLO accepts (`ttl`, `GET/PUT /api/status-list-config`, minimum 60). */
 export const STATUS_LIST_TTL_SECONDS = 60;
 /** Lifetime of the PID; more than 24 hours, so it is not short-lived (`P-SHORT` No). */
 const PID_LIFETIME_SECONDS = 30 * 24 * 60 * 60;
@@ -40,12 +41,17 @@ export interface IssuerEudiploAdapterOptions {
   harnessHost?: string;
 }
 
-/** What EUDIPLO offers beyond 9.1.0 and the adapter uses where the instance under test accepts it. */
+/**
+ * What the reference image has beyond the release 9.1.0, and the adapter uses where the instance under test accepts it,
+ * so the same adapter still configures 9.1.0 (without them).
+ */
 export interface EudiploCapabilities {
-  /** `GET /api/key-chain/{id}/csr` (EUDIPLO/eudiplo#1397, after 9.1.0): enrolment by CSR instead of key import. */
+  /** `GET /api/key-chain/{id}/csr` (EUDIPLO/eudiplo#1397): enrolment by CSR instead of key import. */
   csr: boolean;
-  /** `walletAttestationStatusCheckMode` (EUDIPLO/eudiplo#1340, after 9.1.0): the adapter sets `strict`. */
+  /** `walletAttestationStatusCheckMode` (EUDIPLO/eudiplo#1340, #1468): `strict` for WIAs and KAs. */
   statusCheckMode: boolean;
+  /** `revokeWithWalletUnit` (EUDIPLO/eudiplo#1468): the PID is revoked with its wallet unit (revocation chaining). */
+  revokeWithWalletUnit: boolean;
 }
 
 /** One entry of `GET /api/session/{id}/credential-status`. */
@@ -110,7 +116,7 @@ export class IssuerEudiploAdapter implements IssuerAdapter {
   private keyChains?: KeyChains;
   private version?: { version?: string; revision?: string };
   private method?: 'csr' | 'generated';
-  private capabilities: EudiploCapabilities = { csr: false, statusCheckMode: false };
+  private capabilities: EudiploCapabilities = { csr: false, statusCheckMode: false, revokeWithWalletUnit: false };
 
   constructor(private readonly options: IssuerEudiploAdapterOptions = {}) {
     this.baseUrl = (options.baseUrl ?? process.env.EUDIPLO_URL ?? `http://127.0.0.1:${process.env.EUDIPLO_PORT ?? 3000}`).replace(/\/$/, '');
@@ -270,6 +276,8 @@ export class IssuerEudiploAdapter implements IssuerAdapter {
       user_authentication: icsList(env.ics, 'ICS-04.user_authentication', ['iso_18045_high']),
     };
     const batchSize = icsNumber(env.ics, 'ICS-08.batch_size', 1);
+    // Revocation chaining (WURevocation_18): EUDIPLO follows the status of the key attestation (the wallet unit
+    // attestation) and revokes the PID with it. 9.1.0 does not know the field.
     const pidConfiguration = (id: string, description: string) => ({
       id,
       description,
@@ -287,12 +295,16 @@ export class IssuerEudiploAdapter implements IssuerAdapter {
       keyChainId: attestation,
       lifeTime: PID_LIFETIME_SECONDS,
       fields: PID_FIELDS,
+      revokeWithWalletUnit: true,
     });
-    await this.call('POST', '/api/issuer/credentials', pidConfiguration(PID_SD_JWT_CONFIGURATION, 'PID in SD-JWT VC format (PID Rulebook), default_configuration_PP_1'));
+    const droppedFromPid = await this.postWithoutUnknownKeys(
+      '/api/issuer/credentials',
+      pidConfiguration(PID_SD_JWT_CONFIGURATION, 'PID in SD-JWT VC format (PID Rulebook), default_configuration_PP_1'),
+    );
+    this.capabilities.revokeWithWalletUnit = !droppedFromPid.includes('revokeWithWalletUnit');
     // Issue 24 (PP_WS_MS_CredentialEndpoint_004_UF): a second configuration that no offer of the suite names, so a
     // credential request can name a configuration the access token was not issued for.
-    await this.call(
-      'POST',
+    await this.postWithoutUnknownKeys(
       '/api/issuer/credentials',
       pidConfiguration(SECOND_SD_JWT_CONFIGURATION, 'Second PID configuration in SD-JWT VC format, never offered: target of PP_WS_MS_CredentialEndpoint_004_UF'),
     );
@@ -311,8 +323,9 @@ export class IssuerEudiploAdapter implements IssuerAdapter {
       // 9.1.0 imports the Registrar's certificate with `mode` `import` (its default `generate` asks a registrar);
       // later releases have no `mode` and publish `jwt` as given.
       registrationCertificate: { enabled: true, mode: 'import', jwt: env.registrationCertificate },
-      // A PID Provider rejects a WIA or KA whose status it cannot obtain (catalogue decision 2). EUDIPLO 9.1.0 has no
-      // setting for it and accepts them (best effort); later releases take `walletAttestationStatusCheckMode`.
+      // A PID Provider rejects a WIA or KA whose status it cannot obtain (catalogue decision 2): `strict`, for WIAs at
+      // the authorization server (inherited) and KAs at the credential endpoint. 9.1.0 has no such setting and accepts
+      // them (best effort).
       walletAttestationStatusCheckMode: 'strict',
     };
     const dropped = await this.postWithoutUnknownKeys('/api/issuer/config', issuance);
@@ -388,6 +401,14 @@ export class IssuerEudiploAdapter implements IssuerAdapter {
     return `${scheme}?credential_offer=${encodeURIComponent(JSON.stringify(offer))}`;
   }
 
+  /** The issuance configuration and the PID configuration as EUDIPLO stored them, to check what `setUp` configured. */
+  async configuration(): Promise<{ issuance: Record<string, unknown>; pid: Record<string, unknown> }> {
+    return {
+      issuance: await this.call<Record<string, unknown>>('GET', '/api/issuer/config'),
+      pid: await this.call<Record<string, unknown>>('GET', `/api/issuer/credentials/${PID_SD_JWT_CONFIGURATION}`),
+    };
+  }
+
   /** The tenant's status list settings (`GET /api/status-list-config`). */
   async statusListSettings(): Promise<Record<string, unknown>> {
     return this.call<Record<string, unknown>>('GET', '/api/status-list-config');
@@ -427,6 +448,7 @@ export class IssuerEudiploAdapter implements IssuerAdapter {
       ...(this.tenantId ? { tenant: this.tenantId } : {}),
       ...(this.method ? { enrolment: this.method === 'csr' ? 'CSR (GET /api/key-chain/{id}/csr)' : 'keys generated by the Registrar, imported (POST /api/key-chain/import)' } : {}),
       walletAttestationStatusCheckMode: this.capabilities.statusCheckMode ? 'strict' : 'not configurable (best effort)',
+      revokeWithWalletUnit: this.capabilities.revokeWithWalletUnit ? 'on' : 'not configurable',
     };
   }
 
