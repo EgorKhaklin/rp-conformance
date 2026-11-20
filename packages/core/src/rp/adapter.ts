@@ -6,7 +6,10 @@ import type { Flow } from './definition';
  * query asks for its credential "in the credential format of the test case", so it has one variant per format: the
  * plain ID for SD-JWT VC and `…_mdoc` for mdoc. `…_trusted_authorities` is the variant of `default_query_pid`
  * restricted with a `trusted_authorities` entry of type `aki` naming the PID/Issuance anchor of `PP-A`
- * (TrustMechanisms_016). Test cases call each variant by its FCAF name, for example `default_query_pid`.
+ * (TrustMechanisms_016). Test cases call each variant by its FCAF name, for example `default_query_pid`. The
+ * `default_query_pid_…` variants of the data model test cases request other PID attributes: every mandatory one
+ * (`_mandatory`), the age-over attribute for 18 without and with a `values` constraint `true` (`_age_over_18`,
+ * `_age_over_18_true`), and three members of the structured address (`_address`, SD-JWT VC only).
  */
 export type DefaultQueryId =
   | 'default_query_pid'
@@ -19,7 +22,14 @@ export type DefaultQueryId =
   | 'default_query_pubeaa'
   | 'default_query_pubeaa_mdoc'
   | 'default_query_eaa'
-  | 'default_query_eaa_mdoc';
+  | 'default_query_eaa_mdoc'
+  | 'default_query_pid_mandatory'
+  | 'default_query_pid_mandatory_mdoc'
+  | 'default_query_pid_age_over_18'
+  | 'default_query_pid_age_over_18_mdoc'
+  | 'default_query_pid_age_over_18_true'
+  | 'default_query_pid_age_over_18_true_mdoc'
+  | 'default_query_pid_address';
 
 /** Every default query, in the order the adapters configure them. */
 export const DEFAULT_QUERY_IDS: DefaultQueryId[] = [
@@ -34,6 +44,13 @@ export const DEFAULT_QUERY_IDS: DefaultQueryId[] = [
   'default_query_pubeaa_mdoc',
   'default_query_eaa',
   'default_query_eaa_mdoc',
+  'default_query_pid_mandatory',
+  'default_query_pid_mandatory_mdoc',
+  'default_query_pid_age_over_18',
+  'default_query_pid_age_over_18_mdoc',
+  'default_query_pid_age_over_18_true',
+  'default_query_pid_age_over_18_true_mdoc',
+  'default_query_pid_address',
 ];
 
 /**
@@ -99,7 +116,8 @@ export interface DcqlQuery {
     id: string;
     format: string;
     meta?: Record<string, unknown>;
-    claims?: { id?: string; path: (string | number | null)[] }[];
+    /** `values`: the values the claim may have (OpenID4VP section 6.3). */
+    claims?: { id?: string; path: (string | number | null)[]; values?: (string | number | boolean)[] }[];
     require_cryptographic_holder_binding?: boolean;
     trusted_authorities?: { type: string; values: string[] }[];
   }[];

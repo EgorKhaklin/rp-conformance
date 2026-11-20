@@ -18,6 +18,9 @@ export const CREDENTIAL_CHECKS = [
   'key-binding',
   'kb-freshness',
   'status-reference',
+  // The disclosed claims satisfy the credential query (every requested claim disclosed, every `values` constraint met,
+  // OpenID4VP sections 6.3, 6.4 and 8.6), and the PID attributes have the data types of the PID rulebook.
+  'claims',
 ] as const;
 
 /** The credential checks of an mdoc presentation (ISO/IEC 18013-5 section 9.3.1, OpenID4VP Appendix B.2). */

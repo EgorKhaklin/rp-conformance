@@ -15,8 +15,11 @@ beforeAll(async () => {
   fixture = await Fixture.create();
 });
 
-// REJ_OR_ACC: the reference validator takes the rejecting branch (a device-signed element fails key-binding).
-const rejects = (codes: string[]) => codes.some((c) => c === 'REJ' || c === 'REJ_OR_ACC' || c === 'NOSTAT' || c === 'POLICY');
+// REJ_OR_ACC: the reference validator takes the rejecting branch when the step's fault has a target (a device-signed
+// element fails key-binding), and the accepting one when it has none (CredentialMetadata_001: the extra disclosures pass
+// every check, and the reference Relying Party releases only the requested attributes). REJ_OR_INVALID: it rejects.
+const rejects = (codes: string[], target?: string) =>
+  codes.some((c) => c === 'REJ' || (c === 'REJ_OR_ACC' && target !== undefined) || c === 'NOSTAT' || c === 'POLICY' || c === 'REJ_OR_INVALID');
 
 async function selfValidate(definition: TestCaseDefinition, flow: Flow) {
   const outcomes: { step: number; expected: string; failures: string[]; target?: string; stale?: boolean; exact?: boolean; late?: boolean }[] = [];
@@ -78,8 +81,8 @@ async function selfValidate(definition: TestCaseDefinition, flow: Flow) {
 }
 
 describe('executable definitions against the reference validator', () => {
-  it('all 234 test definitions are executable: the 121 of the baseline (Phases 1 to 4), 97 of Phase 5 and 16 of IA_Engagement and IA_ProtocolFlow', () => {
-    expect(executableDefinitions).toHaveLength(234);
+  it('all 258 test definitions are executable: the 121 of the baseline (Phases 1 to 4), 97 of Phase 5, 16 of IA_Engagement and IA_ProtocolFlow and 24 of the data model (issue 30)', () => {
+    expect(executableDefinitions).toHaveLength(258);
   });
 
   const runs = executableDefinitions.flatMap((d) => flowsOf(d).map((flow) => [d.id, flow, d] as const));
@@ -94,7 +97,7 @@ describe('executable definitions against the reference validator', () => {
         continue;
       }
       expect(outcome.stale ?? false, `${label}: trust-list-stale`).toBe(outcome.expected.split('+').includes('STALE'));
-      if (outcome.late || !rejects(outcome.expected.split('+'))) {
+      if (outcome.late || !rejects(outcome.expected.split('+'), outcome.target)) {
         expect(outcome.failures, label).toEqual([]);
       } else {
         expect(outcome.failures, label).toHaveLength(1);

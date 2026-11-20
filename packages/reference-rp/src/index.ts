@@ -418,6 +418,7 @@ export class ReferenceRelyingParty {
         maxStatusListBytes: this.options.maxStatusListBytes,
         validStatuses: this.options.validStatuses,
         trustedAuthorities: credentialQuery.trusted_authorities,
+        requestedClaims: credentialQuery.claims ?? [],
       };
       const validation =
         credentialQuery.format === 'mso_mdoc'
