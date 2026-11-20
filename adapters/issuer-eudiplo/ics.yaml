@@ -42,7 +42,7 @@ items:
   ICS-07.T_chain: PT7M                       # 30 s WALLET_UNIT_STATUS_CHECK_INTERVAL (adapters/eudiplo/docker-compose.yml, live in the container) + reuse of SL-WP-A for its ttl 300 s (harness default; EUDIPLO reuses a list for its ttl, at most 1 h) + T_rev 60 s = 390 s, rounded up
   ICS-08: "Yes"                              # batchSize below
   ICS-08.batch_size: 2                       # live: issuance configuration batchSize 2, published as batch_credential_issuance.batch_size (a maximum: one proof still gives one credential)
-  ICS-08.credential_reuse_policy: none       # config.credentialReusePolicy not set
+  ICS-08.credential_reuse_policy: once_only, limited_time  # config.credentialReusePolicy arf_annex_ii: method A with batch_size 2, then method B (issue 24)
   ICS-09: "Yes"                              # source: built-in token.refreshTokenEnabled default true (token-grant-rules.ts), refresh tokens bound to the DPoP key
   ICS-10: "No"                               # deferred issuance needs an attribute provider or webhook that defers; the adapter configures none
   ICS-11: "Yes"                              # live: notificationEndpointEnabled true, notification_endpoint in the metadata

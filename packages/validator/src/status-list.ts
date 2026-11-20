@@ -55,8 +55,8 @@ export const CWT = { iss: 1, sub: 2, exp: 4, iat: 6, identifierList: 65530, stat
 
 export interface StatusListInput {
   format: 'jwt' | 'cwt';
-  /** The credential's reference. */
-  reference: { uri: string; idx: number } | undefined;
+  /** The credential's reference; an mdoc's may name the certificate that signs the list (ISO/IEC 18013-5 ed2). */
+  reference: { uri: string; idx: number; certificate?: Uint8Array } | undefined;
   /** The trusted issuer the credential matched, with the anchors its status lists must be signed under. */
   issuer: MatchedIssuer | undefined;
   fetchStatusList: (uri: string) => Promise<FetchedStatusList>;
@@ -66,6 +66,16 @@ export interface StatusListInput {
   now: Date;
   /** Called right before the status list is requested. */
   onFetched?: () => void;
+  /** Freshness policy (ICS RP.R.7, RP.R.8): the maximum age of a token by its `iat`, and whether an `iat` in the future is refused. */
+  freshness?: StatusListFreshness;
+}
+
+/** The freshness policy of the Relying Party for Status List Tokens (Token Status List section 8.3 step 4b). */
+export interface StatusListFreshness {
+  /** The maximum age of a token by its `iat`, seconds (ICS RP.R.7); unlimited when left out. */
+  maxAgeSeconds?: number;
+  /** Refuse a token whose `iat` lies more than `T_skew` in the future (ICS RP.R.8). */
+  refuseFutureIat?: boolean;
 }
 
 /** A Status List Token decoded in either format: its header, its claims and what was signed. */
@@ -125,6 +135,9 @@ export async function evaluateStatusList(recorder: CheckRecorder, input: StatusL
     if (!token?.chain?.length) fail(`the Status List Token has no ${input.format === 'jwt' ? 'x5c' : 'x5chain in its protected header'}`);
     const path = await validatePath(token?.chain ?? [], input.issuer?.statusAnchors ?? [], now);
     if (!path.ok) fail(`not under a revocation anchor of ${input.issuer?.name}: ${path.reason}`);
+    // RP_PP_SM_Revocation_031: the certificate the MSO status element names signs the list.
+    const named = reference?.certificate;
+    if (named && !Buffer.from(token?.chain?.[0] ?? '', 'base64').equals(Buffer.from(named))) fail('the Status List Token is not signed by the certificate the MSO status element names');
     return path.ok ? `${path.leaf.subject.commonName} under ${path.anchor.subject.commonName}` : undefined;
   });
 
@@ -156,9 +169,13 @@ export async function evaluateStatusList(recorder: CheckRecorder, input: StatusL
 
   await recorder.run('status-list-validity', ['status-list-format'], () => {
     const exp = token?.exp;
-    if (exp === undefined) return new NotApplicable('no exp');
+    if (exp === undefined) {
+      checkFreshness(token?.iat, input.freshness, nowSeconds, skew);
+      return new NotApplicable('no exp');
+    }
     if (typeof exp !== 'number') fail('exp is not a number');
     if (nowSeconds > (exp as number) + skew) fail(`expired: exp ${exp}, now ${nowSeconds}, T_skew ${skew}`);
+    checkFreshness(token?.iat, input.freshness, nowSeconds, skew);
   });
 
   await recorder.run('status-list-decoding', ['status-list-format'], () => {
@@ -270,4 +287,13 @@ function decodeCwt(bytes: Uint8Array): DecodedToken {
     list: claims.get(CWT.statusList),
     verify: (jwk) => verifyCoseSign1(structure, jwk),
   };
+}
+
+/** The freshness policy of the Relying Party applied to a token's `iat` (RP_PP_SM_Revocation_014). */
+function checkFreshness(iat: unknown, freshness: StatusListFreshness | undefined, nowSeconds: number, skew: number) {
+  if (!freshness || typeof iat !== 'number') return;
+  if (freshness.refuseFutureIat && iat > nowSeconds + skew) fail(`iat ${iat} lies in the future (now ${nowSeconds}, T_skew ${skew})`);
+  if (freshness.maxAgeSeconds !== undefined && nowSeconds - iat > freshness.maxAgeSeconds) {
+    fail(`iat ${iat} is older than the maximum age of ${freshness.maxAgeSeconds} s`);
+  }
 }

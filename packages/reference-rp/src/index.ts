@@ -11,19 +11,22 @@ import type {
   RunningServer,
   ServerOptions,
 } from '@rp-conformance/core';
-import { categoryOfQuery, sendJson, sendText, startServer } from '@rp-conformance/core';
-import { base64url, jwkThumbprint, type Oid4vpHandover, PID_DOCTYPE, PID_VCT, signCompactJws } from '@rp-conformance/forge';
+import { categoryOfCredentialQuery, sendJson, sendText, startServer } from '@rp-conformance/core';
+import { base64url, decodeCbor, jwkThumbprint, type Oid4vpHandover, PID_DOCTYPE, PID_VCT, readCose, signCompactJws } from '@rp-conformance/forge';
 import type { CheckResult } from '@rp-conformance/core';
 import {
   type FetchedStatusList,
   type ListSource,
   type MdocValidation,
   type SdJwtVcValidation,
+  type StatusListFreshness,
   TRUST_RULES,
   TrustStore,
   validateAuthorizationResponse,
   validateMdocPresentation,
+  validateCombinedBinding,
   validateSdJwtVcPresentation,
+  validateVpToken,
 } from '@rp-conformance/validator';
 import { exportJWK, generateKeyPair, importJWK } from 'jose';
 
@@ -50,6 +53,16 @@ export interface ReferenceRpOptions extends ServerOptions {
   allowInsecureUrls?: boolean;
   /** The grace period `G` after the `NextUpdate` of a trust list (ICS RP.T.2), milliseconds; default 0. */
   graceMs?: number;
+  /** The maximum size of an Authorization Response (ICS RP.P.11), bytes; a larger request body is refused with 413. */
+  maxResponseBytes?: number;
+  /** Cache Status List Tokens for their `ttl` (ICS RP.R.5). */
+  cacheStatusLists?: boolean;
+  /** Timeout of a status list or identifier list retrieval (ICS RP.R.6), milliseconds; default 5000. */
+  statusTimeoutMs?: number;
+  /** Freshness policy for Status List Tokens (ICS RP.R.7, RP.R.8). */
+  statusListFreshness?: StatusListFreshness;
+  /** Reject a PID whose administrative expiry date has passed (ICS RP.P.12). */
+  rejectPastExpiryDate?: boolean;
   /** The transaction lifetime `T_tx` (ICS RP.P.7), milliseconds; default 300 s. */
   transactionLifetimeMs?: number;
 }
@@ -102,9 +115,24 @@ export interface ReferenceRpResult {
 
 const hash: CallbackContext['hash'] = (data, alg) => createHash(alg.replace('-', '').toLowerCase()).update(data).digest();
 
+/**
+ * Whether a host is an address the reference Relying Party never requests a status list from: a link-local or private
+ * IPv4 or IPv6 literal (RP_PP_IA_Supportive_006). Loopback stays allowed, since the harness itself runs on 127.0.0.1.
+ */
+export function isBlockedHost(hostname: string): boolean {
+  const host = hostname.replace(/^\[(.*)\]$/, '$1').toLowerCase();
+  const v4 = /^(\d+)\.(\d+)\.(\d+)\.(\d+)$/.exec(host)?.slice(1).map(Number);
+  if (v4) {
+    const [a, b] = v4 as [number, number];
+    return a === 10 || (a === 169 && b === 254) || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168) || a === 0;
+  }
+  return /^fe[89ab][0-9a-f]:/.test(host) || /^f[cd][0-9a-f]{2}:/.test(host);
+}
+
 /** Fetches a status list or identifier list: text for a JWT, bytes for a CWT. */
-async function fetchList(uri: string, accept: string): Promise<FetchedStatusList> {
-  const fetched = await fetch(uri, { headers: { accept }, signal: AbortSignal.timeout(5000) });
+async function fetchList(uri: string, accept: string, timeoutMs = 5000): Promise<FetchedStatusList> {
+  if (isBlockedHost(new URL(uri).hostname)) throw new Error(`the status list URI names the link-local or private address ${new URL(uri).hostname}`);
+  const fetched = await fetch(uri, { headers: { accept }, signal: AbortSignal.timeout(timeoutMs) });
   const bytes = new Uint8Array(await fetched.arrayBuffer());
   return { status: fetched.status, body: accept.endsWith('+jwt') ? new TextDecoder().decode(bytes) : bytes, contentType: fetched.headers.get('content-type') };
 }
@@ -128,6 +156,8 @@ export class ReferenceRelyingParty {
   readonly trust: TrustStore;
   readonly clientId: string;
   private accessKey?: CryptoKey;
+  /** Status List Tokens by URI, until their `ttl` has passed (ICS RP.R.5). */
+  private readonly statusCache = new Map<string, { fetched: FetchedStatusList; expiresAt: number }>();
 
   constructor(private readonly options: ReferenceRpOptions) {
     this.trust = new TrustStore({
@@ -164,10 +194,26 @@ export class ReferenceRelyingParty {
     return this.trust.refresh();
   }
 
+  /** A Status List Token from the cache while its `ttl` lasts, otherwise retrieved (ICS RP.R.5, RP.R.6). */
+  private async fetchStatusList(uri: string, accept: string): Promise<FetchedStatusList> {
+    const cached = this.statusCache.get(uri);
+    if (cached && cached.expiresAt > Date.now()) return cached.fetched;
+    const fetched = await fetchList(uri, accept, this.options.statusTimeoutMs);
+    const ttl = this.options.cacheStatusLists && fetched.status === 200 ? ttlOf(fetched.body) : undefined;
+    if (ttl) this.statusCache.set(uri, { fetched, expiresAt: Date.now() + ttl * 1000 });
+    return fetched;
+  }
+
   private async route(method: string, rawUrl: string, body: Buffer, res: import('node:http').ServerResponse, headers: import('node:http').IncomingHttpHeaders = {}) {
     const url = new URL(rawUrl, 'http://localhost');
     const path = url.pathname;
     let match: RegExpExecArray | null;
+    // An Authorization Response above the declared maximum size is refused before it is parsed (RP_WS_SH_Encoding_004).
+    if (method === 'POST' && this.options.maxResponseBytes && body.length > this.options.maxResponseBytes) {
+      const tx = this.transactions.get(/^\/oid4vp\/([^/]+)\//.exec(path)?.[1] ?? '');
+      if (tx?.status === 'pending') Object.assign(tx, { status: 'failure', error: 'the Authorization Response is too large' });
+      return sendJson(res, 413, { error: 'invalid_request', error_description: 'the request is too large' });
+    }
     if (method === 'POST' && path === '/api/presentations') {
       const { query = 'default_query_pid', flow = 'redirect' } = JSON.parse(body.toString() || '{}');
       if (flow !== 'redirect' && flow !== 'dc-api') return sendJson(res, 400, { error: 'unsupported_flow' });
@@ -394,59 +440,76 @@ export class ReferenceRelyingParty {
       keys: [{ kid: tx.encryptionJwk.kid as string, privateKey: tx.encryptionKey }],
       encValues: metadata.encrypted_response_enc_values_supported,
       state: binding.state,
+      maxResponseBytes: this.options.maxResponseBytes,
     });
     tx.response = response.checks;
     if (!response.valid || !response.payload) return `${response.failed}: ${response.checks.at(-1)?.detail}`;
     const presentations = response.payload.vp_token as Record<string, unknown>;
     const query = this.options.queries[tx.query];
+    // The vp_token as a whole first: known credential query ids, one presentation each unless `multiple`, every
+    // required credential query or credential set satisfied, one document per DeviceResponse (UC_Presentation).
+    const vpToken = await validateVpToken(presentations, query);
+    tx.response = [...response.checks, ...vpToken.checks];
+    if (!vpToken.valid) return `${vpToken.failed}: ${vpToken.checks.at(-1)?.detail}`;
     const attributes: Record<string, unknown> = {};
     const validations: (SdJwtVcValidation | MdocValidation)[] = [];
+    const disclosed: { id: string; format: string; claims: Record<string, unknown> }[] = [];
     for (const credentialQuery of query.credentials) {
-      const entries = presentations[credentialQuery.id];
-      if (!Array.isArray(entries) || entries.length !== 1 || typeof entries[0] !== 'string') {
-        return `expected one presentation for ${credentialQuery.id}`;
-      }
+      const entries = presentations[credentialQuery.id] as string[] | undefined;
+      // An optional credential query, or one of an option the Wallet did not choose (credential_sets).
+      if (!entries) continue;
       const common = {
         trust: this.trust,
-        // The root of trust of the query's category: TL-PID, TL-QEAA through the LOTL, TL-PUB or the rulebook anchor.
-        trustRule: TRUST_RULES[categoryOfQuery(tx.query)],
+        // The root of trust of the credential query's category: TL-PID, TL-QEAA through the LOTL, TL-PUB or the rulebook anchor.
+        trustRule: TRUST_RULES[categoryOfCredentialQuery(credentialQuery.id)],
         nonce: tx.requestPayload.nonce as string,
         skewSeconds: this.options.skewSeconds,
         // A PID without reliable revocation status is rejected (catalogue decision 2); for the other categories the
         // reference Relying Party declares RP.R.2 Reject.
         requireStatus: true,
         maxStatusListBytes: this.options.maxStatusListBytes,
+        statusListFreshness: this.options.statusListFreshness,
+        rejectPastExpiryDate: this.options.rejectPastExpiryDate,
         validStatuses: this.options.validStatuses,
         trustedAuthorities: credentialQuery.trusted_authorities,
+        requestedClaims: credentialQuery.claims ?? [],
       };
-      const validation =
-        credentialQuery.format === 'mso_mdoc'
-          ? await validateMdocPresentation(entries[0], {
-              ...common,
-              expectedDocType: (credentialQuery.meta?.doctype_value as string | undefined) ?? PID_DOCTYPE,
-              handover: binding.handover,
-              // OpenID4VP Appendix B.2.6: the thumbprint of the key the response was encrypted to.
-              jwkThumbprint: await jwkThumbprint(tx.encryptionJwk as JsonWebKey),
-              fetchStatusList: (uri) => fetchList(uri, 'application/statuslist+cwt'),
-              fetchIdentifierList: (uri) => fetchList(uri, 'application/identifierlist+cwt'),
-            })
-          : await validateSdJwtVcPresentation(entries[0], {
-              ...common,
-              expectedVct: (credentialQuery.meta?.vct_values as string[] | undefined) ?? [PID_VCT],
-              audience: binding.audience,
-              kbMaxAgeSeconds: this.options.kbMaxAgeSeconds,
-              fetchStatusList: (uri) => fetchList(uri, 'application/statuslist+jwt'),
-            });
-      validations.push(validation);
-      tx.validations = validations;
-      if (!validation.valid) return `${credentialQuery.id}: ${validation.failed}: ${validation.checks.at(-1)?.detail}`;
-      for (const claim of credentialQuery.claims ?? []) {
-        let value: unknown = validation.claims;
-        for (const segment of claim.path) value = (value as Record<string, unknown> | undefined)?.[String(segment)];
-        if (value === undefined) return `${credentialQuery.id}: requested claim ${claim.path.join('.')} not disclosed`;
-        attributes[claim.path.join('.')] = value;
+      for (const entry of entries) {
+        const validation =
+          credentialQuery.format === 'mso_mdoc'
+            ? await validateMdocPresentation(entry, {
+                ...common,
+                expectedDocType: (credentialQuery.meta?.doctype_value as string | undefined) ?? PID_DOCTYPE,
+                handover: binding.handover,
+                // OpenID4VP Appendix B.2.6: the thumbprint of the key the response was encrypted to.
+                jwkThumbprint: await jwkThumbprint(tx.encryptionJwk as JsonWebKey),
+                fetchStatusList: (uri) => this.fetchStatusList(uri, 'application/statuslist+cwt'),
+                fetchIdentifierList: (uri) => fetchList(uri, 'application/identifierlist+cwt', this.options.statusTimeoutMs),
+              })
+            : await validateSdJwtVcPresentation(entry, {
+                ...common,
+                expectedVct: (credentialQuery.meta?.vct_values as string[] | undefined) ?? [PID_VCT],
+                audience: binding.audience,
+                kbMaxAgeSeconds: this.options.kbMaxAgeSeconds,
+                fetchStatusList: (uri) => this.fetchStatusList(uri, 'application/statuslist+jwt'),
+              });
+        validations.push(validation);
+        tx.validations = validations;
+        if (!validation.valid) return `${credentialQuery.id}: ${validation.failed}: ${validation.checks.at(-1)?.detail}`;
+        disclosed.push({ id: credentialQuery.id, format: credentialQuery.format, claims: (validation.claims ?? {}) as Record<string, unknown> });
+        for (const claim of credentialQuery.claims ?? []) {
+          let value: unknown = validation.claims;
+          for (const segment of claim.path) value = (value as Record<string, unknown> | undefined)?.[String(segment)];
+          if (value === undefined) return `${credentialQuery.id}: requested claim ${claim.path.join('.')} not disclosed`;
+          attributes[claim.path.join('.')] = value;
+        }
       }
     }
+    // Combined presentations: the reference Relying Party binds the credentials by their identifying attributes (ICS
+    // RP.P.10 attribute-based, ARF section 6.6.3.10).
+    const combined = await validateCombinedBinding(disclosed);
+    tx.response = [...tx.response, ...combined.checks];
+    if (!combined.valid) return `${combined.failed}: ${combined.checks.at(-1)?.detail}`;
     tx.status = 'success';
     tx.attributes = attributes;
     if (validations.some((v) => v.trustListStale)) tx.flags = ['trust-list-stale'];
@@ -484,6 +547,21 @@ try {
 </body>
 </html>
 `;
+}
+
+/** The `ttl` of a Status List Token in JWT or CWT format (claim 65534), seconds, or undefined. */
+function ttlOf(body: string | Uint8Array): number | undefined {
+  try {
+    if (typeof body === 'string') {
+      const ttl = base64url.decodeJson<{ ttl?: unknown }>(body.trim().split('.')[1] ?? '').ttl;
+      return typeof ttl === 'number' && ttl > 0 ? ttl : undefined;
+    }
+    const payload = readCose(decodeCbor(body)).payload;
+    const ttl = payload ? decodeCbor<Map<number, unknown>>(payload).get(65534) : undefined;
+    return typeof ttl === 'number' && ttl > 0 ? ttl : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 /** The value of a cookie in a `Cookie` header. */

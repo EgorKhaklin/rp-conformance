@@ -41,7 +41,7 @@ export class StatusProvider {
       const path = new URL(req.url ?? '/', 'http://localhost').pathname;
       const registration = this.registrations.get(path);
       const status = registration ? (registration.behaviour.redirectTo ? 302 : (registration.behaviour.status ?? 200)) : 404;
-      this.log.push({ at: new Date().toISOString(), method: req.method ?? 'GET', url: `${this.publicBaseUrl}${path}`, headers: req.headers, status });
+      this.log.push({ at: new Date().toISOString(), method: req.method ?? 'GET', url: `${this.publicBaseUrl}${path}`, headers: req.headers, status, target: req.url });
       if (!registration) return sendJson(res, 404, { error: 'not_found' });
       const { behaviour, body } = registration;
       if (behaviour.latencyMs) await new Promise((resolve) => setTimeout(resolve, behaviour.latencyMs));

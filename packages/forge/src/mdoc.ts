@@ -63,8 +63,9 @@ export function mdocValidity(now: Date, short = false) {
  * `eu.europa.ec.eudi.pid.1`, the MSO (SHA-256 digests, `validityInfo`, `deviceKeyInfo`, `status`) signed with ES256 in
  * a COSE_Sign1 `IssuerAuth` that carries the document signer certificate in `x5chain`.
  */
-export async function issuePidMdoc(options: MdocIssueOptions): Promise<IssuedMdoc> {
-  return issueMdoc({ ...options, docType: PID_DOCTYPE, namespace: PID_NAMESPACE, claims: DEFAULT_PID_MDOC_CLAIMS, fullDates: FULL_DATES });
+export async function issuePidMdoc(options: MdocIssueOptions & { claims?: Record<string, unknown> }): Promise<IssuedMdoc> {
+  const claims = { ...DEFAULT_PID_MDOC_CLAIMS, ...options.claims };
+  return issueMdoc({ ...options, docType: PID_DOCTYPE, namespace: PID_NAMESPACE, claims, fullDates: FULL_DATES });
 }
 
 /**

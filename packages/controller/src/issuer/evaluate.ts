@@ -87,14 +87,32 @@ export function evaluateRejected(observation: IssuanceObservation, code?: string
   return { verdict: 'PASS', reason: `rejected at ${end.step}: HTTP ${end.status}, error ${end.error}` };
 }
 
-/** Evaluates the codes of an issuance step; the step's verdict is the worst of them. */
+/** What an issuance step ended with, for `INFO`. */
+function outcomeOf(observation: IssuanceObservation): string {
+  const failed = serverError(observation);
+  if (failed) return `the Provider answered with a server error: ${describe(failed)}`;
+  if (observation.credentials.length) return `issued ${observation.credentials.length} credential(s)`;
+  const end = last(observation);
+  return end ? `ended at ${describe(end)}` : `no request was sent${observation.error ? ` (${observation.error})` : ''}`;
+}
+
+/**
+ * Evaluates the codes of an issuance step; the step's verdict is the worst of them, or with `oneOf` the best (the
+ * catalogue's "REJ or CONF"). `CONF` on an issuance step is `ISS` whose named checks must also pass. `INFO` records
+ * the outcome and passes, unless the Provider answered with HTTP 5xx.
+ */
 export function evaluateIssuance(expectation: IssuerExpectation, observation: IssuanceObservation): Evaluation {
   const evaluations = expectation.codes.map((code: IssuerExpectationCode): Evaluation => {
-    if (code === 'ISS') return evaluateIssued(observation, expectation.checks);
+    if (code === 'ISS' || code === 'CONF') return evaluateIssued(observation, expectation.checks);
     if (code === 'REJ') return evaluateRejected(observation);
     if (code.startsWith('REJ:')) return evaluateRejected(observation, code.slice('REJ:'.length));
-    if (code === 'INFO') return { verdict: 'PASS', reason: 'recorded' };
+    if (code === 'INFO') return serverError(observation) ? { verdict: 'FAIL', reason: outcomeOf(observation) } : { verdict: 'PASS', reason: `recorded: ${outcomeOf(observation)}` };
     return { verdict: 'INCONCLUSIVE', reason: `expected result ${code} is not implemented for an issuance step` };
   });
+  if (expectation.oneOf) {
+    const passed = evaluations.find((e) => e.verdict === 'PASS');
+    if (passed) return passed;
+    return { verdict: worst(evaluations.map((e) => e.verdict)), reason: `none of ${expectation.codes.join(', ')}: ${evaluations.map((e) => e.reason).join('; ')}` };
+  }
   return { verdict: worst(evaluations.map((e) => e.verdict)), reason: evaluations.map((e) => e.reason).join('; ') };
 }
