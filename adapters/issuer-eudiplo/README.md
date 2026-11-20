@@ -91,11 +91,27 @@ Checked against the running image and EUDIPLO's source at `ae0792a`.
 | No login at the built-in authorization server: it issues authorization codes without a login or consent step | No `authenticateSubject` yet, `P-AC` No (see below) | `PP_WS_IA_AuthorizationCode_*` and every `AC` variant |
 | No DPoP server nonce (no `DPoP-Nonce` or `use_dpop_nonce` in the source) | NOT APPLICABLE (`ICS-13.dpop_nonce` No; `P-DPN` stands for the nonce endpoint only) | `PP_WS_SM_TokenBinding_006_UF` |
 | Identifier lists are read as verifier but never published by the issuer | `P-IL` No | `PP_RP_SM_Revocation_007` and the identifier list variants of `SCN-P` |
-| A proof's `iat` is checked only against the future; its age is bounded only by the `c_nonce`, which lives 10 minutes | `ICS-14.T_proof` "not bounded"; the test cases take the 5 minute cap | `PP_WS_SM_ProofOfPossession_006_UF` (`iat` − 1 h with a fresh `c_nonce`): expected FAIL, a known finding once it runs |
+| A proof's `iat` is checked only against the future in the source; its age is bounded only by the `c_nonce`, which lives 10 minutes | `ICS-14.T_proof` "not bounded"; the test cases take the 5 minute cap | none: `PP_WS_SM_ProofOfPossession_006_UF` passes, the pinned image refuses `iat` − 1 h with `invalid_proof` (issue 19 run) |
 | No subject record to change: the claims travel with each offer | No `changeSubject` | `PP_WS_SM_Revocation_008` (NOT APPLICABLE) |
-| With `walletAttestationRequired`, the authorization server metadata still lists `none` next to `attest_jwt_client_auth` in `token_endpoint_auth_methods_supported` | Whether a request without attestation is accepted is for the client attestation test cases to show | to be seen in `PP_WS_SM_ClientAttestation_*` |
+| With `walletAttestationRequired`, the authorization server metadata still lists `none` next to `attest_jwt_client_auth` in `token_endpoint_auth_methods_supported` | A token request without WIA, or without PoP, is still refused with `invalid_client` | none: `PP_WS_SM_ClientAttestation_002_UF` passes |
 | Shortest status list lifetime 60 s (`ttl` minimum, live) | `T_rev` PT1M with `immediateUpdate` | none: `REVOKED(T_rev)` test cases poll for a minute |
 | Revocation chaining is a poll, and a suspended wallet unit changes nothing | `T_chain` PT7M; a suspended WIA or KA is still rejected at issuance (strict), but suspension does not chain | none (the catalogue chains revocation only) |
+
+Known findings of the security mechanism test cases (issue 19), each with its prepared upstream issue text in
+[`upstream-findings/`](upstream-findings) and its entries in [`known-findings.yaml`](known-findings.yaml):
+
+| Finding | Test cases |
+| --- | --- |
+| The status of a TS3 WIA or KA (`client_status.status`, `key_storage_status.status`) is never read; only a top-level `status` claim is, so strict mode never fetches `SL-WP-A` | `PP_WS_SM_ClientAttestation_012_UF`, `_013_UF`, `PP_WS_SM_KeyAttestation_008_UF`, `_009_UF` |
+| WIA and KA are accepted under each other's anchor of the same Wallet Provider | `PP_WS_SM_ClientAttestation_006_UF`, `PP_WS_SM_KeyAttestation_004_UF` |
+| A client attestation PoP `jti` is accepted twice | `PP_WS_SM_ClientAttestation_009_UF` |
+| The PID's expiry is not bounded by the WIA's or KA's revocation maintenance period | `PP_WS_SM_ClientAttestation_015`, `_016_UF`, `PP_WS_SM_KeyAttestation_011` |
+| The `nonce` of a KA in a `jwt` proof is not checked | `PP_WS_SM_KeyAttestation_007_UF` |
+| A key proof with `alg` `none` gets `invalid_credential_request` instead of `invalid_proof` | `PP_WS_SM_ProofOfPossession_002_UF` |
+
+`PP_WS_SM_ProofOfPossession_009_UF`: EUDIPLO advertises `ES512` for `jwt` proofs, so its P-521 step is NOT APPLICABLE
+and the test case is judged on the off-curve step. `PP_WS_SM_ProofOfPossession_007_UF` (`AC` only) is NOT APPLICABLE
+without `P-AC`.
 
 Not configured by the adapter although EUDIPLO supports it; each can be added when the test cases need it:
 

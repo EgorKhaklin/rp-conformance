@@ -225,6 +225,7 @@ async function checkStatus(reference: { idx: number; uri: string }, options: Iss
   const token = decodeJwt(body.trim(), 'status list token');
   if (token.header.typ !== TYP.statusList) fail(`${what} status list typ is ${String(token.header.typ)}`);
   if (token.payload.sub !== reference.uri) fail(`${what} status list sub ${String(token.payload.sub)} is not ${reference.uri}`);
+  if (typeof token.payload.iat !== 'number') fail(`${what} status list has no numeric iat`);
   const anchors = options.walletProviders.entities.flatMap((entity) =>
     entity.services.filter((s) => s.type === WALLET_PROVIDER_SERVICE.revocation).map((service) => ({ entity: entity.name, service })),
   );
@@ -235,6 +236,7 @@ async function checkStatus(reference: { idx: number; uri: string }, options: Iss
   const list = token.payload.status_list as { bits?: number; lst?: string } | undefined;
   if (!list || typeof list.lst !== 'string' || ![1, 2, 4, 8].includes(list.bits ?? 0)) return fail(`${what} status list has no valid status_list`);
   const bits = list.bits as number;
+  if (!/^[A-Za-z0-9_-]*$/.test(list.lst)) fail(`${what} status list lst is not base64url`);
   const decoded = inflateSync(Buffer.from(list.lst, 'base64url'), { maxOutputLength: 16 * 1024 * 1024 });
   if (reference.idx >= (decoded.length * 8) / bits) fail(`${what} status index ${reference.idx} is outside the list`);
   const value = (decoded[Math.floor((reference.idx * bits) / 8)] >> ((reference.idx * bits) % 8)) & ((1 << bits) - 1);

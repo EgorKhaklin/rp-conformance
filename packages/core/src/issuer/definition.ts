@@ -3,6 +3,7 @@
 // the evaluators and the issuer faults come later.
 import type { CredentialFormat, ExpectationOf, StepDefinitionOf, TestCaseDefinitionOf } from '../definition';
 import type { FaultId } from '../faults';
+import type { IssuerFaultId } from './faults';
 import type { CredentialRequestFaultId } from './credential-request-faults';
 import type { IssuerIcsCondition, IssuerPolicyItem, IssuerProfile } from './ics';
 
@@ -52,7 +53,7 @@ export interface IssuanceAction {
   /** Number of proofs; default 1. */
   batchSize?: number;
   /** Named faults (at most one); empty for a valid issuance. */
-  faults: (FaultId | CredentialRequestFaultId)[];
+  faults: (FaultId | IssuerFaultId | CredentialRequestFaultId)[];
   /** Stop after the token response, without a credential request. */
   stopAfterToken?: boolean;
   /** Expect and follow a deferred credential response. */
@@ -61,6 +62,13 @@ export interface IssuanceAction {
   encryption?: boolean;
   /** Request by `credential_identifier` instead of `credential_configuration_id`. */
   credentialIdentifier?: boolean;
+  // Security mechanisms (issue 19: PP_WS_SM_ClientAttestation, _KeyAttestation, _ProofOfPossession).
+  /** Proof type of the credential request; default `jwt` (the KA in the proof's `key_attestation` header). */
+  proofType?: 'jwt' | 'attestation';
+  /** The KA carries the `c_nonce` (OpenID4VCI Appendix D.1; required for the `attestation` proof type). */
+  keyAttestationNonce?: boolean;
+  /** After the faulty credential request, fetch a fresh `c_nonce` and send the request again without the fault. */
+  retryWithFreshNonce?: boolean;
 }
 
 /** An artifact of an earlier step that a `token-reuse` step sends again. */
@@ -81,7 +89,14 @@ export interface WalletEventAction {
   /** Default `CW-1`. */
   walletUnit?: WalletUnit;
   /** For `status-list`: the list, for example `SL-WP-WIA`, and the faults (at most one) of the version it serves. */
-  statusList?: { id: string; faults: FaultId[] };
+  statusList?: {
+    id: string;
+    faults: FaultId[];
+    /** The attestation whose status reference points to the changed list: the WIA (default) or the KA. */
+    of?: 'wia' | 'ka';
+    /** Answer the list's URL with this HTTP status and no token instead (the list cannot be obtained). */
+    httpStatus?: number;
+  };
 }
 
 /** An adapter hook for a back-office event: `setStatus` for what an earlier step issued, or `changeSubject`. */
@@ -147,6 +162,8 @@ export interface IssuerExpectation extends ExpectationOf<IssuerExpectationCode> 
   checks?: string[];
   /** For `NOFETCH`: the URL, or the list (`TL-WP`, `SL-WP-*`), the SUT must not request. */
   noFetch?: string;
+  /** The step passes when any one of `codes` passes (catalogue "REJ or CONF", "REJ or INFO"); default all of them. */
+  oneOf?: boolean;
 }
 
 export type IssuerStepDefinition = StepDefinitionOf<IssuerStepAction, IssuerExpectation>;

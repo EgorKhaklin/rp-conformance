@@ -4,6 +4,10 @@ import { definitions as mainInteraction } from './pid_provider/Interaction/MainI
 import { definitions as credentialEndpoint } from './pid_provider/MessageStructure/CredentialEndpoint';
 import { definitions as metadata } from './pid_provider/MessageStructure/Metadata';
 import { definitions as offer } from './pid_provider/MessageStructure/Offer';
+// Issue 19: PP_WS_SM_ClientAttestation, _KeyAttestation, _ProofOfPossession.
+import { definitions as clientAttestation } from './pid_provider/SecurityMechanisms/ClientAttestation';
+import { definitions as keyAttestation } from './pid_provider/SecurityMechanisms/KeyAttestation';
+import { definitions as proofOfPossession } from './pid_provider/SecurityMechanisms/ProofOfPossession';
 
 export * from './wording';
 
@@ -17,6 +21,10 @@ export const issuerDefinitions: IssuerTestCaseDefinition[] = [
   ...metadata,
   ...offer,
   ...credentialEndpoint,
+  // Issue 19
+  ...clientAttestation,
+  ...keyAttestation,
+  ...proofOfPossession,
 ];
 
 /** The issuer definitions the harness can execute. */
