@@ -7,8 +7,17 @@ on:
     branches: [main]
     paths: &site-paths
       - fcaf-overlay/docs/**
+      - fcaf-overlay-issuer/docs/**
+      # The issuer suite's project documents on the site (scripts/site-project-pages.py).
+      - issuer-test-catalogue.md
+      - issuer-harness-design.md
+      - adapters/issuer-eudiplo/README.md
+      - adapters/issuer-eudiplo/ics.yaml
+      - adapters/issuer-eudiplo/known-findings.yaml
+      - adapters/issuer-eudiplo/upstream-findings/**
       - website/**
       - scripts/site-build.sh
+      - scripts/site-project-pages.py
       - scripts/fcaf-upstream.sh
       - .github/workflows/pages.yml
   pull_request:

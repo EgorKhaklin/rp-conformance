@@ -1,6 +1,7 @@
 import { mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { dirname, join, relative } from 'node:path';
-import type { TestCaseDefinition } from '@rp-conformance/core';
+import type { IssuerTestCaseDefinition, TestCaseDefinition } from '@rp-conformance/core';
+import { loadIssuerPages, renderIssuerOverlay } from './issuer-overlay';
 import { loadSharedPages, loadUpstreamPages, renderOverlay } from './overlay';
 
 /**
@@ -9,6 +10,11 @@ import { loadSharedPages, loadUpstreamPages, renderOverlay } from './overlay';
  */
 export async function renderBaseline(definitions: TestCaseDefinition[], baseline?: TestCaseDefinition[]): Promise<Map<string, string>> {
   return renderOverlay(definitions, await loadUpstreamPages(), await loadSharedPages(), baseline && new Set(baseline.map((d) => d.id)));
+}
+
+/** Renders the issuer overlay of the given issuer definitions over the rendered RP overlay `rp`. */
+export async function renderIssuer(definitions: IssuerTestCaseDefinition[], rp: Map<string, string>): Promise<Map<string, string>> {
+  return renderIssuerOverlay(definitions, rp, await loadIssuerPages());
 }
 
 async function listFiles(root: string): Promise<string[]> {

@@ -28,11 +28,11 @@ jobs:
       # Unit tests, fault self-validation, the reference run of every executable test case in both flows, and the
       # byte-for-byte rendering check of the 121 test cases and the shared pages.
       - run: pnpm test
-      - name: Rendered FCAF overlay is committed
+      - name: Rendered FCAF overlays (Relying Party and issuer) are committed
         run: pnpm fcaf:render --check
-      - name: FCAF lint on the rendered overlay
+      - name: FCAF lint on the rendered overlays
         env:
           FCAF_LINT_FORMAT: github
         run: |
-          pnpm fcaf:render --out "$RUNNER_TEMP/overlay"
-          OVERLAY_DIR="$RUNNER_TEMP/overlay" scripts/fcaf-lint.sh "$RUNNER_TEMP/fcaf"
+          pnpm fcaf:render --out "$RUNNER_TEMP/overlay" --out-issuer "$RUNNER_TEMP/overlay-issuer"
+          OVERLAY_DIR="$RUNNER_TEMP/overlay" ISSUER_OVERLAY_DIR="$RUNNER_TEMP/overlay-issuer" scripts/fcaf-lint.sh "$RUNNER_TEMP/fcaf"
