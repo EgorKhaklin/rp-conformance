@@ -47,6 +47,27 @@ export interface PresentationBinding {
 export interface RequestedClaims {
   disclose: string[];
   elements: Record<string, string[]>;
+  /** The requested claim paths, so a structured claim requested by members discloses only those (SD-JWT VC). */
+  paths?: (string | number | null)[][];
+}
+
+/**
+ * What the Conformance Wallet discloses for a presentation variant of the data model test cases: the requested claims
+ * without `family_name` (IdentifyingData_003), or with attributes the request does not ask for (CredentialMetadata_001).
+ */
+function disclosureVariant(fault: 'presentation.family-name-withheld' | 'presentation.unrequested-disclosed', requested: RequestedClaims): RequestedClaims {
+  if (fault === 'presentation.family-name-withheld') {
+    return {
+      disclose: requested.disclose.filter((name) => name !== 'family_name'),
+      elements: Object.fromEntries(Object.entries(requested.elements).map(([namespace, names]) => [namespace, names.filter((name) => name !== 'family_name')])),
+      ...(requested.paths ? { paths: requested.paths.filter((path) => path[0] !== 'family_name') } : {}),
+    };
+  }
+  return {
+    disclose: [...requested.disclose, 'place_of_birth', 'nationalities'],
+    elements: { ...requested.elements, [PID_NAMESPACE]: [...(requested.elements[PID_NAMESPACE] ?? []), 'place_of_birth', 'nationality'] },
+    ...(requested.paths ? { paths: [...requested.paths, ['place_of_birth'], ['nationalities']] } : {}),
+  };
 }
 
 export interface PresentationKeys {
@@ -90,6 +111,9 @@ export async function buildPresentation(
     if (fault === 'presentation.replay') throw new Error('presentation.replay sends the presentation of an earlier step');
     if (info.format && info.format !== held.format) throw new Error(`fault ${fault} applies to ${info.format}, not ${held.format}`);
     if (info.flow && info.flow !== binding.handover.flow) throw new Error(`fault ${fault} applies to the ${info.flow} flow`);
+    if (fault === 'presentation.family-name-withheld' || fault === 'presentation.unrequested-disclosed') {
+      return buildPresentation(held, disclosureVariant(fault, requested), binding, keys, { ...options, fault: undefined });
+    }
   }
   return held.format === 'mso_mdoc'
     ? presentMdocWithFault(held.value, requested, binding, keys, fault, held.docType)
@@ -107,6 +131,7 @@ async function presentSdJwtVcWithFault(
   const valid = await presentSdJwtVc(credential, {
     holderPrivateKey: keys.holder.privateKey,
     disclose: requested.disclose,
+    paths: requested.paths,
     audience: binding.audience,
     nonce: binding.nonce,
     now,

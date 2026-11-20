@@ -262,7 +262,11 @@ export class Fixture {
     ) as HeldCredential;
     const presentation = (replay && options.replayed) || await buildPresentation(
       held,
-      { disclose: (credentialQuery.claims ?? []).map((c) => String(c.path[0])), elements: requestedElements(credentialQuery.claims) },
+      {
+        disclose: (credentialQuery.claims ?? []).map((c) => String(c.path[0])),
+        elements: requestedElements(credentialQuery.claims),
+        paths: (credentialQuery.claims ?? []).map((c) => c.path),
+      },
       { audience, clientId: AUDIENCE, nonce: boundTo.nonce, handover, jwkThumbprint: await jwkThumbprint(boundTo.key.publicJwk as JsonWebKey) },
       { holder: this.holder, secp256k1: this.secp256k1 },
       { fault: replay ? undefined : presentationFault, skewSeconds: SKEW, kbMaxAgeSeconds: KB_MAX_AGE },
@@ -292,6 +296,7 @@ export class Fixture {
       requireStatus: true,
       maxStatusListBytes: MAX_STATUS_LIST_BYTES,
       trustedAuthorities: credentialQuery.trusted_authorities,
+      requestedClaims: credentialQuery.claims ?? [],
       mode,
     };
     const credential = !presented

@@ -66,3 +66,36 @@
   finding: >-
     EUDIPLO accepts an mdoc whose document signer certificate carries an unknown extension marked critical (RFC 5280
     section 4.2)
+
+# Found by the data model test cases (issue 30) against ghcr.io/eudiplo/eudiplo:main (9.1.0-main.ae0792a, 2026-11-19);
+# not yet reported upstream. Evidence: the report of the run, kept as reports/r20261119T224543-ce85c7.
+- testCase: RP_WS_DM_IdentifyingData_001b
+  finding: >-
+    EUDIPLO releases the mdoc element place_of_birth, a CBOR map, as an empty object: getPrettyClaims returns it as a
+    Map, which the session result serialises as {}
+  evidence: reports/r20261119T224543-ce85c7/artifacts/RP_WS_DM_IdentifyingData_001b
+- testCase: RP_WS_DM_IdentifyingData_004a_UF
+  finding: >-
+    EUDIPLO accepts a PID in SD-JWT VC format whose birthdate is an integer or whose nationalities is a string, and
+    releases the values without flagging them (PID rulebook, ISO 8601-1)
+  evidence: reports/r20261119T224543-ce85c7/artifacts/RP_WS_DM_IdentifyingData_004a_UF
+- testCase: RP_WS_DM_IdentifyingData_004b_UF
+  finding: >-
+    EUDIPLO accepts a PID in mdoc format whose birth_date is an integer instead of a full-date or whose nationality is
+    a text string, and releases the values without flagging them (PID rulebook, RFC 8943)
+  evidence: reports/r20261119T224543-ce85c7/artifacts/RP_WS_DM_IdentifyingData_004b_UF
+- testCase: RP_WS_DM_IdentifyingData_007a
+  finding: >-
+    EUDIPLO releases every claim of the issuer-signed JWT, including a claim it does not know and the query does not
+    request (rp_conformance_private_claim)
+  evidence: reports/r20261119T224543-ce85c7/artifacts/RP_WS_DM_IdentifyingData_007a
+- testCase: RP_WS_DM_CredentialMetadata_001a_UF
+  finding: >-
+    EUDIPLO releases attributes of an SD-JWT VC that the wallet disclosed without the query requesting them
+    (place_of_birth, nationalities), against data minimisation (ARF OIA_16, OpenID4VP section 15.4.2)
+  evidence: reports/r20261119T224543-ce85c7/artifacts/RP_WS_DM_CredentialMetadata_001a_UF
+- testCase: RP_WS_DM_CredentialMetadata_001b_UF
+  finding: >-
+    EUDIPLO releases elements of an mdoc that the wallet disclosed without the query requesting them (nationality),
+    against data minimisation (ARF OIA_16, OpenID4VP section 15.4.2)
+  evidence: reports/r20261119T224543-ce85c7/artifacts/RP_WS_DM_CredentialMetadata_001b_UF
