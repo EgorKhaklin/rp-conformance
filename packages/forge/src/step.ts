@@ -115,7 +115,7 @@ export async function forgePresentation(action: PresentationAction, ctx: StepFor
     const signerEntity = ctx.pki.entities[listSpec.signer?.entity ?? spec.issuer];
     const listSigner = listSpec.signer?.key === 'issuance' ? credentialSignerOf(signerEntity, spec.format) : signerEntity.signers.revocation;
     const uri = ctx.allocateStatusUri();
-    const options = { signer: listSigner, issuer: signerEntity.issuerUri, uri, statuses, bits, now };
+    const options = { signer: listSigner, issuer: signerEntity.issuerUri, uri, statuses, bits, now, ...(listSpec.ttl ? { ttl: listSpec.ttl } : {}) };
     const [fault] = listSpec.faults;
     let validToken: string | Uint8Array;
     let served: ServedStatusList;
@@ -152,6 +152,9 @@ export async function forgePresentation(action: PresentationAction, ctx: StepFor
   // `default_credential_qeaa`, `_pubeaa` and `_eaa` are `default_credential_A`, issued like the PID.
   const pid = spec.defaultCredential === 'default_credential_pid' || short;
   const [fault] = spec.faults;
+  // A PID whose administrative expiry date has passed (RP_WS_SM_Validity_020): seven days ago, as a full-date.
+  const expiryDate = spec.expiryDatePast ? new Date(now.getTime() - 7 * 24 * 3600_000).toISOString().slice(0, 10) : undefined;
+  if (expiryDate && !pid) throw new Error('only a PID carries an administrative expiry date');
   // An attribute variant of the PID (RP_WS_DM_*) is applied at issuance, not after it.
   const variant = pid && isPidVariant(fault);
   if (spec.format === 'mso_mdoc') {
@@ -168,6 +171,7 @@ export async function forgePresentation(action: PresentationAction, ctx: StepFor
           : undefined,
       now,
       short,
+      ...(expiryDate ? { claims: { expiry_date: expiryDate } } : {}),
     });
     const bound = secp256k1 ? await bindMdocToSecp256k1Key(issued.issuerSigned, ctx.holderSecp256k1PublicJwk as JsonWebKey, signer) : issued.issuerSigned;
     const credential = fault && !variant
@@ -188,6 +192,7 @@ export async function forgePresentation(action: PresentationAction, ctx: StepFor
     holderPublicJwk: secp256k1 ? (ctx.holderSecp256k1PublicJwk as JsonWebKey) : ctx.holderPublicJwk,
     status: statusList && { uri: statusList.uri, idx: statusList.index },
     now,
+    ...(expiryDate ? { claims: { date_of_expiry: expiryDate } } : {}),
     ...(short ? { validitySeconds: SHORT_VALIDITY_SECONDS } : {}),
   });
   const credential = fault && !variant

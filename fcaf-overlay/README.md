@@ -1,6 +1,6 @@
 # FCAF overlay: Relying Party baseline test cases
 
-Draft of 2026-11-06. This overlay adds a **Relying Party** System Under Test to the EU Functional Conformance Assessment Framework (FCAF, [conformance.eudi.dev](https://conformance.eudi.dev)), with 121 baseline test cases and 158 further test cases written in the FCAF test case format. The objectives and the decisions behind them are in [rp-test-catalogue.md](../rp-test-catalogue.md).
+Draft of 2026-11-06. This overlay adds a **Relying Party** System Under Test to the EU Functional Conformance Assessment Framework (FCAF, [conformance.eudi.dev](https://conformance.eudi.dev)), with 121 baseline test cases and 185 further test cases written in the FCAF test case format. The objectives and the decisions behind them are in [rp-test-catalogue.md](../rp-test-catalogue.md).
 
 ## Base
 
@@ -13,9 +13,9 @@ New files:
 | Path | Content |
 | --- | --- |
 | `docs/fcaf/suts/relying_party/index.md` | Relying Party SUT overview, test classes, decisions applied |
-| `docs/fcaf/suts/relying_party/wallet_solution/` | Class `RP_WS`: overview, baseline list, test case page, 233 test cases (84 of the baseline) |
+| `docs/fcaf/suts/relying_party/wallet_solution/` | Class `RP_WS`: overview, baseline list, test case page, 245 test cases (84 of the baseline) |
 | `docs/fcaf/suts/relying_party/infrastructure/` | Class `RP_Inf`: overview, baseline list, test case page, 9 test cases |
-| `docs/fcaf/suts/relying_party/pid_provider/` | Class `RP_PP`: overview, baseline list, test case page, 37 test cases |
+| `docs/fcaf/suts/relying_party/pid_provider/` | Class `RP_PP`: overview, baseline list, test case page, 52 test cases |
 | `docs/fcaf/ics-rp.md` | Relying Party ICS (capabilities, policies, time values, surrogate technology items) |
 
 Modified copies of existing files (the base content plus additions):
@@ -43,7 +43,7 @@ Modified copies of existing files (the base content plus additions):
 
 Variant letters: `a` is SD-JWT VC (with a Status List Token in JWT format in `RP_PP`), `b` is mdoc (CWT); in `SessionEncryption`, `a` is redirects with `direct_post.jwt` and `b` the W3C Digital Credentials API with `dc_api.jwt`. Where a catalogue objective has several stimuli, each stimulus is one test step with its own expected result.
 
-Catalogue objectives in these areas that are not in the baseline: `RP_WS_SM_Validity_004` (informative only), `RP_WS_SM_Validity_020` (policy-dependent), `RP_WS_SM_Revocation_011` (aggregate of two other test cases), `RP_PP_SM_Revocation_014` and `_031` (optional checks), `RP_WS_SM_TrustMechanisms_017` (optional check).
+Catalogue objectives in these areas that are not in the baseline: `RP_WS_SM_Validity_004` (informative only), `RP_WS_SM_Validity_020` (policy-dependent), `RP_WS_SM_Revocation_011` (aggregate of two other test cases), `RP_PP_SM_Revocation_014` and `_031` (optional checks), `RP_WS_SM_TrustMechanisms_017` (optional check). All of them except `RP_WS_SM_TrustMechanisms_017` are now written beyond the baseline (see below).
 
 ## Beyond the baseline
 
@@ -65,7 +65,12 @@ The remaining catalogue areas are written as test cases one area at a time (harn
 | `RP_WS_DM_IdentifyingData` | 12 | 4 |
 | `RP_WS_DM_CredentialMetadata` | 4 | 4 |
 | `RP_WS_UC_Presentation` | 21 | 13 |
-| **Total** | **158** | **95** |
+| `RP_WS_SH_Encoding` | 8 | 7 |
+| `RP_PP_IA_Supportive` | 12 | 6 |
+| `RP_WS_SM_Validity` (`_004`, `_020`) | 3 | 0 |
+| `RP_WS_SM_Revocation` (`_011`) | 1 | 0 |
+| `RP_PP_SM_Revocation` (`_014`, `_031`) | 3 | 2 |
+| **Total** | **185** | **110** |
 
 Variant letters are the credential format, as in the baseline. Most of these test cases are for one format and run in every presentation flow; `SessionBinding_002` and `_008` are for redirects, `_006`, `_007` and `_009` for the W3C Digital Credentials API, because the audience of a KB-JWT and the handover of an mdoc differ between the flows. The request-side test cases (`RP_WS_MS_*`, `RP_WS_SM_RpIntegrity`) check the requests the Relying Party sends, without answering them; `ProtocolMessages_001`, `_002` and `_004` are for redirects, `ProtocolMessages_005` and `RpIntegrity_007` for the W3C Digital Credentials API. The `RP_Inf` test cases, in the new class directory `infrastructure/`, publish a new version of `TL-PID` or `TL-QEAA` and present a credential whose acceptance depends on it.
 
@@ -81,6 +86,12 @@ The data model test cases (`RP_WS_DM_*`, in the new layer directory `DataModel/`
 
 The 10 test book items of the catalogue (`RP_TB_001` to `_010`, [rp-test-catalogue.md](../rp-test-catalogue.md) section 5.4) are not rendered and stay in the catalogue only. The FCAF names test books as one of its elements ("structured collections of manual or non-automatable test cases", `introduction.md` of `submitted` at `0ed4ab1`), but defines no format, template, test class or location for them: its only template is the test specification template, whose test scenario and expected results an inspection does not have, and the FCAF identifiers and the lint require a layer and an area. The definitions are in [../packages/definitions/src/test_book](../packages/definitions/src/test_book); every run lists them as REVIEW with their method in `report.json`, `summary.md` and the JUnit XML, and they never fail a run. They can be rendered once the FCAF defines a test book format.
 
+`RP_WS_SH_Encoding` (layer `SH`, directory `Shared/`) checks how the Relying Party copes with malformed input: an Authorization Response that is no compact JWE or larger than the maximum size it declares (ICS RP.P.11), an SD-JWT or KB-JWT that is not well-formed, a DeviceResponse that is not well-formed CBOR, duplicate member names in a KB-JWT, and a certificate chain of 50 certificates. `_004` and `_006` end with a valid presentation that shows the Relying Party stayed available, and `_007` (redirects only) checks that its answers to the wallet reveal no internal details. Three objectives are executed with a changed catalogue row: `_001` checks the HTTP status and the answer via redirects only, since via the W3C Digital Credentials API the answer goes to the Relying Party's own page; `_002` adds a KB-JWT payload that is not valid JSON; `_003` uses an indefinite-length map without its `break`, because a well-formed indefinite-length item is valid CBOR.
+
+`RP_PP_IA_Supportive` (class `RP_PP`, layer `IA`) checks how the Relying Party retrieves status lists: the request itself (`_001`, from the Test Status Provider's log), one retrieval for two presentations within `ttl` and a fresh one after it (`_002`, `_003`, for Relying Parties that declare caching in ICS RP.R.5; `_003` publishes the shortest `ttl`, one second), endpoints that answer late, refuse the connection or fail (`_004`, against the timeout of ICS RP.R.6), a redirect loop (`_005`) and a status `uri` at a link-local address (`_006`). Three objectives are executed with a changed catalogue row: `_001` accepts a request without `Accept`, which [Token Status List] section 8.1 makes a SHOULD; `_005` leaves out the redirect to a plain-HTTP or internal target, and `_006` the absence of a request to the link-local address: the harness serves its own status lists over HTTP from a loopback or private address the Relying Party must be allowed to reach, and it cannot see requests to an address it does not serve. `_004` adds an HTML page with status 503.
+
+Six single objectives complete their areas. `RP_PP_SM_Revocation_014` presents a Status List Token issued in the future and one issued 30 days ago, each handled as the Relying Party declares (ICS RP.R.8 and RP.R.7); `_031` an mdoc whose MSO status element names the certificate of its Status List Token; `RP_WS_SM_Revocation_011` both revocation mechanisms of an mdoc in one test case, with the accepted step of `_010` added; `RP_WS_SM_Validity_004` records how the Relying Party handles an SD-JWT VC issued in the future (expected result `INFO`, which passes whatever the outcome unless the Relying Party answers with HTTP 5xx); `_020` a PID whose administrative expiry date has passed, handled as declared in ICS RP.P.12, with a variant of `default_query_pid` that requests the date. `RP_WS_SM_TrustMechanisms_017` is not written: no specification says how a Relying Party obtains the registration certificate of an attestation provider during a presentation.
+
 ## Rendering
 
 The files are rendered; do not edit them here. The test cases come from the executable definitions in [../packages/definitions](../packages/definitions), the shared pages from [../packages/fcaf-render/pages](../packages/fcaf-render/pages), and the modified FCAF pages from their originals in [../packages/fcaf-render/upstream](../packages/fcaf-render/upstream) (`submitted` at `0ed4ab1`). From the repository root:
@@ -93,7 +104,7 @@ CI fails when the committed files differ from the rendered ones, and runs the li
 
 ## Verification done
 
-- The FCAF lint (`tools/fcaf_lint.py` from the `site` branch at `e2f076a`, with the patch above) reports 0 blocking findings and 0 warnings for the 279 files, including the advisory checks for ICS vocabulary, reference keys, `default_*` definitions, relative links and identifier markup. CI runs it with `--enforce-all`, so any finding fails the build.
+- The FCAF lint (`tools/fcaf_lint.py` from the `site` branch at `e2f076a`, with the patch above) reports 0 blocking findings and 0 warnings for the 306 files, including the advisory checks for ICS vocabulary, reference keys, `default_*` definitions, relative links and identifier markup. CI runs it with `--enforce-all`, so any finding fails the build.
 - The lint over the whole corpus reports the same 3,779 warnings with and without the overlay, so the modified shared pages change nothing for the existing Wallet Solution test cases.
 - The MkDocs build of the FCAF site (the `site` branch at `e2f076a` with the hooks of the FCAF repository) passes with `--strict`, with the overlay laid over `submitted`; the `include-markdown` pages render all 239 test cases. `scripts/site-build.sh` runs it, and `.github/workflows/pages.yml` publishes the result at [rp-conformance.eudi-wallet.dev](https://rp-conformance.eudi-wallet.dev/), under this project's name and colours instead of the Commission's.
 

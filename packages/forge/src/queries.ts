@@ -44,6 +44,16 @@ export const PID_PLACE_OF_BIRTH_QUERY: DcqlQuery = {
   credentials: [{ ...PID_QUERY.credentials[0], claims: [...(PID_QUERY.credentials[0].claims ?? []), { path: ['place_of_birth'] }] }],
 };
 
+/**
+ * The variants of `default_query_pid` that also request the administrative expiry date of the PID: `date_of_expiry` in
+ * SD-JWT VC format, `expiry_date` in mdoc format (PID Rulebook; RP_WS_SM_Validity_020).
+ */
+export const PID_EXPIRY_DATE_QUERY: DcqlQuery = {
+  credentials: [{ ...PID_QUERY.credentials[0], claims: [...(PID_QUERY.credentials[0].claims ?? []), { path: ['date_of_expiry'] }] }],
+};
+export const PID_MDOC_EXPIRY_DATE_QUERY: DcqlQuery = {
+  credentials: [{ ...PID_MDOC_QUERY.credentials[0], claims: [...(PID_MDOC_QUERY.credentials[0].claims ?? []), { path: [PID_NAMESPACE, 'expiry_date'] }] }],
+};
 /** A variant of `default_query_pid` (SD-JWT VC) or of its mdoc form that requests the claims at `paths` instead. */
 const pidQueryWith = (base: DcqlQuery, paths: (string | number)[][], values?: (string | number | boolean)[]): DcqlQuery => ({
   credentials: [{ ...base.credentials[0], claims: paths.map((path) => ({ path, ...(values ? { values } : {}) })) }],
@@ -142,6 +152,8 @@ export function defaultQueries(pki: TestPki): Record<DefaultQueryId, DcqlQuery> 
     default_query_pubeaa_mdoc: attestationMdocQuery('pubeaa'),
     default_query_eaa: attestationQuery('eaa'),
     default_query_eaa_mdoc: attestationMdocQuery('eaa'),
+    default_query_pid_expiry_date: PID_EXPIRY_DATE_QUERY,
+    default_query_pid_mdoc_expiry_date: PID_MDOC_EXPIRY_DATE_QUERY,
     default_query_pid_eaa: pidAndEaaQuery(PID_QUERY, attestationQuery('eaa')),
     default_query_pid_eaa_mdoc: pidAndEaaQuery(PID_MDOC_QUERY, attestationMdocQuery('eaa')),
     default_query_pid_or_eaa: pidOrEaaQuery(PID_QUERY, attestationQuery('eaa'), attestationQuery('pubeaa')),

@@ -96,6 +96,8 @@ export interface ResponseOptions {
   /** `T_skew` and `T_kb`, seconds, for the KB-JWT time faults; default 0 and 300. */
   skewSeconds?: number;
   kbMaxAgeSeconds?: number;
+  /** For `response.oversized`: the maximum response size the Relying Party declares (ICS RP.P.11), bytes. */
+  maxResponseBytes?: number;
   /** Via redirects, whether the wallet opens the `redirect_uri`; default the wallet's option (true). */
   followRedirect?: boolean;
   /** Epoch milliseconds before which the wallet does not send the response (ProtocolFlow_011, a late response). */
@@ -401,7 +403,14 @@ export class ConformanceWallet {
     const metadata = request.client_metadata as { encrypted_response_enc_values_supported?: string[] };
     const enc = options.enc ?? metadata.encrypted_response_enc_values_supported?.find((e) => SUPPORTED_ENC.includes(e)) ?? 'A128GCM';
     const payload = { vp_token: built.vpToken, ...(binding.state ? { state: binding.state } : {}) };
-    return { payload, recipient: evidence.encryptionKey, enc, walletKey: this.holderKey, otherTransactionKey: options.otherTransactionKey };
+    return {
+      payload,
+      recipient: evidence.encryptionKey,
+      enc,
+      walletKey: this.holderKey,
+      otherTransactionKey: options.otherTransactionKey,
+      maxResponseBytes: options.maxResponseBytes,
+    };
   }
 
   /** An OpenID4VP client whose `verifyJwt` trusts a request signer only under a `TL-AC` anchor, recording the request. */

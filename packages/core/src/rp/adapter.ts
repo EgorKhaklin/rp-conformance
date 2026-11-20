@@ -23,6 +23,8 @@ export type DefaultQueryId =
   | 'default_query_pubeaa_mdoc'
   | 'default_query_eaa'
   | 'default_query_eaa_mdoc'
+  | 'default_query_pid_expiry_date'
+  | 'default_query_pid_mdoc_expiry_date'
   | 'default_query_pid_mandatory'
   | 'default_query_pid_mandatory_mdoc'
   | 'default_query_pid_age_over_18'
@@ -50,6 +52,8 @@ export const DEFAULT_QUERY_IDS: DefaultQueryId[] = [
   'default_query_pubeaa_mdoc',
   'default_query_eaa',
   'default_query_eaa_mdoc',
+  'default_query_pid_expiry_date',
+  'default_query_pid_mdoc_expiry_date',
   'default_query_pid_mandatory',
   'default_query_pid_mandatory_mdoc',
   'default_query_pid_age_over_18',

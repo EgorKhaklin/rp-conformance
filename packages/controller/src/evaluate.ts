@@ -1,4 +1,14 @@
-import type { CredentialCategory, DcqlQuery, Expectation, ExpectationCode, Ics, RelyingPartyResult, Verdict } from '@rp-conformance/core';
+import {
+  type CredentialCategory,
+  type DcqlQuery,
+  durationMs,
+  type Expectation,
+  type ExpectationCode,
+  type Ics,
+  type PolicyReference,
+  type RelyingPartyResult,
+  type Verdict,
+} from '@rp-conformance/core';
 import { icsAnswer, statusMeanings } from './ics';
 
 export interface Evaluation {
@@ -106,6 +116,7 @@ export function evaluateNoStatus(args: EvaluationInput): Evaluation {
 export function evaluatePolicy(expectation: Expectation, args: EvaluationInput): Evaluation {
   const policy = expectation.policy;
   if (!policy) return { verdict: 'INCONCLUSIVE', reason: 'the expected result names no ICS item' };
+  if (policy.item !== 'RP.R.3') return evaluateDeclaredPolicy(policy, args);
   const hex = `0x${policy.status.toString(16).padStart(2, '0')}`;
   const meaning = statusMeanings(args.ics).get(policy.status);
   if (meaning === undefined) return withPrefix(`${policy.item} declares no meaning for ${hex}`, evaluateReject(args.result, args.responseStatus, args.delivered));
@@ -143,6 +154,16 @@ export interface EvaluationInput {
   category: CredentialCategory;
   /** Requests the Test Status Provider logged for the step's status list URI, from the step's start to the verdict. */
   statusRequests: number;
+  /** Where the Authorization Response was delivered: `response_uri` (redirects) or the page's forwarding (DC API). */
+  responseEndpoint?: 'response_uri' | 'dc-api-forward';
+  /** The body of the answer to the Authorization Response, if the harness saw it. */
+  responseBody?: string;
+  /** The requests the Test Status Provider logged for the step's status list, with method, target and headers. */
+  statusEntries?: { method: string; url: string; target?: string; headers: Record<string, string | string[] | undefined> }[];
+  /** The Relying Party's identifier of the transaction. */
+  transactionId?: string;
+  /** The format of the step's Status List Token. */
+  statusFormat?: 'jwt' | 'cwt';
 }
 
 const ORDER: Verdict[] = ['FAIL', 'INCONCLUSIVE', 'REVIEW', 'PASS'];
@@ -180,10 +201,128 @@ export function evaluate(expectation: Expectation, args: EvaluationInput): Evalu
         return args.result.flags?.includes('trust-list-stale')
           ? { verdict: 'PASS', reason: 'the verification result signals trust-list-stale' }
           : { verdict: 'FAIL', reason: 'the verification result does not signal trust-list-stale' };
+      case 'HTTP_4XX':
+        return evaluateClientError(args);
+      case 'NO_DETAILS':
+        return evaluateNoDetails(args);
+      case 'STATUS_REQUEST':
+        return evaluateStatusRequest(args);
+      case 'INFO':
+        return evaluateInfo(args);
       default:
         return { verdict: 'INCONCLUSIVE', reason: `expected result ${code} does not apply to a presentation step` };
     }
   });
   const verdict = worst(evaluations.map((e) => e.verdict));
   return { verdict, reason: evaluations.map((e) => e.reason).join('; ') };
+}
+
+/**
+ * `HTTP_4XX` (RP_WS_SH_Encoding_001): the `response_uri` answers the faulty Authorization Response with HTTP 4xx. Via
+ * the W3C Digital Credentials API the response returns to the Relying Party's page, and how the page passes it on to its
+ * backend is the Relying Party's own matter (OpenID4VP 1.0 Appendix A), so the code applies to redirects only.
+ */
+export function evaluateClientError(args: EvaluationInput): Evaluation {
+  if (args.responseEndpoint === 'dc-api-forward') return { verdict: 'PASS', reason: 'via the DC API the status of the page forwarding the response is not evaluated' };
+  if (args.delivered === false || args.responseStatus === undefined) return { verdict: 'INCONCLUSIVE', reason: 'the harness saw no answer to the Authorization Response' };
+  if (args.responseStatus >= 400 && args.responseStatus < 500) return { verdict: 'PASS', reason: `the response_uri answered HTTP ${args.responseStatus}` };
+  return { verdict: 'FAIL', reason: `the response_uri answered HTTP ${args.responseStatus}, not 4xx` };
+}
+
+/**
+ * Marks of internal details in an error answer (RP_WS_SH_Encoding_007, OpenID4VP section 15.9): stack frames of
+ * JavaScript, Java, Python, .NET and Go, source file paths with a line number, module directories, exception class
+ * names followed by their message, and SQL error states.
+ */
+export const INTERNAL_DETAILS: { name: string; pattern: RegExp }[] = [
+  { name: 'a JavaScript stack frame', pattern: /\bat (?:async )?[\w$.<>[\]]+ \(?[^\s()]+:\d+:\d+\)?/ },
+  { name: 'a Java or .NET stack frame', pattern: /\bat [\w$.]+\([\w$]*\.(?:java|kt|scala|cs):\d+\)/ },
+  { name: 'a Python traceback', pattern: /Traceback \(most recent call last\)/ },
+  { name: 'a Go panic', pattern: /\bgoroutine \d+ \[/ },
+  { name: 'a source file with a line number', pattern: /[\w./-]+\.(?:[cm]?[jt]s|java|kt|py|rb|go|cs|php):\d+/ },
+  { name: 'a module directory', pattern: /\b(?:node_modules|site-packages|vendor\/bundle)\// },
+  { name: 'a stack member', pattern: /"stack(?:Trace)?"\s*:/ },
+  { name: 'an exception class with its message', pattern: /\b(?:[A-Z]\w*(?:Error|Exception)): / },
+  { name: 'an SQL error state', pattern: /\bSQLSTATE\b|\bQueryFailedError\b/ },
+];
+
+/**
+ * `NO_DETAILS` (RP_WS_SH_Encoding_007): the answer to the faulty Authorization Response reveals no internal details.
+ * Via the W3C Digital Credentials API the answer goes to the Relying Party's own page, not to the wallet.
+ */
+export function evaluateNoDetails(args: EvaluationInput): Evaluation {
+  if (args.responseEndpoint === 'dc-api-forward') return { verdict: 'PASS', reason: 'via the DC API no answer of the Relying Party reaches the wallet' };
+  if (args.delivered === false || args.responseStatus === undefined) return { verdict: 'INCONCLUSIVE', reason: 'the harness saw no answer to the Authorization Response' };
+  const body = args.responseBody ?? '';
+  const found = INTERNAL_DETAILS.filter(({ pattern }) => pattern.test(body)).map(({ name, pattern }) => `${name} (${pattern.exec(body)?.[0]})`);
+  if (found.length) return { verdict: 'FAIL', reason: `the answer reveals internal details: ${found.join('; ')}` };
+  return { verdict: 'PASS', reason: `the answer (HTTP ${args.responseStatus}, ${body.length} characters) reveals no internal details` };
+}
+
+/**
+ * `STATUS_REQUEST` (RP_PP_IA_Supportive_001, Token Status List section 8.1, ARF VCR_16): every logged request for the
+ * step's status list is a `GET` of exactly its URI (no query component), carries no `Authorization` or `Cookie` header
+ * and not the transaction's identifier, and has an `Accept` header, if any, that admits the token's media type.
+ */
+export function evaluateStatusRequest(args: EvaluationInput): Evaluation {
+  const entries = args.statusEntries ?? [];
+  if (entries.length === 0) return { verdict: 'FAIL', reason: 'the Relying Party did not retrieve the status list' };
+  const mediaType = `application/statuslist+${args.statusFormat ?? 'jwt'}`;
+  const problems = entries.flatMap((entry, i) => {
+    const found: string[] = [];
+    const header = (name: string) => entry.headers[name];
+    if (entry.method !== 'GET') found.push(`method ${entry.method}`);
+    if (entry.target !== undefined && entry.target.includes('?')) found.push(`a query component (${entry.target})`);
+    if (header('authorization') !== undefined) found.push('an Authorization header');
+    if (header('cookie') !== undefined) found.push('a Cookie header');
+    const accept = header('accept');
+    const types = (Array.isArray(accept) ? accept.join(',') : (accept ?? '')).split(',').map((t) => t.split(';')[0]?.trim().toLowerCase());
+    if (accept !== undefined && !types.some((t) => t === mediaType || t === '*/*' || t === 'application/*')) found.push(`Accept ${String(accept)}`);
+    const id = args.transactionId;
+    if (id && (entry.target?.includes(id) || Object.values(entry.headers).some((v) => String(v).includes(id)))) found.push('the transaction identifier');
+    return found.map((f) => `request ${i + 1}: ${f}`);
+  });
+  if (problems.length) return { verdict: 'FAIL', reason: `the status list request carries ${problems.join('; ')}` };
+  const accepts = [...new Set(entries.map((e) => String(e.headers.accept ?? '(none)')))].join(', ');
+  return { verdict: 'PASS', reason: `${entries.length} GET request(s) of the status URI without authentication or transaction data (Accept: ${accepts})` };
+}
+
+/**
+ * `POLICY` against the ICS items of issue 32: `RP.R.7`, the maximum age of a Status List Token (a token at least that
+ * old gives no reliable status, `NOSTAT`; `None` or a longer age accepts); `RP.R.8`, whether a token issued in the future
+ * is refused (`Yes`: `NOSTAT`, `No`: accepted); `RP.P.12`, a PID whose administrative expiry date has passed (`Reject`
+ * or `Accept`).
+ */
+export function evaluateDeclaredPolicy(policy: Exclude<PolicyReference, { item: 'RP.R.3' }>, args: EvaluationInput): Evaluation {
+  const declared = String(icsAnswer(args.ics, policy.item) ?? '').trim();
+  const accept = (why: string) => withPrefix(`${policy.item} ${why}`, evaluateAccept(args.result, args.query, args.issuedClaims, args.responseStatus, args.delivered));
+  const refuse = (why: string) => withPrefix(`${policy.item} ${why}`, evaluateNoStatus(args));
+  const undeclared = (): Evaluation => ({ verdict: 'INCONCLUSIVE', reason: `${policy.item} is not declared (${declared || 'missing'})` });
+  switch (policy.item) {
+    case 'RP.R.7': {
+      if (/^none$/i.test(declared)) return accept('declares no maximum age');
+      const maxMs = durationMs(declared);
+      if (maxMs === undefined) return undeclared();
+      return maxMs <= policy.ageSeconds * 1000 ? refuse(`declares a maximum age of ${declared}`) : accept(`declares a maximum age of ${declared}, more than the token's`);
+    }
+    case 'RP.R.8':
+      if (/^yes$/i.test(declared)) return refuse('Yes');
+      if (/^no$/i.test(declared)) return accept('No');
+      return undeclared();
+    case 'RP.P.12':
+      if (/^reject/i.test(declared)) return withPrefix(`${policy.item} ${declared}`, evaluateReject(args.result, args.responseStatus, args.delivered));
+      if (/^accept/i.test(declared)) return accept(declared);
+      return undeclared();
+  }
+}
+
+/**
+ * `INFO` (RP_WS_SM_Validity_004): the outcome is recorded without a verdict on it. The step passes whenever the Relying
+ * Party decided without an HTTP 5xx; an answer that never arrived leaves it inconclusive.
+ */
+export function evaluateInfo(args: EvaluationInput): Evaluation {
+  if (args.delivered === false) return { verdict: 'INCONCLUSIVE', reason: 'the Authorization Response was not delivered' };
+  if (args.responseStatus !== undefined && args.responseStatus >= 500) return { verdict: 'FAIL', reason: `the Relying Party answered HTTP ${args.responseStatus}` };
+  const outcome = args.result.outcome === 'success' ? 'accepted' : args.result.outcome === 'failure' ? 'rejected' : 'left pending';
+  return { verdict: 'PASS', reason: `recorded: the Relying Party ${outcome} the presentation${args.responseStatus !== undefined ? ` (HTTP ${args.responseStatus})` : ''}` };
 }

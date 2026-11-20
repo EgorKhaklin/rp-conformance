@@ -32,6 +32,7 @@ export const ics = {
     text: 'Relying Party keeps using a trust list for a grace period greater than zero after its `NextUpdate`.',
     equals: 'Yes',
   },
+  cachesStatusLists: { item: 'RP.R.5', text: 'Relying Party caches Status List Tokens.', equals: 'Yes' },
   usesRequestUriPost: { item: 'RP.P.8', text: 'Relying Party sets `request_uri_method` to `post`.', equals: 'Yes' },
   redeemsResponseCode: {
     item: 'RP.P.9',
@@ -90,6 +91,8 @@ export interface CredentialSpec {
   signedUnder?: 'issuance' | 'revocation';
   /** Named faults (at most one); empty for a valid credential. */
   faults: FaultId[];
+  /** A PID whose administrative expiry date (`date_of_expiry`, mdoc `expiry_date`) lies seven days in the past. */
+  expiryDatePast?: boolean;
   /**
    * `default_credential_A` only (UC_Presentation_010, _011): the credential additionally carries the identifying
    * attributes family name, given name and birth date, of the holder of `default_credential_pid` (`holder`) or of
@@ -113,7 +116,26 @@ export interface StatusListSpec {
   signer?: { entity: string; key: 'revocation' | 'issuance' };
   /** Named faults (at most one); empty for a valid token. */
   faults: FaultId[];
+  /** The `ttl` claim, seconds; default 300. */
+  ttl?: number;
+  /** The credential references the status list URI of this earlier step (1-based) instead of a new one. */
+  uriOfStep?: number;
+  /** How the Test Status Provider answers for the status list; default: it serves the token. */
+  endpoint?: StatusEndpoint;
 }
+
+/**
+ * How the Test Status Provider answers for a status list (RP_PP_IA_Supportive): with an HTTP status (and optionally
+ * another body and content type), with the valid token only after the Relying Party's declared timeout (ICS RP.R.6)
+ * plus ten seconds, with a redirect to the same URI, or not at all: `refused` puts the URI at a port of the harness
+ * host on which nothing listens, `address` makes the credential reference `uri`, which the harness never requests.
+ */
+export type StatusEndpoint =
+  | { kind: 'status'; status: number; contentType?: string; body?: string }
+  | { kind: 'slow' }
+  | { kind: 'redirect-loop' }
+  | { kind: 'refused' }
+  | { kind: 'address'; uri: string };
 
 /**
  * An identifier list (ISO/IEC 18013-5 second edition section 12.3.6.4, CWT) the Test Status Provider serves for the
@@ -152,6 +174,8 @@ export interface PresentationAction {
   /** The identifier list of an mdoc; left out or `null` when it has none. */
   identifierList?: IdentifierListSpec | null;
   response: ResponseSpec;
+  /** Seconds the controller waits after the Test Status Provider serves the step's list, before the presentation starts. */
+  delaySeconds?: number;
   /** How the Conformance Wallet deviates from the plain flow (catalogue scenario SCN-F); left out for the plain flow. */
   wallet?: WalletBehaviour;
   /**
@@ -241,15 +265,44 @@ export type ExpectationCode =
   | 'ENC_KEY'
   | 'STALE'
   | 'CONF'
+  | RobustnessExpectationCode
+  | RetrievalExpectationCode
+  | InformativeExpectationCode
   | FlowExpectationCode
   | 'REJ_OR_INVALID';
 
-/** The ICS declaration a `POLICY` expectation is compared with. */
-export interface PolicyReference {
-  /** `RP.R.3`: the meaning the Relying Party assigns to an application-specific status value. */
-  item: 'RP.R.3';
-  status: number;
-}
+/**
+ * Expected-result codes of `RP_WS_SH_Encoding`: `HTTP_4XX`, the `response_uri` answers the Authorization Response with
+ * HTTP 4xx; `NO_DETAILS`, that answer reveals no internal details (stack traces, source paths, exception names). Via the
+ * W3C Digital Credentials API the response returns to the Relying Party's own page, so both apply to redirects only.
+ */
+export type RobustnessExpectationCode = 'HTTP_4XX' | 'NO_DETAILS';
+
+/**
+ * Expected-result code of `RP_PP_IA_Supportive`: `STATUS_REQUEST`, every request the Test Status Provider logged for the
+ * step's status list is a `GET` of exactly its URI without authentication, cookies or the transaction's identifier,
+ * with an `Accept` header, if any, that admits the token's media type.
+ */
+export type RetrievalExpectationCode = 'STATUS_REQUEST';
+
+/** `INFO` (catalogue section 2.5): the outcome is recorded in the report, without a verdict on it. */
+export type InformativeExpectationCode = 'INFO';
+
+/**
+ * The ICS declaration a `POLICY` expectation is compared with: `RP.R.3`, the meaning the Relying Party assigns to an
+ * application-specific status value; `RP.R.7`, the maximum age of a Status List Token, for a token `ageSeconds` old;
+ * `RP.R.8`, whether it refuses a Status List Token issued in the future; `RP.P.12`, its policy for a PID whose
+ * administrative expiry date has passed.
+ */
+export type PolicyReference =
+  | {
+      /** `RP.R.3`: the meaning the Relying Party assigns to an application-specific status value. */
+      item: 'RP.R.3';
+      status: number;
+    }
+  | { item: 'RP.R.7'; ageSeconds: number }
+  | { item: 'RP.R.8' }
+  | { item: 'RP.P.12' };
 
 /** An expected result of an RP test case. */
 export interface Expectation extends ExpectationOf<ExpectationCode> {

@@ -85,6 +85,8 @@ const BINDING_REASONS: Partial<Record<FaultId, RegExp>> = {
   'presentation.no-device-auth': /no deviceAuth/,
   'presentation.device-signed-element': /DeviceNameSpaces is not empty/,
   'presentation.device-signature-es256k': /alg -47/,
+  'presentation.kb-duplicate-alg': /KB-JWT header carries the member alg twice/,
+  'presentation.kb-duplicate-nonce': /KB-JWT payload carries the member nonce twice/,
 };
 
 /** The reason for each fault of IssuerIntegrity: many fail the same check, so the reason shows each fails it for its own defect. */
@@ -134,6 +136,9 @@ const ISSUER_REASONS: Partial<Record<FaultId, RegExp>> = {
   'mdoc.key-p192': /key P-192/,
   'mdoc.key-rsa1024': /key RSA 1024 bit/,
   'mdoc.critical-extension': /unknown critical extension/,
+  'credential.x5c-50': /carries 50 certificates/,
+  'mdoc.x5chain-50': /carries 50 certificates/,
+  'credential.disclosure-invalid-json': /not base64url-encoded JSON/,
 };
 
 const reasonOf = (result: Awaited<ReturnType<Fixture['validate']>>, check: string) => result.credential?.checks.find((c) => c.check === check)?.detail;

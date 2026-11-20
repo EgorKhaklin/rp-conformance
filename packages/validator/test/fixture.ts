@@ -70,6 +70,10 @@ export const AUDIENCE = 'x509_hash:self-validation';
 export const SKEW = 60;
 export const KB_MAX_AGE = 300;
 export const MAX_STATUS_LIST_BYTES = 1 << 20;
+/** The maximum response size of the reference validator in the self-validation (ICS RP.P.11 of the reference Relying Party). */
+export const MAX_RESPONSE_BYTES = 1 << 20;
+/** The freshness policy for Status List Tokens of the reference validator in the self-validation (ICS RP.R.7, RP.R.8). */
+export const STATUS_LIST_FRESHNESS = { maxAgeSeconds: 7 * 24 * 3600, refuseFutureIat: true };
 export const RESPONSE_URI = 'https://rp.rp-test/self-validation/response';
 /** The Origin of the Relying Party's page in the DC API flow. */
 export const ORIGIN = 'https://rp.rp-test';
@@ -250,8 +254,10 @@ export class Fixture {
       skewSeconds: SKEW,
     });
     const forged = credentials[0].forged;
-    for (const { forged: credential } of credentials) {
-      if (credential.statusList) this.statusLists.set(credential.statusList.uri, credential.statusList.served);
+    for (const [i, { forged: credential }] of credentials.entries()) {
+      // A status list the Test Status Provider does not serve as a token (RP_PP_IA_Supportive) cannot be retrieved.
+      const unserved = i === 0 && Boolean(action.statusList?.endpoint);
+      if (credential.statusList && !unserved) this.statusLists.set(credential.statusList.uri, credential.statusList.served);
       if (credential.identifierList) this.statusLists.set(credential.identifierList.uri, credential.identifierList.served);
     }
     const tx = await this.transaction();
@@ -294,9 +300,10 @@ export class Fixture {
       enc: action.response.enc ?? 'A128GCM',
       walletKey: this.walletKey,
       otherTransactionKey: options.other?.key.publicJwk,
+      maxResponseBytes: MAX_RESPONSE_BYTES,
     };
     const form = flow === 'dc-api' ? await buildDcApiResponse(input, responseFault) : await buildAuthorizationResponse(input, responseFault);
-    const response = await validateAuthorizationResponse(form, { keys: [tx.key], encValues, state, mode });
+    const response = await validateAuthorizationResponse(form, { keys: [tx.key], encValues, state, mode, maxResponseBytes: MAX_RESPONSE_BYTES });
     const fetchList = async (uri: string): Promise<FetchedStatusList> => {
       const served = this.statusLists.get(uri);
       return served ? { status: 200, body: served.body, contentType: served.contentType } : { status: 404, body: '' };
@@ -314,6 +321,9 @@ export class Fixture {
           skewSeconds: SKEW,
           requireStatus: true,
           maxStatusListBytes: MAX_STATUS_LIST_BYTES,
+          // The policies of the reference Relying Party (ICS RP.R.7, RP.R.8, RP.P.12).
+          statusListFreshness: STATUS_LIST_FRESHNESS,
+          rejectPastExpiryDate: true,
           trustedAuthorities: credentialQuery.trusted_authorities,
           requestedClaims: credentialQuery.claims ?? [],
           mode,
