@@ -4,11 +4,40 @@
 // credential does not carry; `holder-binding` takes their place: the credential is bound (`cnf.jwk`) to a key the
 // Conformance Wallet proved possession of and that the Wallet Unit's key attestation attests. `trusted-authorities`
 // checks a query, of which there is none.
-import { type CheckId, STATUS_LIST_CHECKS } from '@rp-conformance/core';
-import { base64url, verifyEs256 } from '@rp-conformance/forge';
+import { createHash } from 'node:crypto';
+import { type CheckId, type CheckResult, type PidSubject, STATUS_LIST_CHECKS } from '@rp-conformance/core';
+import { base64url, type CborMap, decodeCbor, verifyEs256 } from '@rp-conformance/forge';
 import { CheckRecorder, type ValidationMode, type ValidationResult } from './checks';
 import { describeKey, processDisclosures } from './disclosures';
-import { decodeSegment, evaluateStatusList, type FetchedStatusList, fail, isUri, leafJwk } from './status-list';
+import {
+  asMap,
+  checkDocumentSignerTrust,
+  checkMdocValidity,
+  checkValueDigests,
+  deviceKeyOfMso,
+  type IssuerSignedElement,
+  readIssuerSigned,
+  readMsoStatus,
+  validityOf,
+  verifyIssuerAuth,
+} from './mdoc';
+import {
+  checkPidDocType,
+  checkPidFormats,
+  checkPidMdocAttributes,
+  checkPidMdocDates,
+  checkPidMdocPortraitOptOut,
+  checkPidMdocValues,
+  checkPidSdJwtAttributes,
+  checkPidSdJwtDates,
+  checkPidSdJwtExtension,
+  checkPidSdJwtPortraitOptOut,
+  checkPidSdJwtValues,
+  checkPidUnique,
+  checkPidVct,
+  pidMdocClaims,
+} from './pid-rulebook';
+import { attempt, decodeSegment, evaluateStatusList, type FetchedStatusList, fail, isUri, leafJwk } from './status-list';
 import type { MatchedIssuer, TrustRule, TrustStore } from './trust';
 
 /** The checks of an issued SD-JWT VC, in the order the reference validator runs them. */
@@ -50,9 +79,30 @@ export interface IssuedSdJwtVcValidationOptions {
   /** Default `all`: every check whose prerequisites passed is evaluated, so the report shows each of them. */
   mode?: ValidationMode;
   now?: Date;
+  /** The checks of `ISSUER_OUTPUT_CHECKS` to run after the credential and status list checks, with what they compare. */
+  output?: IssuedOutputOptions;
+}
+
+/**
+ * What the output checks of a test case compare the issued credential with (issuer catalogue sections 5.1.3 and 5.1.4).
+ * Only the checks in `checks` run; the credential checks and status list checks always do.
+ */
+export interface IssuedOutputOptions {
+  checks: CheckId[];
+  /** `pid-values`: the test subject's data the adapter seeded. */
+  subject?: PidSubject;
+  /** `validity-declared`: the validity period the ICS declares for the configuration, seconds. */
+  declaredValiditySeconds?: number;
+  /** `validity-declared`: the tolerance, the timestamp precision the ICS declares (ICS-16), seconds. */
+  precisionSeconds?: number;
+  /** `type-metadata`: fetches the Type Metadata of an https `vct`. */
+  fetchTypeMetadata?: (url: string) => Promise<{ status: number; body: Uint8Array }>;
+  /** `pid-extension`: the claims a published rulebook documents for a domestic `vct`. */
+  documentedClaims?: string[];
 }
 
 const DAY = 24 * 60 * 60;
+const wants = (output: IssuedOutputOptions | undefined, check: CheckId) => Boolean(output?.checks.includes(check));
 
 /** Two public JWKs name the same EC key. */
 export const sameEcKey = (a: JsonWebKey | undefined, b: JsonWebKey | undefined) =>
@@ -176,6 +226,238 @@ export async function validateIssuedSdJwtVc(credential: string, options: IssuedS
         statusListFetched = true;
       },
     });
+
+    const output = options.output;
+    if (wants(output, 'validity-period')) await recorder.run('validity-period', ['format'], () => checkSdJwtValidityPeriod(payload, nowSeconds, skew));
+    if (wants(output, 'validity-declared')) await recorder.run('validity-declared', ['format'], () => checkDeclaredValidity(sdJwtPeriod(payload), output as IssuedOutputOptions));
+    if (wants(output, 'type-metadata')) await recorder.run('type-metadata', ['format'], () => checkTypeMetadata(payload, output?.fetchTypeMetadata));
+    if (wants(output, 'pid-type')) await recorder.run('pid-type', ['format'], () => checkPidVct(payload));
+    const disclosed = () => claims as Record<string, unknown>;
+    if (wants(output, 'pid-attributes')) await recorder.run('pid-attributes', ['disclosures'], () => checkPidSdJwtAttributes(disclosed()));
+    if (wants(output, 'pid-values')) await recorder.run('pid-values', ['disclosures'], () => checkPidSdJwtValues(disclosed(), requireSubject(output)));
+    if (wants(output, 'pid-dates')) await recorder.run('pid-dates', ['disclosures'], () => checkPidSdJwtDates(disclosed(), skew));
+    if (wants(output, 'pid-extension')) await recorder.run('pid-extension', ['disclosures'], () => checkPidSdJwtExtension(disclosed(), output?.documentedClaims));
+    if (wants(output, 'pid-portrait')) await recorder.run('pid-portrait', ['disclosures'], () => checkPidSdJwtPortraitOptOut(disclosed()));
   });
   return { ...result, claims: result.failures.includes('disclosures') ? undefined : claims, issuer: issuer?.name, statusListFetched };
+}
+
+const requireSubject = (output: IssuedOutputOptions | undefined): PidSubject => output?.subject ?? fail('the test case names no subject to compare with');
+
+/** The validity period of an SD-JWT VC, `exp` minus `nbf` (or `iat`), seconds. */
+const sdJwtPeriod = (payload: Record<string, unknown>) => {
+  const start = typeof payload.nbf === 'number' ? payload.nbf : payload.iat;
+  if (typeof start !== 'number' || typeof payload.exp !== 'number') return fail('the credential has no exp, or neither nbf nor iat');
+  return payload.exp - start;
+};
+
+/**
+ * `validity-period` of an SD-JWT VC (SD-JWT VC section 3.2.2, `SM_Validity_001`): `iat` and `exp` present as NumericDate,
+ * `nbf` optional, the period not empty, and the credential valid at the time of issuance within `T_skew`.
+ */
+export function checkSdJwtValidityPeriod(payload: Record<string, unknown>, nowSeconds: number, skew: number): string {
+  for (const claim of ['iat', 'exp']) if (typeof payload[claim] !== 'number') fail(`${claim} is missing or not a NumericDate`);
+  if (payload.nbf !== undefined && typeof payload.nbf !== 'number') fail('nbf is not a NumericDate');
+  const [iat, exp] = [payload.iat as number, payload.exp as number];
+  const start = typeof payload.nbf === 'number' ? payload.nbf : iat;
+  if (exp <= start) fail(`exp ${exp} is not after ${typeof payload.nbf === 'number' ? 'nbf' : 'iat'} ${start}`);
+  if (iat > nowSeconds + skew) fail(`iat ${iat} lies in the future at issuance (now ${nowSeconds}, T_skew ${skew} s)`);
+  if (start > nowSeconds + skew) fail(`not valid at issuance: nbf ${start}, now ${nowSeconds}, T_skew ${skew} s`);
+  if (exp < nowSeconds - skew) fail(`not valid at issuance: exp ${exp}, now ${nowSeconds}, T_skew ${skew} s`);
+  return `iat ${iat}${typeof payload.nbf === 'number' ? `, nbf ${payload.nbf}` : ''}, exp ${exp}: ${exp - start} s, valid at issuance`;
+}
+
+/** `validity-declared` (`SM_Validity_004`, ISSU_38): the period equals the declared one within the declared precision. */
+export function checkDeclaredValidity(periodSeconds: number, output: IssuedOutputOptions): string {
+  const declared = output.declaredValiditySeconds;
+  if (declared === undefined) return fail('the ICS declares no validity period for the configuration');
+  // Issuance time rounded down and expiry rounded up to the precision (ICS-16) widen the period by up to two steps.
+  const tolerance = 2 * (output.precisionSeconds ?? 0);
+  if (Math.abs(periodSeconds - declared) > tolerance) fail(`the validity period is ${periodSeconds} s, the ICS declares ${declared} s (tolerance ${tolerance} s)`);
+  return `${periodSeconds} s, declared ${declared} s (tolerance ${tolerance} s)`;
+}
+
+/** The Type Metadata URL of an https `vct` (SD-JWT VC section 6.3.1): `/.well-known/vct` inserted before the path. */
+export function typeMetadataUrl(vct: string): string {
+  const url = new URL(vct);
+  return `${url.origin}/.well-known/vct${url.pathname === '/' ? '' : url.pathname}${url.search}`;
+}
+
+/**
+ * `type-metadata` (`DM_PidSdJwt_006`, SD-JWT VC section 6): for an https `vct`, the Type Metadata is retrievable, names
+ * the same `vct`, and matches `vct#integrity` when present (W3C Subresource Integrity). A URN `vct` has no retrieval
+ * the specification defines; the check records that.
+ */
+export async function checkTypeMetadata(payload: Record<string, unknown>, fetchTypeMetadata?: (url: string) => Promise<{ status: number; body: Uint8Array }>): Promise<string> {
+  const vct = payload.vct;
+  if (typeof vct !== 'string') return fail('vct is not a string');
+  const integrity = payload['vct#integrity'];
+  if (!/^https:\/\//.test(vct)) {
+    return `vct ${vct} is not an https URL, so SD-JWT VC defines no retrieval of its Type Metadata${integrity !== undefined ? '; vct#integrity cannot be matched' : ''} (recorded)`;
+  }
+  if (!fetchTypeMetadata) return fail('the harness cannot fetch Type Metadata');
+  const url = typeMetadataUrl(vct);
+  const response = await fetchTypeMetadata(url);
+  if (response.status !== 200) fail(`GET ${url}: HTTP ${response.status}`);
+  const metadata = attempt(() => JSON.parse(Buffer.from(response.body).toString('utf8')) as Record<string, unknown>, `the Type Metadata at ${url} is not JSON`);
+  if (metadata.vct !== vct) fail(`the Type Metadata at ${url} names vct ${JSON.stringify(metadata.vct)}`);
+  if (integrity !== undefined) {
+    if (typeof integrity !== 'string') fail('vct#integrity is not a string');
+    const matches = (integrity as string).split(/\s+/).some((entry) => {
+      const [alg, digest] = entry.split('-', 2);
+      const node = { sha256: 'sha256', sha384: 'sha384', sha512: 'sha512' }[alg ?? ''];
+      return node !== undefined && createHash(node).update(response.body).digest('base64') === digest;
+    });
+    if (!matches) fail(`vct#integrity ${String(integrity)} does not match the Type Metadata at ${url}`);
+  }
+  return `Type Metadata retrieved from ${url}${integrity !== undefined ? ', vct#integrity matches' : ''}`;
+}
+
+// ---------------------------------------------------------------------------------------------------------------------
+// mdoc
+
+/** The checks of an issued mdoc, in the order the reference validator runs them. */
+export const ISSUED_MDOC_CHECKS: CheckId[] = [...ISSUED_CREDENTIAL_CHECKS, ...STATUS_LIST_CHECKS];
+
+export interface IssuedMdocValidation extends ValidationResult {
+  /** The issuer-signed elements by namespace, as JSON values, when the disclosures check passed. */
+  claims?: Record<string, Record<string, unknown>>;
+  /** The PID attributes of namespace `eu.europa.ec.eudi.pid.1` under their mdoc identifiers, for `pid-formats`. */
+  pidClaims?: Record<string, unknown>;
+  issuer?: string;
+  statusListFetched: boolean;
+}
+
+export interface IssuedMdocValidationOptions extends Omit<IssuedSdJwtVcValidationOptions, 'expectedVct' | 'output'> {
+  /** The doctype of the credential configuration the Conformance Wallet requested. */
+  expectedDocType: string;
+  output?: IssuedOutputOptions;
+}
+
+/**
+ * The reference validator for an mdoc as a Provider issued it over OpenID4VCI (Appendix A.2.4: base64url of the
+ * `IssuerSigned` structure): the checks of an mdoc presentation (ISO/IEC 18013-5 section 9.3.1), from the same helpers,
+ * with `holder-binding` (the MSO's `deviceKeyInfo` is a proof key and attested) instead of `key-binding`, since there is no
+ * DeviceAuth; then the status list the MSO references, as a Status List Token in CWT format.
+ */
+export async function validateIssuedMdoc(credential: string, options: IssuedMdocValidationOptions): Promise<IssuedMdocValidation> {
+  const recorder = new CheckRecorder(options.mode ?? 'all');
+  const now = options.now ?? new Date();
+  const skew = options.skewSeconds;
+  let parsed: ReturnType<typeof readIssuerSigned> | undefined;
+  let issuer: MatchedIssuer | undefined;
+  let claims: Record<string, Record<string, unknown>> | undefined;
+  let elements: IssuerSignedElement[] = [];
+  let reference: { idx: number; uri: string } | undefined;
+  let statusListFetched = false;
+  const mso = () => (parsed as ReturnType<typeof readIssuerSigned>).mso;
+
+  const result = await recorder.collect(async () => {
+    await recorder.run('format', [], () => {
+      if (!/^[A-Za-z0-9_-]+$/.test(credential)) fail('the credential is not base64url');
+      const issuerSigned = asMap(attempt(() => decodeCbor(base64url.decode(credential)), 'the credential is not CBOR'), 'IssuerSigned');
+      parsed = readIssuerSigned(issuerSigned);
+      if (parsed.mso.get('docType') !== options.expectedDocType) fail(`MSO docType ${String(parsed.mso.get('docType'))} is not the requested ${options.expectedDocType}`);
+    });
+
+    await recorder.run('issuer-trust', ['format'], async () => {
+      const match = await checkDocumentSignerTrust(options.trust, options.trustRule, (parsed as ReturnType<typeof readIssuerSigned>).x5chain, mso(), now);
+      if (options.issuerEntity && match.entity.name !== options.issuerEntity) {
+        fail(`the chain ends in an anchor of ${match.entity.name} (${match.list.id}), not of the enrolled ${options.issuerEntity}`);
+      }
+      issuer = { name: match.entity.name, statusAnchors: options.trustRule.statusAnchors(match.entity, match.service) };
+      return `${match.entity.name} under ${match.anchor.subject.commonName} (${match.list.id})`;
+    });
+
+    await recorder.run('issuer-signature', ['format'], () => verifyIssuerAuth((parsed as ReturnType<typeof readIssuerSigned>).issuerAuth, (parsed as ReturnType<typeof readIssuerSigned>).x5chain));
+
+    await recorder.run('disclosures', ['format'], () => {
+      const digests = checkValueDigests((parsed as ReturnType<typeof readIssuerSigned>).issuerSigned, mso(), { rejectDuplicates: false });
+      claims = digests.claims;
+      elements = digests.elements;
+      return `${elements.length} elements`;
+    });
+
+    await recorder.run('validity', ['format'], () => checkMdocValidity(mso(), now, skew));
+
+    await recorder.run('holder-binding', ['format'], () => checkHolderBinding({ cnf: { jwk: deviceKeyOfMso(mso()) } }, options.proofKeys, options.keyAttestations).replaceAll('cnf.jwk', 'deviceKeyInfo'));
+
+    await recorder.run('status-reference', ['format'], () => {
+      const read = readMsoStatus(mso(), options.requireStatus);
+      if (read.identifierList && !read.statusList) fail('the MSO references an identifier list, which the reference validator does not check for an issued mdoc yet');
+      reference = read.statusList;
+      return read.detail;
+    });
+
+    await evaluateStatusList(recorder, {
+      format: 'cwt',
+      reference,
+      issuer,
+      fetchStatusList: options.fetchStatusList,
+      maxStatusListBytes: options.maxStatusListBytes,
+      skewSeconds: skew,
+      now,
+      onFetched: () => {
+        statusListFetched = true;
+      },
+    });
+
+    const output = options.output;
+    const nowSeconds = Math.floor(now.getTime() / 1000);
+    if (wants(output, 'validity-period')) await recorder.run('validity-period', ['format'], () => checkMdocValidityPeriod(mso(), nowSeconds, skew));
+    if (wants(output, 'validity-declared')) {
+      await recorder.run('validity-declared', ['format'], () => {
+        const { validFrom, validUntil } = validityOf(mso());
+        return checkDeclaredValidity((validUntil.getTime() - validFrom.getTime()) / 1000, output as IssuedOutputOptions);
+      });
+    }
+    if (wants(output, 'pid-type')) await recorder.run('pid-type', ['disclosures'], () => checkPidDocType(options.expectedDocType, mso().get('docType'), elements));
+    if (wants(output, 'pid-attributes')) await recorder.run('pid-attributes', ['disclosures'], () => checkPidMdocAttributes(elements));
+    if (wants(output, 'pid-unique')) await recorder.run('pid-unique', ['disclosures'], () => checkPidUnique(elements));
+    if (wants(output, 'pid-values')) await recorder.run('pid-values', ['disclosures'], () => checkPidMdocValues(elements, requireSubject(output), validityOf(mso()).validFrom));
+    if (wants(output, 'pid-dates')) {
+      await recorder.run('pid-dates', ['disclosures'], () => {
+        const { validFrom, validUntil } = validityOf(mso());
+        return checkPidMdocDates(elements, validFrom, validUntil, skew);
+      });
+    }
+    if (wants(output, 'pid-portrait')) await recorder.run('pid-portrait', ['disclosures'], () => checkPidMdocPortraitOptOut(elements));
+  });
+  const disclosed = !result.failures.includes('disclosures') && claims !== undefined;
+  return {
+    ...result,
+    claims: disclosed ? claims : undefined,
+    pidClaims: disclosed ? pidMdocClaims(elements) : undefined,
+    issuer: issuer?.name,
+    statusListFetched,
+  };
+}
+
+/**
+ * `validity-period` of an mdoc (ISO/IEC 18013-5 section 9.1.2.4, `SM_Validity_001`): `validFrom` not after `validUntil`,
+ * `signed` and `validFrom` not in the future and `validUntil` not past at the time of issuance within `T_skew`: the mdoc valid at the time of issuance.
+ */
+export function checkMdocValidityPeriod(mso: CborMap, nowSeconds: number, skew: number): string {
+  const { signed, validFrom, validUntil } = validityOf(mso);
+  const [from, until, at] = [validFrom.getTime() / 1000, validUntil.getTime() / 1000, signed.getTime() / 1000];
+  if (until <= from) fail(`validUntil ${validUntil.toISOString()} is not after validFrom ${validFrom.toISOString()}`);
+  if (at > nowSeconds + skew) fail(`signed ${signed.toISOString()} lies in the future at issuance`);
+  if (from > nowSeconds + skew) fail(`not valid at issuance: validFrom ${validFrom.toISOString()}`);
+  if (until < nowSeconds - skew) fail(`not valid at issuance: validUntil ${validUntil.toISOString()}`);
+  return `signed ${signed.toISOString()}, validFrom ${validFrom.toISOString()}, validUntil ${validUntil.toISOString()}: ${until - from} s, valid at issuance`;
+}
+
+/**
+ * `pid-formats` (`DM_PidMdoc_006`): compares the SD-JWT VC and the mdoc a step received for the same subject, as the
+ * reference validator disclosed them. A step check: it belongs to the issuance, not to one credential.
+ */
+export function comparePidFormats(sdJwtClaims: Record<string, unknown> | undefined, mdocPidClaims: Record<string, unknown> | undefined): CheckResult {
+  if (!sdJwtClaims || !mdocPidClaims) {
+    return { check: 'pid-formats', status: 'skip', detail: `the step has no ${!sdJwtClaims ? 'SD-JWT VC' : 'mdoc'} whose disclosures passed` };
+  }
+  try {
+    return { check: 'pid-formats', status: 'pass', detail: checkPidFormats(sdJwtClaims, mdocPidClaims) };
+  } catch (error) {
+    return { check: 'pid-formats', status: 'fail', detail: (error as Error).message };
+  }
 }

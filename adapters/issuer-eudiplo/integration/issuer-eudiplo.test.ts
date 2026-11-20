@@ -15,7 +15,7 @@ import { TrustInfrastructure } from '@rp-conformance/trust-infrastructure';
 import { publishTlWp, WALLET_PROVIDER_IDS } from '@rp-conformance/wallet-provider';
 import { AuthorizationEndpointError, type IssuerTestEnvironment, type PublishedTrustList } from '@rp-conformance/core';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { EudiploError, IssuerEudiploAdapter, loadIssuerIcs, PID_SD_JWT_CONFIGURATION, PID_SUBJECTS, PID_VCT, REFERENCE_EUDIPLO, SECOND_SD_JWT_CONFIGURATION, SECOND_VCT } from '../src/index';
+import { EudiploError, IssuerEudiploAdapter, loadIssuerIcs, PID_DOCTYPE, PID_MDOC_CONFIGURATION, PID_SD_JWT_CONFIGURATION, PID_SUBJECTS, PID_VCT, REFERENCE_EUDIPLO, SECOND_SD_JWT_CONFIGURATION } from '../src/index';
 
 const harnessHost = process.env.HARNESS_HOST ?? 'host.docker.internal';
 const namespace = `i16-${Date.now().toString(36)}`;
@@ -48,10 +48,16 @@ describe('EUDIPLO issuer adapter', () => {
     const enrolment = await enrolSut(pki, {
       entity: 'PP-T',
       csrs,
-      credentialSigningProfiles: ['sd-jwt-vc'],
+      // With CSRs the adapter names the format of each key; 9.1.0 imports a generated SD-JWT VC signer and document signer.
+      credentialSigningProfiles: csrs?.credentialSigningProfiles ?? ['sd-jwt-vc', 'mdoc'],
       statusListWithIssuanceKey: false,
       access: { entityIdentifier: 'VATDE-987654321', serviceIdentifier: 'S1', tradeName: 'PID Provider under test' },
-      registration: { providesAttestations: [{ format: 'dc+sd-jwt', meta: { vct_values: [PID_VCT] } }] },
+      registration: {
+        providesAttestations: [
+          { format: 'dc+sd-jwt', meta: { vct_values: [PID_VCT] } },
+          { format: 'mso_mdoc', meta: { doctype_value: PID_DOCTYPE } },
+        ],
+      },
     });
     await trust.start({ port: 0, publicHost: harnessHost });
     const lists: PublishedTrustList[] = [];
@@ -67,6 +73,7 @@ describe('EUDIPLO issuer adapter', () => {
       runId: namespace,
       trustLists: lists,
       credentialSigningCertificates: enrolment.credentialSigners.map(toEnrolledCertificate),
+      credentialSigningProfiles: enrolment.credentialSigners.map((signer) => signer.profile),
       statusListSigningCertificate: enrolment.statusListSigner && toEnrolledCertificate(enrolment.statusListSigner),
       accessCertificate: toEnrolledCertificate(enrolment.access),
       registrationCertificate: enrolment.registrationCertificate,
@@ -105,6 +112,9 @@ describe('EUDIPLO issuer adapter', () => {
     expect(response.status).toBe(200);
     const metadata = await response.json();
     expect(metadata.credential_issuer).toBe(adapter.credentialIssuer);
+    const mdoc = metadata.credential_configurations_supported?.[PID_MDOC_CONFIGURATION];
+    expect(mdoc?.format).toBe('mso_mdoc');
+    expect(mdoc?.doctype).toBe(PID_DOCTYPE);
     const pid = metadata.credential_configurations_supported?.[PID_SD_JWT_CONFIGURATION];
     expect(pid).toBeDefined();
     expect(pid.format).toBe('dc+sd-jwt');
@@ -201,7 +211,7 @@ describe('EUDIPLO issuer adapter', () => {
     const second = await resolveOffer((await adapter.createOffer({ subject: 'SUBJ-1', configurations: [SECOND_SD_JWT_CONFIGURATION], grant: 'pre-authorized_code', byReference: false, txCode: true })).offer);
     expect(second.credential_configuration_ids).toEqual([SECOND_SD_JWT_CONFIGURATION]);
     const metadata = await (await fetch(`${adapter.baseUrl}/.well-known/openid-credential-issuer/issuers/${adapter.tenant}`)).json();
-    expect(metadata.credential_configurations_supported?.[SECOND_SD_JWT_CONFIGURATION]).toMatchObject({ format: 'dc+sd-jwt', vct: SECOND_VCT });
+    expect(metadata.credential_configurations_supported?.[SECOND_SD_JWT_CONFIGURATION]).toMatchObject({ format: 'dc+sd-jwt', vct: PID_VCT });
   });
 
   it('answers an authorization request without a pushed request_uri with an error page, which authenticateSubject throws', async () => {

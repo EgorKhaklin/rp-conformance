@@ -1,10 +1,12 @@
 import { type CheckId, CREDENTIAL_CHECKS, STATUS_LIST_CHECKS } from '@rp-conformance/core';
-import { base64url, sha256, verifyEs256 } from '@rp-conformance/forge';
+import { base64url, PID_VCT, sha256, verifyEs256 } from '@rp-conformance/forge';
 import { describeKey, processDisclosures } from './disclosures';
+import { checkClaims, type RequestedClaim } from './claims';
 import { parseCertificate } from '@owf/x509';
-import { CheckRecorder, type ValidationMode, type ValidationResult } from './checks';
-import { decodeSegment, evaluateStatusList, type FetchedStatusList, fail, isUri, leafJwk } from './status-list';
+import { CheckRecorder, NotApplicable, type ValidationMode, type ValidationResult } from './checks';
+import { decodeSegment, evaluateStatusList, type FetchedStatusList, fail, isUri, leafJwk, type StatusListFreshness } from './status-list';
 import type { MatchedIssuer, TrustRule, TrustStore } from './trust';
+import { duplicateMember } from './json-members';
 
 export type { FetchedStatusList };
 
@@ -46,9 +48,15 @@ export interface SdJwtVcValidationOptions {
   validStatuses?: number[];
   /** `trusted_authorities` of the credential query the Relying Party sent (OpenID4VP section 6.1.1.1). */
   trustedAuthorities?: { type: string; values: string[] }[];
+  /** The claims of the credential query, for the check `claims`; left out, the check does not apply. */
+  requestedClaims?: RequestedClaim[];
   fetchStatusList: (uri: string) => Promise<FetchedStatusList>;
   mode?: ValidationMode;
   now?: Date;
+  /** Freshness policy for Status List Tokens (ICS RP.R.7, RP.R.8). */
+  statusListFreshness?: StatusListFreshness;
+  /** Reject a PID whose administrative expiry date has passed (ICS RP.P.12 Reject). */
+  rejectPastExpiryDate?: boolean;
 }
 
 const DAY = 24 * 60 * 60;
@@ -142,6 +150,9 @@ export async function validateSdJwtVcPresentation(presentation: string, options:
       if (typeof payload.exp === 'number' && nowSeconds > payload.exp + skew) fail(`expired: exp ${payload.exp}, now ${nowSeconds}, T_skew ${skew}`);
       if (typeof payload.nbf === 'number' && nowSeconds < payload.nbf - skew) fail(`not yet valid: nbf ${payload.nbf}, now ${nowSeconds}, T_skew ${skew}`);
       // A credential iat in the future is recorded only (catalogue decision 5).
+      // RP_WS_SM_Validity_020: the administrative expiry date of a PID, under the policy of ICS RP.P.12.
+      const expiry = claims?.date_of_expiry;
+      if (options.rejectPastExpiryDate && typeof expiry === 'string' && expiry < now.toISOString().slice(0, 10)) fail(`the administrative expiry date ${expiry} has passed`);
       if (typeof payload.iat === 'number' && payload.iat > nowSeconds + skew) return `iat ${payload.iat} lies in the future (informative)`;
     });
 
@@ -149,6 +160,11 @@ export async function validateSdJwtVcPresentation(presentation: string, options:
     // typed, signed with ES256 by the key in cnf.jwk, over this presentation, for this request.
     await recorder.run('key-binding', ['format'], async () => {
       if (!kbJwt) fail('the presentation has no KB-JWT');
+      // RFC 7515 section 4 and RFC 7519 section 4: a member name occurs at most once.
+      for (const [index, part] of [[0, 'header'], [1, 'payload']] as const) {
+        const duplicate = duplicateMember(Buffer.from(kbJwt.split('.')[index] ?? '', 'base64url').toString('utf8'));
+        if (duplicate !== undefined) fail(`the KB-JWT ${part} carries the member ${duplicate} twice`);
+      }
       if (kbHeader.typ !== 'kb+jwt') fail(`KB-JWT typ is ${String(kbHeader.typ)}`);
       if (kbHeader.alg !== 'ES256') fail(`KB-JWT alg ${String(kbHeader.alg)} is not supported`);
       const jwk = (payload.cnf as { jwk?: JsonWebKey } | undefined)?.jwk;
@@ -185,6 +201,12 @@ export async function validateSdJwtVcPresentation(presentation: string, options:
       reference = { idx: list?.idx as number, uri: list?.uri as string };
     });
 
+    // The disclosed claims satisfy the query, and a PID's attributes have the types of the PID rulebook.
+    await recorder.run('claims', ['format', 'disclosures'], () => {
+      if (!options.requestedClaims) return new NotApplicable('no credential query given');
+      return checkClaims(claims ?? {}, options.requestedClaims, payload.vct === PID_VCT ? { encoding: 'sd-jwt-vc' } : undefined);
+    });
+
     // Status list procedures (Token Status List section 8). In first-failure mode they run only for a valid credential.
     await evaluateStatusList(recorder, {
       format: 'jwt',
@@ -199,6 +221,7 @@ export async function validateSdJwtVcPresentation(presentation: string, options:
       onFetched: () => {
         statusListFetched = true;
       },
+      freshness: options.statusListFreshness,
     });
   });
   return { ...result, claims: result.failures.includes('disclosures') ? undefined : claims, issuer: issuer?.name, statusListFetched, trustListStale };

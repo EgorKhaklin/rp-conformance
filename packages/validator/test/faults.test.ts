@@ -1,4 +1,5 @@
 import {
+  attestation,
   FAULT_IDS,
   type FaultId,
   faultInfo,
@@ -35,7 +36,8 @@ const actionWith = (fault?: FaultId, format: 'dc+sd-jwt' | 'mso_mdoc' = 'dc+sd-j
   const credentialFormat = info?.format === 'mso_mdoc' || info?.format === 'cwt' ? 'mso_mdoc' : format;
   const only = (point: string) => (info?.point === point ? [fault as FaultId] : []);
   return presentation({
-    query: pidQueryOf(credentialFormat),
+    // An attribute variant of the PID is presented for the query that requests the changed attributes.
+    query: info?.query ?? pidQueryOf(credentialFormat),
     credential: pid.of(credentialFormat, { faults: only('credential'), ...(info?.issuer ? { issuer: info.issuer } : {}) }),
     ...(info?.point === 'identifier-list'
       ? { identifierList: identifierListToken.cwt({ contains: false, faults: only('identifier-list') }) }
@@ -83,6 +85,8 @@ const BINDING_REASONS: Partial<Record<FaultId, RegExp>> = {
   'presentation.no-device-auth': /no deviceAuth/,
   'presentation.device-signed-element': /DeviceNameSpaces is not empty/,
   'presentation.device-signature-es256k': /alg -47/,
+  'presentation.kb-duplicate-alg': /KB-JWT header carries the member alg twice/,
+  'presentation.kb-duplicate-nonce': /KB-JWT payload carries the member nonce twice/,
 };
 
 /** The reason for each fault of IssuerIntegrity: many fail the same check, so the reason shows each fails it for its own defect. */
@@ -132,6 +136,9 @@ const ISSUER_REASONS: Partial<Record<FaultId, RegExp>> = {
   'mdoc.key-p192': /key P-192/,
   'mdoc.key-rsa1024': /key RSA 1024 bit/,
   'mdoc.critical-extension': /unknown critical extension/,
+  'credential.x5c-50': /carries 50 certificates/,
+  'mdoc.x5chain-50': /carries 50 certificates/,
+  'credential.disclosure-invalid-json': /not base64url-encoded JSON/,
 };
 
 const reasonOf = (result: Awaited<ReturnType<Fixture['validate']>>, check: string) => result.credential?.checks.find((c) => c.check === check)?.detail;
@@ -190,7 +197,7 @@ describe('fault self-validation', () => {
     },
   );
 
-  it.each(FAULT_IDS.filter((fault) => !['trust-list', 'request'].includes(faultInfo(fault).point)))('%s fails exactly its target check', async (fault) => {
+  it.each(FAULT_IDS.filter((fault) => !['trust-list', 'request', 'vp-token'].includes(faultInfo(fault).point)))('%s fails exactly its target check', async (fault) => {
     const result = await fixture.validate(actionWith(fault), { other: await otherFor(fault) });
     const target = faultInfo(fault).target;
     expect(result.failures).toEqual(target ? [target] : []);
@@ -262,6 +269,14 @@ describe('fault self-validation', () => {
     expect(result.failures).toEqual([faultInfo(fault).target]);
   });
 
+  // The disclosure variants of the data model test cases apply to both formats.
+  it.each(['presentation.family-name-withheld', 'presentation.unrequested-disclosed'] as const)('%s fails exactly its target check in mdoc format too', async (fault) => {
+    const result = await fixture.validate(actionWith(fault, 'mso_mdoc'));
+    const target = faultInfo(fault).target;
+    expect(result.failures).toEqual(target ? [target] : []);
+    if (target) expect(reasonOf(result, target)).toMatch(/family_name is not disclosed/);
+  });
+
   it('every fault that fails key-binding or kb-freshness has its own expected reason', () => {
     const binding = FAULT_IDS.filter((fault) => ['key-binding', 'kb-freshness'].includes(faultInfo(fault).target ?? ''));
     expect(binding.filter((fault) => !BINDING_REASONS[fault])).toEqual([]);
@@ -331,5 +346,42 @@ describe('fault self-validation', () => {
       expect(result.credential?.failed).toBe(faultInfo(fault).target);
       expect(result.credential && 'statusListFetched' in result.credential && result.credential.statusListFetched).toBe(false);
     }
+  });
+});
+
+// The vp_token faults of the combined presentations (UC_Presentation): a valid PID and a valid non-qualified EAA for
+// `default_query_pid_eaa`, of which the vp_token fails exactly `vp-token`, in each format the fault applies to and in
+// both flows; the presentations in it are valid, and are not validated once the vp_token as a whole failed.
+describe('vp_token faults', () => {
+  const combined = (fault: FaultId | undefined, format: 'dc+sd-jwt' | 'mso_mdoc') =>
+    presentation({
+      query: format === 'mso_mdoc' ? 'default_query_pid_eaa_mdoc' : 'default_query_pid_eaa',
+      credential: pid.of(format),
+      answers: 'pid',
+      alongside: [{ answers: 'eaa', credential: attestation.of('eaa', format) }],
+      ...(fault ? { response: { faults: [fault] } } : {}),
+    });
+  const cases = (['dc+sd-jwt', 'mso_mdoc'] as const).flatMap((format) =>
+    (['redirect', 'dc-api'] as const).flatMap((flow) => [
+      [undefined, format, flow] as const,
+      ...FAULT_IDS.filter((fault) => faultInfo(fault).point === 'vp-token' && (!faultInfo(fault).format || faultInfo(fault).format === format)).map(
+        (fault) => [fault, format, flow] as const,
+      ),
+    ]),
+  );
+
+  it.each(cases)('%s (%s via %s) fails exactly its target check', async (fault, format, flow) => {
+    const result = await fixture.validate(combined(fault, format), { flow });
+    expect(result.failures).toEqual(fault ? [faultInfo(fault).target] : []);
+  });
+
+  it.each(['dc+sd-jwt', 'mso_mdoc'] as const)('an EAA of another person fails exactly combined-binding (%s)', async (format) => {
+    const action = presentation({
+      query: format === 'mso_mdoc' ? 'default_query_pid_eaa_identifying_mdoc' : 'default_query_pid_eaa_identifying',
+      credential: pid.of(format),
+      answers: 'pid',
+      alongside: [{ answers: 'eaa', credential: attestation.of('eaa', format, { identifying: 'other-person' }) }],
+    });
+    expect((await fixture.validate(action)).failures).toEqual(['combined-binding']);
   });
 });

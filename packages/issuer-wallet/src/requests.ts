@@ -117,6 +117,8 @@ export interface CredentialRequestInput {
   tokenType: string;
   dpop?: string;
   credentialConfigurationId: string;
+  /** Request by this `credential_identifier` of the token response instead of `credential_configuration_id` (issue 20). */
+  credentialIdentifier?: string;
   /** Key proofs of proof type `jwt`. */
   proofs: string[];
 }
@@ -132,7 +134,10 @@ export function credentialRequest(input: CredentialRequestInput): HttpRequestMes
       authorization: `${input.tokenType} ${input.accessToken}`,
       ...(input.dpop !== undefined ? { DPoP: input.dpop } : {}),
     },
-    body: JSON.stringify({ credential_configuration_id: input.credentialConfigurationId, proofs: { jwt: input.proofs } }),
+    body: JSON.stringify({
+      ...(input.credentialIdentifier !== undefined ? { credential_identifier: input.credentialIdentifier } : { credential_configuration_id: input.credentialConfigurationId }),
+      proofs: { jwt: input.proofs },
+    }),
   };
 }
 

@@ -2,7 +2,8 @@
 // flow with PAR, PKCE and `issuer_state` (the authorization request goes to the adapter's `authenticateSubject`), with
 // the grant faults of the points `authorization` and `token-request` (grant-faults.ts): offer by value
 // or by reference, Credential Issuer and Authorization Server metadata (`SCN-M`), token request with client attestation
-// and DPoP, nonce, credential request with an `openid4vci-proof+jwt` carrying the KA (`SCN-I`). The libraries parse and
+// and DPoP, nonce, credential request with an `openid4vci-proof+jwt` carrying the KA (`SCN-I`), for SD-JWT VC and mdoc,
+// and for several configurations with one access token. The libraries parse and
 // validate offer and metadata; every message the client sends to the token, nonce and credential endpoints is built
 // by a function of its own (`jwts.ts`, `requests.ts`) and passes the hooks before it is signed or sent.
 import { createHash, randomBytes } from 'node:crypto';
@@ -192,6 +193,12 @@ export interface IssueOptions {
   txCode?: string;
   /** Default the first of the offer's `credential_configuration_ids`. */
   credentialConfigurationId?: string;
+  /**
+   * Several configurations of the offer, requested one after the other with the same access token, each with a fresh
+   * `c_nonce` and proof (`IA_MainInteraction_003`: both formats of the PID with one access token). Takes precedence
+   * over `credentialConfigurationId`.
+   */
+  credentialConfigurationIds?: string[];
   /** Also fetch the metadata with `Accept: application/jwt` (default true). */
   signedMetadata?: boolean;
   /** The grant to run; default the pre-authorized code grant when the offer has one, else the authorization code grant. */
@@ -201,11 +208,13 @@ export interface IssueOptions {
   /** Authorization code flow: stop after the authorization response, before the token request. */
   stopAfterAuthorization?: boolean;
   /** A fault of the points `authorization` or `token-request` (at most one per issuance). */
-  fault?: GrantFaultId;
+  grantFault?: GrantFaultId;
   /** `token-request.pre-authorized-code-other-offer`: a second offer of the SUT, by value or by reference. */
   otherOffer?: { offer: string; txCode?: string };
   /** The lifetime of a pre-authorized code the SUT declares (ICS-14.pre_authorized_code), seconds. */
   preAuthorizedCodeLifetimeSeconds?: number;
+  /** Request each credential by the `credential_identifier` the token response issued for it (issue 20, `MS_CredentialEndpoint_002`). */
+  credentialIdentifier?: boolean;
   /** The longest a fault may wait, seconds (default 0: a fault that waits is not executed). */
   maxWaitSeconds?: number;
   /** How the client waits; default a timer. */
@@ -214,6 +223,15 @@ export interface IssueOptions {
 
 /** The adapter's `authenticateSubject`: the authorization request URL in, the redirect to the wallet out. */
 export type Authenticate = (authorizationRequestUrl: string) => Promise<string>;
+
+/** The first `credential_identifier` the token response's `authorization_details` issued for a configuration. */
+export function credentialIdentifierOf(token: TokenResult, configurationId: string): string {
+  const details = Array.isArray(token.response.authorization_details) ? (token.response.authorization_details as Record<string, unknown>[]) : [];
+  const identifiers = details.filter((d) => d.credential_configuration_id === configurationId).flatMap((d) => (Array.isArray(d.credential_identifiers) ? d.credential_identifiers : []));
+  const [identifier] = identifiers.filter((i): i is string => typeof i === 'string');
+  if (!identifier) throw new IssuanceError(`the token response issued no credential_identifiers for ${configurationId}`);
+  return identifier;
+}
 
 /** The `redirect_uri` of the Conformance Wallet. It is never fetched: the client reads the redirect's query. */
 export const WALLET_REDIRECT_URI = 'https://wallet.rp-conformance.invalid/callback';
@@ -267,14 +285,17 @@ export class IssuanceClient {
     try {
       const offer = await this.resolveOffer(options.offer, evidence);
       const metadata = await this.fetchMetadata(offer.offer.credential_issuer, evidence, { signed: options.signedMetadata ?? true });
-      const configurationId = options.credentialConfigurationId ?? offer.offer.credential_configuration_ids[0];
+      const configurationId = options.credentialConfigurationIds?.[0] ?? options.credentialConfigurationId ?? offer.offer.credential_configuration_ids[0];
       const grant = options.grant ?? (offer.offer.grants?.[PRE_AUTHORIZED_CODE_GRANT] ? 'pre-authorized_code' : 'authorization_code');
       let token: TokenResult;
       if (grant === 'authorization_code') {
         if (!options.authenticate) throw new IssuanceError('the authorization code flow needs the adapter to authenticate the subject (authenticateSubject)');
-        const authorization = await this.authorize(offer.offer, metadata.result, configurationId, evidence, { ...options, authenticate: options.authenticate });
+        const authorization = await this.authorize(offer.offer, metadata.result, options.credentialConfigurationIds?.length ? options.credentialConfigurationIds : configurationId, evidence, {
+          ...options,
+          authenticate: options.authenticate,
+        });
         if (options.stopAfterAuthorization) return evidence;
-        token = await this.requestAuthorizationCodeToken(metadata.result, authorization, evidence, options.fault);
+        token = await this.requestAuthorizationCodeToken(metadata.result, authorization, evidence, options.grantFault);
       } else {
         const other = options.otherOffer ? await this.resolveOffer(options.otherOffer.offer, evidence, { record: false }) : undefined;
         const otherCode = other?.offer.grants?.[PRE_AUTHORIZED_CODE_GRANT]?.['pre-authorized_code'];
@@ -284,8 +305,11 @@ export class IssuanceClient {
           ...(otherCode ? { otherOffer: { preAuthorizedCode: otherCode, ...(options.otherOffer?.txCode !== undefined ? { txCode: options.otherOffer.txCode } : {}) } } : {}),
         });
       }
-      const cNonce = await this.requestNonce(metadata.result, evidence);
-      await this.requestCredential(metadata.result, token, configurationId, cNonce, evidence);
+      const configurationIds = options.credentialConfigurationIds?.length ? options.credentialConfigurationIds : [configurationId];
+      for (const id of configurationIds) {
+        const cNonce = await this.requestNonce(metadata.result, evidence);
+        await this.requestCredential(metadata.result, token, id, cNonce, evidence, { byIdentifier: options.credentialIdentifier ?? false });
+      }
     } catch (error) {
       evidence.error = (error as Error).message;
       if (error instanceof WaitLimitExceeded) evidence.waitExceeded = { waitsFor: error.waitsFor, seconds: error.seconds, limit: error.limit };
@@ -341,7 +365,7 @@ export class IssuanceClient {
     metadata: IssuerMetadataResult,
     evidence: IssuanceEvidence,
     txCode?: string,
-    options: Pick<IssueOptions, 'fault' | 'preAuthorizedCodeLifetimeSeconds' | 'maxWaitSeconds' | 'sleep'> & { otherOffer?: { preAuthorizedCode: string; txCode?: string } } = {},
+    options: Pick<IssueOptions, 'grantFault' | 'preAuthorizedCodeLifetimeSeconds' | 'maxWaitSeconds' | 'sleep'> & { otherOffer?: { preAuthorizedCode: string; txCode?: string } } = {},
   ): Promise<TokenResult> {
     const grant = offer.grants?.[PRE_AUTHORIZED_CODE_GRANT];
     if (!grant) throw new IssuanceError('the offer has no pre-authorized code grant');
@@ -353,15 +377,15 @@ export class IssuanceClient {
       preAuthorizedCode: grant['pre-authorized_code'],
       ...(txCode !== undefined ? { txCode } : {}),
       offerResolvedAt: new Date().toISOString(),
-      ...(options.fault ? { fault: options.fault } : {}),
+      ...(options.grantFault ? { fault: options.grantFault } : {}),
     };
     evidence.grant = record;
-    if (options.fault === 'token-request.pre-authorized-code-expired') {
+    if (options.grantFault === 'token-request.pre-authorized-code-expired') {
       if (options.preAuthorizedCodeLifetimeSeconds === undefined) throw new IssuanceError('the SUT declares no lifetime of its pre-authorized codes (ICS-14.pre_authorized_code)');
       record.waitedSeconds = await this.waitPast('pre-authorized-code', options.preAuthorizedCodeLifetimeSeconds, options);
     }
     const valid: TokenForm = { 'pre-authorized_code': grant['pre-authorized_code'], tx_code: txCode };
-    if (options.fault === 'token-request.tx-code-repeated') {
+    if (options.grantFault === 'token-request.tx-code-repeated') {
       if (txCode === undefined) throw new IssuanceError('the offer has no tx_code to repeat wrongly');
       record.wrongTxCodeAttempts = 0;
       for (let attempt = 0; attempt < TX_CODE_WRONG_ATTEMPTS; attempt++) {
@@ -369,7 +393,7 @@ export class IssuanceClient {
         record.wrongTxCodeAttempts++;
       }
     }
-    const form = applyTokenRequestFault(options.fault, valid, options);
+    const form = applyTokenRequestFault(options.grantFault, valid, options);
     record.tokenRequest = form;
     return this.tokenResultOf(await this.sendPreAuthorizedTokenRequest(issuer, form, evidence), evidence);
   }
@@ -427,9 +451,9 @@ export class IssuanceClient {
   async authorize(
     offer: CredentialOfferObject,
     metadata: IssuerMetadataResult,
-    configurationId: string,
+    configurationId: string | string[],
     evidence: IssuanceEvidence,
-    options: Pick<IssueOptions, 'fault' | 'maxWaitSeconds' | 'sleep'> & { authenticate: Authenticate },
+    options: Pick<IssueOptions, 'grantFault' | 'maxWaitSeconds' | 'sleep'> & { authenticate: Authenticate },
   ): Promise<AuthorizationEvidence> {
     const grant = offer.grants?.[AUTHORIZATION_CODE_GRANT];
     if (!grant) throw new IssuanceError('the offer has no authorization code grant');
@@ -445,12 +469,12 @@ export class IssuanceClient {
       issuer_state: grant.issuer_state,
       code_challenge: s256Challenge(codeVerifier),
       code_challenge_method: 'S256',
-      authorization_details: JSON.stringify([{ type: 'openid_credential', credential_configuration_id: configurationId }]),
+      authorization_details: JSON.stringify((Array.isArray(configurationId) ? configurationId : [configurationId]).map((id) => ({ type: 'openid_credential', credential_configuration_id: id }))),
     };
-    const parameters = applyAuthorizationFault(options.fault, valid, { codeVerifier });
-    const pushed = options.fault !== 'authorization.no-par';
+    const parameters = applyAuthorizationFault(options.grantFault, valid, { codeVerifier });
+    const pushed = options.grantFault !== 'authorization.no-par';
     const authorization: AuthorizationEvidence = { authorizationServer: issuer, parameters, pushed, codeVerifier, redirectUri: WALLET_REDIRECT_URI, state };
-    evidence.grant = { grant: 'authorization_code', clientId: this.unit.clientId, authorizationServer: issuer, authorization, ...(options.fault ? { fault: options.fault } : {}) };
+    evidence.grant = { grant: 'authorization_code', clientId: this.unit.clientId, authorizationServer: issuer, authorization, ...(options.grantFault ? { fault: options.grantFault } : {}) };
 
     let url = authorizationRequestUrl(server.authorization_endpoint, parameters);
     if (pushed) {
@@ -467,7 +491,7 @@ export class IssuanceClient {
       authorization.requestUri = body.request_uri;
       if (typeof body.expires_in === 'number') authorization.expiresIn = body.expires_in;
       authorization.parAt = new Date().toISOString();
-      if (options.fault === 'authorization.request-uri-expired') {
+      if (options.grantFault === 'authorization.request-uri-expired') {
         if (authorization.expiresIn === undefined) throw new IssuanceError('the PAR response carries no expires_in');
         authorization.waitedSeconds = await this.waitPast('request-uri', authorization.expiresIn, options);
       }
@@ -616,10 +640,15 @@ export class IssuanceClient {
     credentialConfigurationId: string,
     cNonce: string,
     evidence: IssuanceEvidence,
+    options: { byIdentifier?: boolean } = {},
   ): Promise<IssuedCredential[]> {
     const configuration = metadata.credentialIssuer.credential_configurations_supported[credentialConfigurationId];
+    // By `credential_identifier` (OpenID4VCI 1.0 section 8.2): the first one the token response issued for the configuration.
+    const credentialIdentifier = options.byIdentifier ? credentialIdentifierOf(token, credentialConfigurationId) : undefined;
     if (!configuration) throw new IssuanceError(`the metadata has no credential configuration ${credentialConfigurationId}`);
-    if (configuration.format !== 'dc+sd-jwt') throw new IssuanceError(`format ${configuration.format}: the client requests SD-JWT VC (dc+sd-jwt) only`);
+    if (configuration.format !== 'dc+sd-jwt' && configuration.format !== 'mso_mdoc') {
+      throw new IssuanceError(`format ${configuration.format}: the client requests SD-JWT VC (dc+sd-jwt) and mdoc (mso_mdoc) only`);
+    }
     const endpoint = metadata.credentialIssuer.credential_endpoint;
     const ka = await this.unit.keyAttestation();
     const proofKey = ka.keys[0];
@@ -637,6 +666,7 @@ export class IssuanceClient {
         tokenType: token.tokenType,
         dpop: await this.dpop('credential', 'POST', endpoint, token.accessToken),
         credentialConfigurationId,
+        ...(credentialIdentifier !== undefined ? { credentialIdentifier } : {}),
         proofs: [proof],
       });
     const response = await this.sendWithDpopRetry('credential', build, evidence);
@@ -647,7 +677,8 @@ export class IssuanceClient {
     }
     const issued = credentials.map((entry) => {
       const credential = (entry as { credential?: unknown }).credential;
-      if (typeof credential !== 'string') throw new IssuanceError('a credentials entry carries no SD-JWT VC string', evidence.exchanges.at(-1));
+      // SD-JWT VC: the compact SD-JWT; mdoc: base64url of IssuerSigned (OpenID4VCI Appendix A.1.2, A.2.4).
+      if (typeof credential !== 'string') throw new IssuanceError(`a credentials entry carries no ${configuration.format} string`, evidence.exchanges.at(-1));
       return { credentialConfigurationId, format: configuration.format, credential, proofKey, keyAttestation: ka.jwt };
     });
     evidence.credentials.push(...issued);

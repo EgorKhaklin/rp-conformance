@@ -42,6 +42,11 @@ export interface SdJwtVcIssueOptions {
   validitySeconds?: number;
   /** SD-JWT VC media type in `typ`; `dc+sd-jwt` per SD-JWT VC. */
   typ?: string;
+  /**
+   * The disclosure frame of `@sd-jwt/core`; default every top-level attribute selectively disclosable. The attribute
+   * variants of the data model test cases make the members of a structured claim disclosable or a claim plain.
+   */
+  disclosureFrame?: Record<string, unknown>;
 }
 
 export interface PidIssueOptions extends SdJwtVcIssueOptions {
@@ -88,7 +93,7 @@ export async function issueSdJwtVc(options: SdJwtVcIssueOptions & { vct: string;
     signer: async (data) => base64url.encode(await signEs256(options.signer.key.privateKey, data)),
     omitTyp: true,
   });
-  const compact = await sdjwt.issue(payload, { _sd: Object.keys(claims) } as never, { header });
+  const compact = await sdjwt.issue(payload, (options.disclosureFrame ?? { _sd: Object.keys(claims) }) as never, { header });
   return { compact, claims: payload, header };
 }
 
@@ -97,6 +102,8 @@ export interface PresentOptions {
   holderPrivateKey: CryptoKey;
   /** Top-level claims to disclose. */
   disclose: string[];
+  /** The requested claim paths; a structured claim requested only by members discloses only those members. */
+  paths?: (string | number | null)[][];
   /** KB-JWT `aud`: the Client Identifier of the Relying Party. */
   audience: string;
   nonce: string;
@@ -136,7 +143,7 @@ function referencedDigests(value: unknown, root = true): { direct: string[]; nes
  * reference at the top level as a claim (a foreign one, an array element, one with a reserved or no claim name) is
  * presented as issued, so a credential fault in the disclosures reaches the Relying Party unchanged.
  */
-export function selectDisclosures(compact: string, disclose: string[]): string[] {
+export function selectDisclosures(compact: string, disclose: string[], paths?: (string | number | null)[][]): string[] {
   const [jwt, ...rest] = compact.split('~');
   const disclosures = rest.filter(Boolean);
   const payload = base64url.decodeJson<Record<string, unknown>>(jwt.split('.')[1] ?? '');
@@ -152,19 +159,38 @@ export function selectDisclosures(compact: string, disclose: string[]): string[]
   const { direct, nested } = referencedDigests(payload);
   const keep = new Set<string>(nested);
   const dropped = new Set<string>();
-  for (const digest of direct) {
+  const nameOf = (digest: string) => {
     const elements = decoded.get(digest);
-    const name = Array.isArray(elements) && elements.length === 3 ? elements[1] : undefined;
+    return Array.isArray(elements) && elements.length === 3 ? elements[1] : undefined;
+  };
+  /** The members of a top-level claim the request names, when it requests the claim only by members. */
+  const membersOf = (name: unknown): Set<string> | undefined => {
+    const of = (paths ?? []).filter((path) => path[0] === name);
+    if (!of.length || of.some((path) => path.length < 2 || path[1] === null)) return undefined;
+    return new Set(of.map((path) => String(path[1])));
+  };
+  const topLevel = new Map<string, unknown>();
+  for (const digest of direct) {
+    const name = nameOf(digest);
     if (typeof name === 'string' && !RESERVED_NAMES.has(name) && !disclose.includes(name)) dropped.add(digest);
-    else keep.add(digest);
+    else keep.add(digest), topLevel.set(digest, name);
   }
-  // Disclosures referenced from inside a kept disclosure are kept with it; those inside a dropped one are dropped.
+  // Disclosures referenced from inside a kept disclosure are kept with it; those inside a dropped one are dropped. Of a
+  // structured claim requested by members, only the disclosures of those members are kept.
   const queue = [...keep];
   while (queue.length) {
-    const elements = decoded.get(queue.pop() as string);
+    const digest = queue.pop() as string;
+    const elements = decoded.get(digest);
     if (!Array.isArray(elements)) continue;
-    const inner = referencedDigests(elements[elements.length - 1], false);
-    for (const d of [...inner.direct, ...inner.nested]) if (!keep.has(d)) keep.add(d), queue.push(d);
+    const value = elements[elements.length - 1];
+    const members = topLevel.has(digest) ? membersOf(topLevel.get(digest)) : undefined;
+    const own = members && value && typeof value === 'object' && !Array.isArray(value) ? ((value as Record<string, unknown>)._sd ?? []) : [];
+    for (const d of Array.isArray(own) ? own : []) {
+      const name = nameOf(String(d));
+      if (typeof name === 'string' && !members?.has(name)) dropped.add(String(d));
+    }
+    const inner = referencedDigests(value, false);
+    for (const d of [...inner.direct, ...inner.nested]) if (!keep.has(d) && !dropped.has(d)) keep.add(d), queue.push(d);
   }
   for (const digest of dropped) {
     const elements = decoded.get(digest);
@@ -181,7 +207,7 @@ export function selectDisclosures(compact: string, disclose: string[]): string[]
  */
 export async function presentSdJwtVc(compact: string, options: PresentOptions): Promise<string> {
   const [jwt] = compact.split('~');
-  const sdJwt = `${[jwt, ...selectDisclosures(compact, options.disclose)].join('~')}~`;
+  const sdJwt = `${[jwt, ...selectDisclosures(compact, options.disclose, options.paths)].join('~')}~`;
   const header = { typ: 'kb+jwt', alg: 'ES256' };
   const payload = {
     iat: Math.floor((options.now ?? new Date()).getTime() / 1000),

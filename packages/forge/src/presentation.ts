@@ -10,9 +10,13 @@ import { flipBitInBytes } from './faults-cose';
 import { decodeJws, flipBitInSegment, resignJws } from './jose';
 import { encodeDeviceResponse, jwkThumbprint, type Oid4vpHandover, PID_NAMESPACE, presentMdoc } from './mdoc';
 import { presentSdJwtVc } from './pid';
+import { isRobustDeviceResponseFault, isRobustSdJwtPresentationFault, robustDeviceResponse, robustSdJwtPresentation } from './robustness';
 
 /** A credential the Conformance Wallet holds: an SD-JWT VC (compact, without KB-JWT) or an mdoc's `IssuerSigned` (CBOR). */
-export type HeldCredential = { format: 'dc+sd-jwt'; value: string } | { format: 'mso_mdoc'; value: Uint8Array; docType?: string };
+export type HeldCredential = ({ format: 'dc+sd-jwt'; value: string } | { format: 'mso_mdoc'; value: Uint8Array; docType?: string }) & {
+  /** The `id` of the credential query the credential answers, in a combined presentation (UC_Presentation). */
+  query?: string;
+};
 
 /** A key pair on secp256k1, as Node.js key objects: WebCrypto has no secp256k1. */
 export interface Secp256k1KeyPair {
@@ -47,6 +51,27 @@ export interface PresentationBinding {
 export interface RequestedClaims {
   disclose: string[];
   elements: Record<string, string[]>;
+  /** The requested claim paths, so a structured claim requested by members discloses only those (SD-JWT VC). */
+  paths?: (string | number | null)[][];
+}
+
+/**
+ * What the Conformance Wallet discloses for a presentation variant of the data model test cases: the requested claims
+ * without `family_name` (IdentifyingData_003), or with attributes the request does not ask for (CredentialMetadata_001).
+ */
+function disclosureVariant(fault: 'presentation.family-name-withheld' | 'presentation.unrequested-disclosed', requested: RequestedClaims): RequestedClaims {
+  if (fault === 'presentation.family-name-withheld') {
+    return {
+      disclose: requested.disclose.filter((name) => name !== 'family_name'),
+      elements: Object.fromEntries(Object.entries(requested.elements).map(([namespace, names]) => [namespace, names.filter((name) => name !== 'family_name')])),
+      ...(requested.paths ? { paths: requested.paths.filter((path) => path[0] !== 'family_name') } : {}),
+    };
+  }
+  return {
+    disclose: [...requested.disclose, 'place_of_birth', 'nationalities'],
+    elements: { ...requested.elements, [PID_NAMESPACE]: [...(requested.elements[PID_NAMESPACE] ?? []), 'place_of_birth', 'nationality'] },
+    ...(requested.paths ? { paths: [...requested.paths, ['place_of_birth'], ['nationalities']] } : {}),
+  };
 }
 
 export interface PresentationKeys {
@@ -90,6 +115,9 @@ export async function buildPresentation(
     if (fault === 'presentation.replay') throw new Error('presentation.replay sends the presentation of an earlier step');
     if (info.format && info.format !== held.format) throw new Error(`fault ${fault} applies to ${info.format}, not ${held.format}`);
     if (info.flow && info.flow !== binding.handover.flow) throw new Error(`fault ${fault} applies to the ${info.flow} flow`);
+    if (fault === 'presentation.family-name-withheld' || fault === 'presentation.unrequested-disclosed') {
+      return buildPresentation(held, disclosureVariant(fault, requested), binding, keys, { ...options, fault: undefined });
+    }
   }
   return held.format === 'mso_mdoc'
     ? presentMdocWithFault(held.value, requested, binding, keys, fault, held.docType)
@@ -107,12 +135,14 @@ async function presentSdJwtVcWithFault(
   const valid = await presentSdJwtVc(credential, {
     holderPrivateKey: keys.holder.privateKey,
     disclose: requested.disclose,
+    paths: requested.paths,
     audience: binding.audience,
     nonce: binding.nonce,
     now,
   });
   const { fault } = options;
   if (!fault) return valid;
+  if (isRobustSdJwtPresentationFault(fault)) return robustSdJwtPresentation(valid, fault, keys.holder.privateKey);
   const cut = valid.lastIndexOf('~') + 1;
   const sdJwt = valid.slice(0, cut);
   const kbJwt = valid.slice(cut);
@@ -184,6 +214,10 @@ async function presentMdocWithFault(
   fault?: FaultId,
   docType?: string,
 ): Promise<string> {
+  if (isRobustDeviceResponseFault(fault)) {
+    const valid = await presentMdocWithFault(issuerSigned, requested, binding, keys, undefined, docType);
+    return encodeDeviceResponse(robustDeviceResponse(base64url.decode(valid), fault as FaultId));
+  }
   let handover = binding.handover;
   let { nonce, jwkThumbprint: thumbprint } = binding;
   let holderPrivateKey = keys.holder.privateKey;

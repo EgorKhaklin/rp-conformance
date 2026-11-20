@@ -154,7 +154,7 @@ async function issue(grant: 'pre-authorized_code' | 'authorization_code', fault?
     grant,
     signedMetadata: false,
     ...(grant === 'pre-authorized_code' ? { txCode: TX_CODE } : { authenticate: issuer.authenticate }),
-    ...(fault ? { fault } : {}),
+    ...(fault ? { grantFault: fault } : {}),
     ...(fault && grantFaultInfo(fault).otherOffer ? { otherOffer: { offer: issuer.offer('pre-authorized_code', SECOND_CONFIGURATION_ID), txCode: '111111' } } : {}),
     ...noWait,
     ...extra,
@@ -209,7 +209,7 @@ describe('grant checks: each fault fails exactly its target check', () => {
     const evidence = await cw.issue({
       offer: issuer.offer('authorization_code'),
       authenticate: issuer.authenticate,
-      fault: 'authorization.request-uri-expired',
+      grantFault: 'authorization.request-uri-expired',
       signedMetadata: false,
       maxWaitSeconds: 4000,
       sleep: async (ms) => {
@@ -218,7 +218,7 @@ describe('grant checks: each fault fails exactly its target check', () => {
     });
     expect(slept).toBe((60 + 3600) * 1000);
     expect(evidence.grant?.authorization?.waitedSeconds).toBe(3660);
-    const limited = await (await client()).issue({ offer: issuer.offer('pre-authorized_code'), txCode: TX_CODE, fault: 'token-request.pre-authorized-code-expired', preAuthorizedCodeLifetimeSeconds: LIFETIME, signedMetadata: false });
+    const limited = await (await client()).issue({ offer: issuer.offer('pre-authorized_code'), txCode: TX_CODE, grantFault: 'token-request.pre-authorized-code-expired', preAuthorizedCodeLifetimeSeconds: LIFETIME, signedMetadata: false });
     expect(limited.waitExceeded).toEqual({ waitsFor: 'pre-authorized-code', seconds: LIFETIME + 3600, limit: 0 });
     expect(limited.exchanges.some((e) => e.step === 'token')).toBe(false);
   });

@@ -1,5 +1,6 @@
 // The named checks of the reference validator (harness design section 7). Every fault names the one check it must fail.
-import type { IssuerRequestCheck } from './issuer/checks';
+import type { IssuerArtifactCheck } from './issuer/artifact-checks';
+import type { IssuerAttestationCheck, IssuerRequestCheck } from './issuer/checks';
 import type { AuthorizationResponseCheck, GrantCheck } from './issuer/grant-faults';
 
 /**
@@ -18,6 +19,9 @@ export const CREDENTIAL_CHECKS = [
   'key-binding',
   'kb-freshness',
   'status-reference',
+  // The disclosed claims satisfy the credential query (every requested claim disclosed, every `values` constraint met,
+  // OpenID4VP sections 6.3, 6.4 and 8.6), and the PID attributes have the data types of the PID rulebook.
+  'claims',
 ] as const;
 
 /** The credential checks of an mdoc presentation (ISO/IEC 18013-5 section 9.3.1, OpenID4VP Appendix B.2). */
@@ -108,13 +112,46 @@ export const REQUEST_CHECKS = [
   'wallet-nonce',
 ] as const;
 
+/**
+ * Checks of what a Provider issued beyond the credential checks of a presentation (issuer catalogue sections 3.6 and
+ * 5.1.3 to 5.1.4, `OBS-CRED`): the validity period (`SM_Validity`), the Type Metadata of `vct`, and the PID Rulebook
+ * checks of the data model (`DM_*`), one per rule. `pid-formats` compares the SD-JWT VC and the mdoc of one issuance.
+ */
+export const ISSUER_OUTPUT_CHECKS = [
+  'validity-period',
+  'validity-declared',
+  'type-metadata',
+  'pid-type',
+  'pid-attributes',
+  'pid-unique',
+  'pid-values',
+  'pid-dates',
+  'pid-extension',
+  'pid-formats',
+  'pid-portrait',
+] as const;
+
 export type CredentialCheck = (typeof CREDENTIAL_CHECKS)[number];
 export type StatusListCheck = (typeof STATUS_LIST_CHECKS)[number];
 export type IdentifierListCheck = (typeof IDENTIFIER_LIST_CHECKS)[number];
 export type ResponseCheck = (typeof RESPONSE_CHECKS)[number];
 export type TrustListCheck = (typeof TRUST_LIST_CHECKS)[number];
 export type RequestCheck = (typeof REQUEST_CHECKS)[number];
-export type CheckId = CredentialCheck | StatusListCheck | IdentifierListCheck | ResponseCheck | TrustListCheck | RequestCheck | IssuerRequestCheck | GrantCheck | AuthorizationResponseCheck;
+export type IssuerOutputCheck = (typeof ISSUER_OUTPUT_CHECKS)[number];
+export type CheckId =
+  | CredentialCheck
+  | StatusListCheck
+  | IdentifierListCheck
+  | ResponseCheck
+  | TrustListCheck
+  | RequestCheck
+  | IssuerRequestCheck
+  | IssuerArtifactCheck
+  | IssuerAttestationCheck
+  | VpTokenCheck
+  | IssuerOutputCheck
+  | GrantCheck
+  | AuthorizationResponseCheck;
 
 /** `pass`; `fail`; `skip` when a check could not be evaluated because a check it depends on did not pass, or does not apply. */
 export type CheckStatus = 'pass' | 'fail' | 'skip';
@@ -124,3 +161,14 @@ export interface CheckResult {
   status: CheckStatus;
   detail?: string;
 }
+
+/**
+ * Checks of the `vp_token` as a whole against the DCQL query of the request (`RP_WS_UC_Presentation`): `vp-token` before
+ * the presentations are validated (OpenID4VP 1.0 section 8.1, 8.6 steps 1 and 3, section 6.4; HAIP 1.0 section 5.3.1:
+ * keys are credential query ids, one presentation per query unless `multiple`, every required credential query or
+ * credential set satisfied, one document per DeviceResponse), `combined-binding` after them (ARF section 6.6.3.10:
+ * the identifying attributes of the presented credentials match, for attribute-based binding).
+ */
+export const VP_TOKEN_CHECKS = ['vp-token', 'combined-binding'] as const;
+
+export type VpTokenCheck = (typeof VP_TOKEN_CHECKS)[number];

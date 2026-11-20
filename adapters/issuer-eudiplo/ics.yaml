@@ -7,10 +7,12 @@
 profiles:
   - P-PID   # ICS-01
   - P-SD    # ICS-02
+  - P-MD    # ICS-02
   - P-PA    # ICS-03
   - P-AC    # ICS-03: built-in authorization server, PAR + PKCE S256; authenticateSubject follows its redirect (no login, ICS-03.subject_authentication)
   - P-DB    # ICS-04
   - P-REV   # ICS-05
+  - P-SHORT # ICS-05: the short-lived configurations ICS-05.short.SD and ICS-05.short.MD
   - P-SUSP  # ICS-05
   - P-HOOK  # ICS-06
   - P-CHAIN # ICS-07
@@ -22,9 +24,10 @@ profiles:
 
 items:
   ICS-01: PID Provider                       # entity PP-T on TL-PID; PID Rulebook
-  ICS-02: SD-JWT VC                          # live: pid-sd-jwt-vc, format dc+sd-jwt, vct urn:eudi:pid:1. EUDIPLO issues mso_mdoc too; the adapter configures no mdoc PID (PID_02 not met, README)
+  ICS-02: SD-JWT VC and mdoc                 # live: pid-sd-jwt-vc (dc+sd-jwt, vct urn:eudi:pid:1) and pid-mso-mdoc (mso_mdoc, doctype eu.europa.ec.eudi.pid.1)
   ICS-02.SD: pid-sd-jwt-vc                   # the configuration that issues the PID in SD-JWT VC, as definitions name it (ICS-02.<format variant>)
-  ICS-02.second: test-attestation-sd-jwt-vc  # a second configuration of another type (vct urn:rp-conformance:test-attestation:1), for PP_WS_IA_PreAuthorized_004_UF
+  ICS-02.MD: pid-mso-mdoc                    # the configuration that issues the PID in mdoc, signed by the document signer the Registrar issued
+  ICS-02.second: pid-sd-jwt-vc-2               # a second SD-JWT VC configuration (issue 24's, never in a PID offer), offered on its own by PP_WS_IA_PreAuthorized_004_UF
   ICS-03: pre-authorized code, authorization code  # live: flows pre_authorized_code (with and without tx_code) and authorization_code (issuer_state) at the built-in authorization server
   ICS-03.tx_code: with and without           # live: tx_code of 6 digits, input_mode numeric; txCodeMaxAttempts default 5
   ICS-03.subject_authentication: none        # the built-in authorization server issues codes without a login step (docs issuance/authorization-servers.md): authenticateSubject opens the authorization request and returns EUDIPLO's redirect; the subject is the one of the offer (issuer_state)
@@ -34,7 +37,12 @@ items:
   ICS-04.key_storage: [iso_18045_high]       # live: keyAttestationsRequired, published as key_attestations_required
   ICS-04.user_authentication: [iso_18045_high]
   ICS-05: Token Status List                  # live: statusManagement true. JWT, and CWT for Accept application/statuslist+cwt (docs issuance/revocation.md; a token exists only once a credential is issued)
-  ICS-05.short_lived: "No"                   # lifeTime 30 days
+  ICS-05.token_formats: [jwt, cwt]           # source: status-list.controller.ts answers Accept application/statuslist+cwt with a CWT, anything else with a JWT (issue 22, sl-media-type)
+  ICS-05.short_lived: "Yes"                  # the PID configurations live 30 days with a status reference; the short-lived ones 12 hours without
+  ICS-05.short.SD: pid-sd-jwt-vc-short       # short-lived PID in SD-JWT VC: statusManagement false, lifeTime 12 h (SM_Validity_002)
+  ICS-05.short.MD: pid-mso-mdoc-short        # short-lived PID in mdoc: statusManagement false, lifeTime 12 h
+  ICS-05.validity_period: P30D               # lifeTime of ICS-02.SD and ICS-02.MD (SM_Validity_004); EUDIPLO rounds iat down and exp up to the hour (ICS-16.timestamp_precision)
+  ICS-05.short.validity_period: PT12H        # lifeTime of ICS-05.short.SD and ICS-05.short.MD
   ICS-05.identifier_list: "No"               # source: EUDIPLO reads identifier lists as verifier (trust/status-list-verifier.service.ts) but publishes none
   ICS-05.suspension: "Yes"                   # live: status list bits 2 (PUT /api/status-list-config); status 2 = suspended
   ICS-06: revoke, suspend, unsuspend         # setStatus: POST /api/session/revoke, confirmed by GET /api/session/{id}/credential-status. A revoked credential cannot be changed again (409)
@@ -45,7 +53,7 @@ items:
   ICS-07.T_chain: PT7M                       # 30 s WALLET_UNIT_STATUS_CHECK_INTERVAL (adapters/eudiplo/docker-compose.yml, live in the container) + reuse of SL-WP-A for its ttl 300 s (harness default; EUDIPLO reuses a list for its ttl, at most 1 h) + T_rev 60 s = 390 s, rounded up
   ICS-08: "Yes"                              # batchSize below
   ICS-08.batch_size: 2                       # live: issuance configuration batchSize 2, published as batch_credential_issuance.batch_size (a maximum: one proof still gives one credential)
-  ICS-08.credential_reuse_policy: none       # config.credentialReusePolicy not set
+  ICS-08.credential_reuse_policy: once_only, limited_time  # config.credentialReusePolicy arf_annex_ii: method A with batch_size 2, then method B (issue 24)
   ICS-09: "Yes"                              # source: built-in token.refreshTokenEnabled default true (token-grant-rules.ts), refresh tokens bound to the DPoP key
   ICS-10: "No"                               # deferred issuance needs an attribute provider or webhook that defers; the adapter configures none
   ICS-11: "Yes"                              # live: notificationEndpointEnabled true, notification_endpoint in the metadata
@@ -63,6 +71,6 @@ items:
   ICS-16.min_entries: 10000                  # live: status list capacity 10000 (STATUS_CAPACITY default, set explicitly)
   ICS-16.timestamp_precision: PT1H           # source: issuance and expiry times rounded to the hour (credential-time.util.ts)
   ICS-17: seeds SUBJ-1 and SUBJ-2            # claims inline with each offer (credentialClaims, src/subjects.ts)
-  ICS-17.portrait_opt_out: "No"              # the SD-JWT VC PID configuration has no portrait
+  ICS-17.portrait_opt_out: "No"              # the PID configurations have no portrait; inline claims cannot carry the empty bstr an mdoc needs (DM_Portrait_001 NOT APPLICABLE)
   ICS-18: reject                             # live: walletAttestationStatusCheckMode strict (read back by GET /api/issuer/config): a WIA or KA whose status list cannot be fetched, is unreadable, expired, or signed by another key is rejected (docs trust/attestation.md). As decision 2 requires of a PID Provider
   ICS-19: "No"                               # embeddedDisclosurePolicy not set
