@@ -31,7 +31,7 @@ concurrency:
 jobs:
   eudiplo:
     runs-on: ubuntu-latest
-    timeout-minutes: 30  # issue 26: the T_chain waits (7 min) make the run about 10 minutes
+    timeout-minutes: 30  # issue 26: the T_chain waits (7 min); issue 27: PID and the three Attestation Provider tenants in parallel, measured 13 min (775 s) locally
     env:
       # The reference issuer (decision of 2026-11-20) is pinned in adapters/issuer-eudiplo/reference.env, the one place
       # that names it (EUDIPLO_IMAGE, EUDIPLO_EXPECT_VERSION); the first step loads it.
