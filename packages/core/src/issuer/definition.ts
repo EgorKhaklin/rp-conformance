@@ -7,6 +7,7 @@ import type { IssuerFaultId } from './faults';
 import type { CredentialRequestFaultId } from './credential-request-faults';
 import type { GrantFaultId } from './grant-faults';
 import type { IssuerIcsCondition, IssuerPolicyItem, IssuerProfile } from './ics';
+import type { SessionFaultId } from './session-faults';
 
 /** Variant codes of the issuer catalogue section 2.3: the credential format. */
 export type FormatVariant = 'SD' | 'MD';
@@ -61,7 +62,7 @@ export interface IssuanceAction {
   /** Number of proofs; default 1. */
   batchSize?: number;
   /** Named faults (at most one); empty for a valid issuance. */
-  faults: (FaultId | IssuerFaultId | CredentialRequestFaultId | GrantFaultId)[];
+  faults: (FaultId | IssuerFaultId | SessionFaultId | CredentialRequestFaultId | GrantFaultId)[];
   /** Stop after the token response, without a credential request. */
   stopAfterToken?: boolean;
   /** Authorization code flow: stop after the authorization response, before the token request (its code is left for a `token-reuse` step). */
@@ -94,6 +95,21 @@ export interface TokenReuseAction {
   ofStep: number;
   /** The Wallet Unit that sends it; default the one of that step (`CW-2` for a code redeemed by another client). */
   walletUnit?: WalletUnit;
+  /** Issue 25: the named fault (at most one) of the repeated request, for example `dpop.refresh-other-key`. */
+  faults?: SessionFaultId[];
+}
+
+/**
+ * Issue 25: send the notification request (OpenID4VCI 1.0 section 11) for the credential an earlier issuance step
+ * received, with its `notification_id` and the access token of that step.
+ */
+export interface NotificationAction {
+  kind: 'notification';
+  /** The issuance step (1-based) whose credential the notification is about. */
+  ofStep: number;
+  event: 'credential_accepted' | 'credential_failure' | 'credential_deleted';
+  /** Named fault (at most one) of the notification request. */
+  faults: SessionFaultId[];
 }
 
 /** The Test Wallet Provider revokes a Wallet Instance or a WSCD, or changes one of its status lists `SL-WP-*`. */
@@ -167,6 +183,7 @@ export type IssuerStepAction =
   | IssuerTrustListAction
   | ObserveStatusAction
   | PresentAction
+  | NotificationAction
   // Issue 26
   | InspectAction;
 

@@ -57,6 +57,7 @@ import {
   type StatusObservation,
   waits,
 } from './status';
+import { handlesSessionStep, noteSessionStep, runSessionStep, sessionApplicability } from './session';
 // Issue 26: trust-list and inspect steps, batch issuance, change of subject data.
 import { batchBinding, bindBatchKeys } from './batch';
 import { type InspectState, runInspection } from './inspect';
@@ -339,7 +340,7 @@ async function runIssuerTestCase(definition: IssuerTestCaseDefinition, ctx: Cont
   }));
   const control = outcomes.find((o) => o.verdict === 'PASS') ?? outcomes[0] ?? null;
   const end = (verdict: Verdict, reason: string): IssuerTestCaseRecord => ({ ...base, verdict, reason, control, steps: [] });
-  const unmet = issuerApplicability(definition, ctx.ics);
+  const unmet = [...issuerApplicability(definition, ctx.ics), ...sessionApplicability(definition, ctx.ics)];
   if (unmet.length) return end('NOT APPLICABLE', `profile not met: ${unmet.join('; ')}`);
   if (control && control.verdict !== 'PASS') return end('INCONCLUSIVE', `positive control ${outcomes.map((o) => o.id).join(' or ')} did not pass in ${variant}`);
   // Issue 26: a test case that needs an adapter hook the adapter lacks does not apply (issuer harness design section 5.4).
@@ -347,7 +348,7 @@ async function runIssuerTestCase(definition: IssuerTestCaseDefinition, ctx: Cont
   const state: TestCaseState = { clients: new Map(), attestations: newAttestationState(), offersByValue: [], evidence: new Map(), ...newLifecycleState(), captured: new Map(), startedAt: new Date() };
   const steps: IssuerStepRecord[] = [];
   try {
-    for (const [index, step] of definition.steps.entries()) steps.push(await runIssuerStep(definition, variant, index + 1, step, ctx, state));
+    for (const [index, step] of definition.steps.entries()) steps.push(noteSessionStep(state, await runIssuerStep(definition, variant, index + 1, step, ctx, state)));
   } finally {
     // Issue 26: the default TL-WP again after a test case that published another version.
     await restoreTrustList(state, trustContext(ctx)).catch((error) => ctx.log?.(`    could not restore TL-WP: ${(error as Error).message}`));
@@ -387,7 +388,9 @@ async function runIssuerStep(
     record.artifacts.push(relative(ctx.runDir, join(dir, name)));
   };
   try {
-    if (step.run?.kind === 'metadata') await runMetadata(step.expect, record, save, ctx);
+    // Issue 25: DPoP, batch, re-issuance, deferred, notification and robustness steps run on the session client.
+    if (handlesSessionStep(definition, step)) await runSessionStep(step, index, record, save, ctx, state);
+    else if (step.run?.kind === 'metadata') await runMetadata(step.expect, record, save, ctx);
     // Issue 26: issuances of test cases that run in parallel go one at a time; only their waits overlap.
     else if (step.run?.kind === 'issuance') {
       const action = step.run;

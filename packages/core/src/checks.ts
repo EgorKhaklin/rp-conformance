@@ -4,6 +4,7 @@ import type { IssuerAttestationCheck, IssuerRequestCheck } from './issuer/checks
 // Issue 26: issuer integrity, unlinkability and trust infrastructure checks.
 import type { IssuerInspectionCheck } from './issuer/integrity-checks';
 import type { AuthorizationResponseCheck, GrantCheck } from './issuer/grant-faults';
+import type { SessionCheck } from './issuer/session-faults';
 
 /**
  * Checks of a credential presentation, in the order the reference validator performs them. For an SD-JWT VC with
@@ -154,6 +155,7 @@ export type CheckId =
   | IssuerOutputCheck
   | GrantCheck
   | AuthorizationResponseCheck
+  | SessionCheck
   // Issue 26
   | IssuerInspectionCheck;
 
