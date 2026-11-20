@@ -14,6 +14,8 @@ import {
   encodeCbor,
   MDOC_DS_EXTENDED_KEY_USAGE,
   type Oid4vpHandover,
+  PID_DOCTYPE,
+  PID_NAMESPACE,
   readCose,
   sha256,
   sigStructure,
@@ -23,7 +25,8 @@ import {
 } from '@rp-conformance/forge';
 import { parseCertificate } from '@owf/x509';
 import { describeKey } from './disclosures';
-import { CheckRecorder, type ValidationMode, type ValidationResult } from './checks';
+import { checkClaims, type RequestedClaim } from './claims';
+import { CheckRecorder, NotApplicable, type ValidationMode, type ValidationResult } from './checks';
 import { evaluateIdentifierList } from './identifier-list';
 import { attempt, base64Of, evaluateStatusList, type FetchedStatusList, fail, isUri } from './status-list';
 import type { MatchedIssuer, TrustRule, TrustStore } from './trust';
@@ -63,6 +66,8 @@ export interface MdocValidationOptions {
   maxStatusListBytes: number;
   validStatuses?: number[];
   trustedAuthorities?: { type: string; values: string[] }[];
+  /** The claims of the credential query, for the check `claims`; left out, the check does not apply. */
+  requestedClaims?: RequestedClaim[];
   fetchStatusList: (uri: string) => Promise<FetchedStatusList>;
   fetchIdentifierList: (uri: string) => Promise<FetchedStatusList>;
   mode?: ValidationMode;
@@ -126,6 +131,8 @@ export async function validateMdocPresentation(presentation: string, options: Md
   let x5chain: Uint8Array[] = [];
   let issuer: MatchedIssuer | undefined;
   let claims: Record<string, Record<string, unknown>> | undefined;
+  /** The disclosed element values as decoded CBOR, for the data types of the PID rulebook. */
+  const rawClaims: Record<string, Record<string, unknown>> = {};
   let statusListReference: { uri: string; idx: number } | undefined;
   let identifierListReference: { uri: string; id: Uint8Array } | undefined;
   let statusListFetched = false;
@@ -221,6 +228,7 @@ export async function validateMdocPresentation(presentation: string, options: Md
           if (!(expected instanceof Uint8Array)) fail(`the MSO has no digest with ID ${String(digestId)} for ${String(identifier)}`);
           if (!Buffer.from(sha256(encodeCbor(item))).equals(Buffer.from(expected as Uint8Array))) fail(`the digest of ${String(identifier)} does not match the MSO`);
           disclosed[namespace as string][identifier as string] = jsonOf(signedItem.get('elementValue'));
+          (rawClaims[namespace as string] ??= {})[identifier as string] = signedItem.get('elementValue');
           count++;
         }
       }
@@ -288,6 +296,13 @@ export async function validateMdocPresentation(presentation: string, options: Md
         if (!isUri(entry.get('uri'))) fail(`uri ${JSON.stringify(entry.get('uri'))} is not a URI`);
         identifierListReference = { id: entry.get('id') as Uint8Array, uri: entry.get('uri') as string };
       }
+    });
+
+    // The disclosed elements satisfy the query, and a PID's elements have the types of the PID rulebook.
+    await recorder.run('claims', ['format', 'disclosures'], () => {
+      if (!options.requestedClaims) return new NotApplicable('no credential query given');
+      const pid = mso.get('docType') === PID_DOCTYPE ? { encoding: 'mdoc' as const, namespace: PID_NAMESPACE, raw: rawClaims } : undefined;
+      return checkClaims(claims ?? {}, options.requestedClaims, pid);
     });
 
     // Status procedures (Token Status List section 8.3, ISO/IEC 18013-5 section 12.3.6): in first-failure mode only for

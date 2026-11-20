@@ -32,8 +32,14 @@ export const ics = {
     text: 'Relying Party keeps using a trust list for a grace period greater than zero after its `NextUpdate`.',
     equals: 'Yes',
   },
+  usesRequestUriPost: { item: 'RP.P.8', text: 'Relying Party sets `request_uri_method` to `post`.', equals: 'Yes' },
+  redeemsResponseCode: {
+    item: 'RP.P.9',
+    text: 'Relying Party redeems the response code of a presentation via redirects at its own front end.',
+    equals: 'Yes',
+  },
   bindsByAttributes: {
-    item: 'RP.P.7',
+    item: 'RP.P.10',
     text: 'Relying Party binds the credentials of a combined presentation by comparing their identifying attributes (attribute-based binding).',
     equals: 'Yes',
   },
@@ -146,6 +152,8 @@ export interface PresentationAction {
   /** The identifier list of an mdoc; left out or `null` when it has none. */
   identifierList?: IdentifierListSpec | null;
   response: ResponseSpec;
+  /** How the Conformance Wallet deviates from the plain flow (catalogue scenario SCN-F); left out for the plain flow. */
+  wallet?: WalletBehaviour;
   /**
    * The `id` of the credential query `credential` answers; default the first credential query of the query in its
    * format. Named by the steps of a combined presentation (UC_Presentation).
@@ -203,9 +211,14 @@ export interface RequestAction {
   query: DefaultQueryId;
   /** Number of requests; default 1. Freshness checks compare them with each other. */
   count?: number;
+  /**
+   * How the Conformance Wallet retrieves the request object: `twice` with GET (ProtocolFlow_002), or with POST,
+   * `wallet_metadata` and `wallet_nonce` (`post`, ProtocolFlow_003); default once with GET.
+   */
+  requestUri?: 'twice' | 'post';
 }
 
-export type StepAction = PresentationAction | StartAction | TrustListAction | RequestAction;
+export type StepAction = PresentationAction | StartAction | TrustListAction | RequestAction | FlowAction | ErrorResponseAction;
 
 /**
  * Expected-result codes of the catalogue (harness design section 5). `LIST_RETRIEVED`: the Test Trust Infrastructure
@@ -213,9 +226,23 @@ export type StepAction = PresentationAction | StartAction | TrustListAction | Re
  * `client_metadata`. `REJ_OR_ACC`: the Relying Party rejects the presentation, or accepts it and releases exactly the
  * requested attributes with their issuer-signed values (DeviceBinding_011: a device-signed element is ignored).
  * `STALE`: the verification result signals that a trust list it depends on is stale (`trust-list-stale`). `CONF`: the
- * captured requests pass the request checks the expectation names.
+ * captured requests pass the request checks the expectation names. `REJ_OR_INVALID`: the Relying Party rejects the
+ * presentation, or accepts it and flags an attribute as invalid (`attribute-invalid`, IdentifyingData_004).
  */
-export type ExpectationCode = 'ACC' | 'REJ' | 'REJ_OR_ACC' | 'NOSTAT' | 'NOFETCH' | 'FETCHED' | 'POLICY' | 'LIST_RETRIEVED' | 'ENC_KEY' | 'STALE' | 'CONF';
+export type ExpectationCode =
+  | 'ACC'
+  | 'REJ'
+  | 'REJ_OR_ACC'
+  | 'NOSTAT'
+  | 'NOFETCH'
+  | 'FETCHED'
+  | 'POLICY'
+  | 'LIST_RETRIEVED'
+  | 'ENC_KEY'
+  | 'STALE'
+  | 'CONF'
+  | FlowExpectationCode
+  | 'REJ_OR_INVALID';
 
 /** The ICS declaration a `POLICY` expectation is compared with. */
 export interface PolicyReference {
@@ -360,6 +387,7 @@ export function presentation(
     if (!(points as readonly string[]).includes(info.point)) throw new Error(`fault ${fault} does not apply to the ${points.join(' or ')}`);
     if (info.format && info.format !== format) throw new Error(`fault ${fault} applies to ${info.format}, not ${format}`);
     if (info.issuer && info.issuer !== credential.issuer) throw new Error(`fault ${fault} needs a credential issued by ${info.issuer}`);
+    if (info.query && info.query !== result.query) throw new Error(`fault ${fault} is presented for ${info.query}, not ${result.query}`);
   }
   const replays = result.response.faults.includes('presentation.replay');
   if (replays !== (result.response.presentationOfStep !== undefined)) {
@@ -491,3 +519,64 @@ export const identifierListToken = {
   },
 };
 
+
+/**
+ * How the Conformance Wallet deviates from the plain flow of a presentation step (catalogue scenario SCN-F,
+ * `RP_WS_IA_ProtocolFlow`).
+ */
+export interface WalletBehaviour {
+  /**
+   * Via redirects, what happens with the `redirect_uri` the Relying Party returns: the wallet opens it without the
+   * user agent's session (default), or does not open it (`none`), so a later step can open it in a user agent.
+   */
+  redirect?: 'none';
+  /** Send the Authorization Response only after the transaction lifetime `T_tx` (ICS RP.P.7) passed since the start. */
+  late?: boolean;
+}
+
+/**
+ * Continues the transaction of an earlier step (catalogue scenario SCN-F): retrieve its `request_uri` again
+ * (`request-uri-again`) or that of an unknown transaction (`request-uri-unknown`, the transaction-specific part
+ * replaced), send its Authorization Response again (`resend`), ask the Relying Party's front end for its result in the
+ * user agent that started it without following the redirect (`front-end`), or open its `redirect_uri` in that user
+ * agent (`redirect-same`), in a fresh one (`redirect-fresh`), or with a random response code (`redirect-forged`).
+ */
+export interface FlowAction {
+  kind: 'flow';
+  /** The step (1-based) whose transaction the action continues. */
+  ofStep: number;
+  behaviour: FlowBehaviour;
+}
+
+export type FlowBehaviour =
+  | 'request-uri-again'
+  | 'request-uri-unknown'
+  | 'resend'
+  | 'front-end'
+  | 'redirect-same'
+  | 'redirect-fresh'
+  | 'redirect-forged';
+
+/**
+ * Start a presentation and answer it with an Authorization Error Response of the Conformance Wallet instead of a
+ * presentation: unencrypted via redirects (OpenID4VP section 8.5), an error object via the DC API (Appendix A.4).
+ */
+export interface ErrorResponseAction {
+  kind: 'error-response';
+  query: DefaultQueryId;
+  error: 'access_denied' | 'invalid_request';
+}
+
+/**
+ * Expected-result codes of the flow test cases (`RP_WS_IA_ProtocolFlow`). `REDIRECT`: the `response_uri` answered
+ * HTTP 200 `application/json` with a `redirect_uri` carrying a fresh `response_code` of at least 128 bits.
+ * `RELEASED`: the Relying Party's front end released the attributes of the transaction to the user agent. `WITHHELD`:
+ * it released nothing. `REQUEST_REFUSED`: `request_uri` answered HTTP 4xx without a request object. `ERROR_ACK`: the
+ * `response_uri` answered the error response with HTTP 200 `application/json`. `RESEND_REJ`: the `response_uri`
+ * answered the second Authorization Response with HTTP 4xx, and the verification result of the transaction is
+ * unchanged.
+ */
+export type FlowExpectationCode = 'REDIRECT' | 'RELEASED' | 'WITHHELD' | 'REQUEST_REFUSED' | 'ERROR_ACK' | 'RESEND_REJ';
+
+/** The expectation codes evaluated by the flow module of the controller. */
+export const FLOW_EXPECTATION_CODES: readonly FlowExpectationCode[] = ['REDIRECT', 'RELEASED', 'WITHHELD', 'REQUEST_REFUSED', 'ERROR_ACK', 'RESEND_REJ'];

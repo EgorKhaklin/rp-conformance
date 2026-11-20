@@ -49,7 +49,9 @@ export const isSignerFault = (fault: FaultId | undefined) => Boolean(fault && SI
 export async function faultySigner(fault: FaultId, issuer: TestEntity, format: CredentialFormat, pki: TestPki, now: Date): Promise<CertifiedKey> {
   const mdoc = format === 'mso_mdoc';
   const id = issuer.spec.id;
-  const leafUnder = (ca: CertifiedKey, name: string, validity = { notBefore: new Date(now.getTime() - DAY_MS), notAfter: new Date(now.getTime() + YEAR_MS) }, extensions?: X509Extension[]) =>
+  // The default validity starts before the `signed` time of the MSOs the harness issues (two days in the past, see
+  // `mdocValidity`), so a faulted document signer is rejected for its own defect and not for the MSO signed date.
+  const leafUnder = (ca: CertifiedKey, name: string, validity = { notBefore: new Date(now.getTime() - 10 * DAY_MS), notAfter: new Date(now.getTime() + YEAR_MS) }, extensions?: X509Extension[]) =>
     mdoc
       ? createDocumentSigner(ca, id, `${id} ${name} document signer`, validity, issuer.issuerUri, { extensions })
       : createEndEntity(ca, id, `${id} ${name} signer`, { ...validity, extensions });

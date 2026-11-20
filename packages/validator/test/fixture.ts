@@ -185,7 +185,7 @@ export class Fixture {
    * Builds `count` requests of the reference Relying Party's form for a default query via `flow`, the first with
    * `fault` (or, for the faults that repeat an earlier request's value, the second), and runs the request checks over them.
    */
-  async validateRequests(flow: Flow, query: DefaultQueryId, options: { count?: number; fault?: FaultId } = {}) {
+  async validateRequests(flow: Flow, query: DefaultQueryId, options: { count?: number; fault?: FaultId; requestUri?: 'twice' | 'post' } = {}) {
     this.registration ??= issueRegistrationCertificate(
       this.pki,
       Object.entries(this.queries)
@@ -204,6 +204,8 @@ export class Fixture {
         query: this.queries[query],
         registrationCertificate,
         baseUrl: 'https://rp.rp-test',
+        // The faults of the second retrieval and of the POST need that retrieval.
+        requestUri: options.fault === 'request.refetch-refused' ? 'twice' : options.fault === 'request.wallet-nonce-missing' ? 'post' : flow === 'redirect' ? options.requestUri : undefined,
         ...(repeat && options.fault === 'request.nonce-reused' ? { nonce: first?.nonce } : {}),
         ...(repeat && options.fault === 'request.enc-key-reused' ? { encryptionJwk: first?.encryptionJwk } : {}),
         ...(i === 0 && options.fault && !['request.nonce-reused', 'request.enc-key-reused'].includes(options.fault) ? { fault: options.fault } : {}),
@@ -313,6 +315,7 @@ export class Fixture {
           requireStatus: true,
           maxStatusListBytes: MAX_STATUS_LIST_BYTES,
           trustedAuthorities: credentialQuery.trusted_authorities,
+          requestedClaims: credentialQuery.claims ?? [],
           mode,
         };
         const result =

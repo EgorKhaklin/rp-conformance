@@ -44,6 +44,42 @@ export const PID_PLACE_OF_BIRTH_QUERY: DcqlQuery = {
   credentials: [{ ...PID_QUERY.credentials[0], claims: [...(PID_QUERY.credentials[0].claims ?? []), { path: ['place_of_birth'] }] }],
 };
 
+/** A variant of `default_query_pid` (SD-JWT VC) or of its mdoc form that requests the claims at `paths` instead. */
+const pidQueryWith = (base: DcqlQuery, paths: (string | number)[][], values?: (string | number | boolean)[]): DcqlQuery => ({
+  credentials: [{ ...base.credentials[0], claims: paths.map((path) => ({ path, ...(values ? { values } : {}) })) }],
+});
+
+/**
+ * The data model variants of `default_query_pid` (RP_WS_DM_IdentifyingData, RP_WS_DM_CredentialMetadata): every
+ * mandatory attribute of the PID rulebook, the age-over attribute for 18 without and with the `values` constraint
+ * `true`, and three members of the structured address (SD-JWT VC only; the mdoc PID has no structured address).
+ */
+export const PID_DATA_MODEL_QUERIES = {
+  default_query_pid_mandatory: pidQueryWith(PID_QUERY, [
+    ['family_name'],
+    ['given_name'],
+    ['birthdate'],
+    ['place_of_birth'],
+    ['nationalities'],
+    ['date_of_expiry'],
+    ['issuing_authority'],
+    ['issuing_country'],
+  ]),
+  default_query_pid_mandatory_mdoc: pidQueryWith(
+    PID_MDOC_QUERY,
+    ['family_name', 'given_name', 'birth_date', 'place_of_birth', 'nationality', 'expiry_date', 'issuing_authority', 'issuing_country'].map((e) => [PID_NAMESPACE, e]),
+  ),
+  default_query_pid_age_over_18: pidQueryWith(PID_QUERY, [['age_equal_or_over', '18']]),
+  default_query_pid_age_over_18_mdoc: pidQueryWith(PID_MDOC_QUERY, [[PID_NAMESPACE, 'age_over_18']]),
+  default_query_pid_age_over_18_true: pidQueryWith(PID_QUERY, [['age_equal_or_over', '18']], [true]),
+  default_query_pid_age_over_18_true_mdoc: pidQueryWith(PID_MDOC_QUERY, [[PID_NAMESPACE, 'age_over_18']], [true]),
+  default_query_pid_address: pidQueryWith(PID_QUERY, [
+    ['address', 'locality'],
+    ['address', 'postal_code'],
+    ['address', 'country'],
+  ]),
+} satisfies Partial<Record<DefaultQueryId, DcqlQuery>>;
+
 const ATTRIBUTES_A = ['attribute_A', 'attribute_B', 'attribute_C'];
 
 /**
@@ -115,6 +151,7 @@ export function defaultQueries(pki: TestPki): Record<DefaultQueryId, DcqlQuery> 
       PID_MDOC_QUERY,
       withIdentifyingClaims(attestationMdocQuery('eaa'), ['family_name', 'given_name', 'birth_date'].map((name) => [CREDENTIAL_A_NAMESPACE, name])),
     ),
+    ...PID_DATA_MODEL_QUERIES,
   };
 }
 

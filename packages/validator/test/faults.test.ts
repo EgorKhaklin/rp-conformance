@@ -12,7 +12,7 @@ import {
   type TrustListAction,
 } from '@rp-conformance/core';
 import { createPublicKey, verify } from 'node:crypto';
-import { defaultEntitiesOf, trustedListEntitiesOf } from '@rp-conformance/forge';
+import { defaultEntitiesOf, faultySigner, isSignerFault, mdocValidity, trustedListEntitiesOf } from '@rp-conformance/forge';
 import { base64url, type CborMap, decodeCbor, decodeEmbedded, embedded, encodeCbor, jwkThumbprint as jwkThumbprintOf, readCose, sigStructure } from '@rp-conformance/forge';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { MDOC_IDENTIFIER_LIST_CHECKS, MDOC_STATUS_LIST_CHECKS, openid4vpSessionTranscript, SD_JWT_VC_CHECKS, TRUST_RULES } from '../src/index';
@@ -36,7 +36,8 @@ const actionWith = (fault?: FaultId, format: 'dc+sd-jwt' | 'mso_mdoc' = 'dc+sd-j
   const credentialFormat = info?.format === 'mso_mdoc' || info?.format === 'cwt' ? 'mso_mdoc' : format;
   const only = (point: string) => (info?.point === point ? [fault as FaultId] : []);
   return presentation({
-    query: pidQueryOf(credentialFormat),
+    // An attribute variant of the PID is presented for the query that requests the changed attributes.
+    query: info?.query ?? pidQueryOf(credentialFormat),
     credential: pid.of(credentialFormat, { faults: only('credential'), ...(info?.issuer ? { issuer: info.issuer } : {}) }),
     ...(info?.point === 'identifier-list'
       ? { identifierList: identifierListToken.cwt({ contains: false, faults: only('identifier-list') }) }
@@ -239,8 +240,17 @@ describe('fault self-validation', () => {
       const result = await fixture.validateRequests(flow, query, { count: 3 });
       expect(result.failures, query).toEqual([]);
       const skipped = result.checks.filter((c) => c.status === 'skip').map((c) => c.check);
-      const otherFlow = flow === 'redirect' ? ['dc-api-request', 'expected-origins'] : ['request-by-reference', 'request-object', 'state'];
-      expect(skipped.sort(), query).toEqual([...otherFlow, ...(query.endsWith('_trusted_authorities') ? [] : ['trusted-authorities'])].sort());
+      const otherFlow = flow === 'redirect' ? ['dc-api-request', 'expected-origins'] : ['request-by-reference', 'request-object', 'state', 'invocation-scheme', 'request-uri-content-type'];
+      // A single GET of request_uri: the checks of a second retrieval and of a POST with wallet_nonce do not apply.
+      const retrieval = ['request-uri-refetch', 'wallet-nonce'];
+      expect(skipped.sort(), query).toEqual([...otherFlow, ...retrieval, ...(query.endsWith('_trusted_authorities') ? [] : ['trusted-authorities'])].sort());
+      if (flow === 'redirect') {
+        for (const requestUri of ['twice', 'post'] as const) {
+          const retrieved = await fixture.validateRequests(flow, query, { requestUri });
+          expect(retrieved.failures, `${query} ${requestUri}`).toEqual([]);
+          expect(retrieved.checks.find((c) => c.check === (requestUri === 'twice' ? 'request-uri-refetch' : 'wallet-nonce'))?.status).toBe('pass');
+        }
+      }
     }
   });
 
@@ -254,10 +264,36 @@ describe('fault self-validation', () => {
     expect(result.failures).toEqual([faultInfo(fault).target]);
   });
 
+  // The disclosure variants of the data model test cases apply to both formats.
+  it.each(['presentation.family-name-withheld', 'presentation.unrequested-disclosed'] as const)('%s fails exactly its target check in mdoc format too', async (fault) => {
+    const result = await fixture.validate(actionWith(fault, 'mso_mdoc'));
+    const target = faultInfo(fault).target;
+    expect(result.failures).toEqual(target ? [target] : []);
+    if (target) expect(reasonOf(result, target)).toMatch(/family_name is not disclosed/);
+  });
+
   it('every fault that fails key-binding or kb-freshness has its own expected reason', () => {
     const binding = FAULT_IDS.filter((fault) => ['key-binding', 'kb-freshness'].includes(faultInfo(fault).target ?? ''));
     expect(binding.filter((fault) => !BINDING_REASONS[fault])).toEqual([]);
   });
+
+  // A signer fault that is not about the validity of the signing certificate keeps the MSO `signed` time within that
+  // validity: the reference validator checks the signed date only once the path is valid, so a faulted path hides it,
+  // while an RP that checks the date first rejects the credential for it and passes the test case for the wrong reason.
+  const VALIDITY_FAULTS = new Set<FaultId>(['mdoc.signer-expired', 'mdoc.signer-not-yet-valid', 'mdoc.signed-after-ds-expiry']);
+  it.each(FAULT_IDS.filter((fault) => faultInfo(fault).format === 'mso_mdoc' && isSignerFault(fault) && !VALIDITY_FAULTS.has(fault)))(
+    '%s signs within the validity of its document signer certificate',
+    async (fault) => {
+      const now = new Date();
+      const signer = await faultySigner(fault, fixture.pki.entities[faultInfo(fault).issuer ?? 'PP-A'], 'mso_mdoc', fixture.pki, now);
+      const leaf = signer.certificate;
+      for (const short of [false, true]) {
+        const { signed } = mdocValidity(now, short);
+        expect(leaf.notBefore.getTime()).toBeLessThanOrEqual(signed.getTime());
+        expect(leaf.notAfter.getTime()).toBeGreaterThanOrEqual(signed.getTime());
+      }
+    },
+  );
 
   // The ES256K faults are genuine device authentication with another algorithm: the credential is bound to the
   // secp256k1 key, and the signature verifies with it.

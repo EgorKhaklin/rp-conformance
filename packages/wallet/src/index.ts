@@ -1,7 +1,7 @@
 // The Conformance Wallet. It started from EUDIPLO's headless E2E wallet (apps/client/e2e/support/wallet.ts), which
 // answers signed OpenID4VP requests with direct_post.jwt, and adds what a conformance run needs: trust in the
 // request signer per TL-AC, findings on the request, and evidence of every exchange.
-import { createHash, X509Certificate } from 'node:crypto';
+import { createHash, randomBytes, X509Certificate } from 'node:crypto';
 import { type CallbackContext, type Jwk, setGlobalConfig } from '@openid4vc/oauth2';
 import { Openid4vpClient } from '@openid4vc/openid4vp';
 import { type CapturedRequest, type DcqlQuery, type FaultId, faultInfo } from '@rp-conformance/core';
@@ -80,6 +80,7 @@ export interface ConformanceWalletOptions {
 const hash: CallbackContext['hash'] = (data, alg) => createHash(alg.replace('-', '').toLowerCase()).update(data).digest();
 
 const SUPPORTED_ENC = ['A128GCM', 'A256GCM'];
+const SUPPORTED_ENC_VALUES = SUPPORTED_ENC;
 
 export type { HeldCredential };
 
@@ -95,9 +96,35 @@ export interface ResponseOptions {
   /** `T_skew` and `T_kb`, seconds, for the KB-JWT time faults; default 0 and 300. */
   skewSeconds?: number;
   kbMaxAgeSeconds?: number;
+  /** Via redirects, whether the wallet opens the `redirect_uri`; default the wallet's option (true). */
+  followRedirect?: boolean;
+  /** Epoch milliseconds before which the wallet does not send the response (ProtocolFlow_011, a late response). */
+  sendAt?: number;
   /** A combined presentation (UC_Presentation): further credentials, each for the credential query it names. */
   alongside?: HeldCredential[];
 }
+
+/** How the Conformance Wallet retrieves the request object of a started transaction (ProtocolFlow_002, _003). */
+export interface StartOptions {
+  /** `twice`: a second GET after the first; `post`: one POST with `wallet_metadata` and `wallet_nonce`. */
+  requestUri?: 'twice' | 'post';
+}
+
+/** The metadata the Conformance Wallet posts to `request_uri` (OpenID4VP 1.0 section 5.10.1 and 10). */
+export const WALLET_METADATA = {
+  vp_formats_supported: {
+    'dc+sd-jwt': { 'sd-jwt_alg_values': ['ES256'], 'kb-jwt_alg_values': ['ES256'] },
+    mso_mdoc: { issuerauth_alg_values: [-7], deviceauth_alg_values: [-7] },
+  },
+  request_object_signing_alg_values_supported: ['ES256'],
+  authorization_encryption_alg_values_supported: ['ECDH-ES'],
+  authorization_encryption_enc_values_supported: SUPPORTED_ENC_VALUES,
+};
+
+const waitUntil = async (at: number | undefined) => {
+  const ms = (at ?? 0) - Date.now();
+  if (ms > 0) await new Promise((resolve) => setTimeout(resolve, ms));
+};
 
 type Finding = (severity: WalletFinding['severity'], code: string, message: string) => void;
 
@@ -150,20 +177,82 @@ export class ConformanceWallet {
    * Resolves the request behind `invocationUri` and records its encryption key, without answering it (SessionEncryption
    * transaction T1).
    */
-  async start(invocationUri: string): Promise<PresentationEvidence> {
+  async start(invocationUri: string, options: StartOptions = {}): Promise<PresentationEvidence> {
     const evidence: PresentationEvidence = { invocationUri, findings: [] };
+    let walletNonce: string | undefined;
+    let refetch: HttpExchange | undefined;
     try {
-      await this.resolve(invocationUri, evidence);
+      if (options.requestUri === 'post') {
+        walletNonce = base64url.encode(randomBytes(16));
+        await this.resolve(invocationUri, evidence, { walletNonce });
+      } else {
+        await this.resolve(invocationUri, evidence);
+        if (options.requestUri === 'twice') refetch = await this.fetchRequestUri(invocationUri);
+      }
     } catch (error) {
       evidence.error = (error as Error).message;
+      if (options.requestUri === 'twice' && evidence.requestFetch && !refetch) refetch = await this.fetchRequestUri(invocationUri).catch(() => undefined);
     }
     const fetched = evidence.requestFetch;
     evidence.captured = {
       flow: 'redirect',
       invocationUri,
       ...(fetched ? { requestUri: { status: fetched.status, contentType: fetched.contentType, body: fetched.body } } : {}),
+      ...(refetch ? { refetch: { status: refetch.status, contentType: refetch.contentType, body: refetch.body } } : {}),
+      ...(walletNonce ? { walletNonce } : {}),
     };
     return evidence;
+  }
+
+  /**
+   * Retrieves the `request_uri` of an invocation URI, or `requestUri` itself, once more with GET, as a wallet that
+   * resolves an invocation again does (ProtocolFlow_002, _004); nothing is verified.
+   */
+  async fetchRequestUri(invocationUriOrRequestUri: string): Promise<HttpExchange> {
+    const requestUri = requestUriOf(invocationUriOrRequestUri) ?? invocationUriOrRequestUri;
+    const exchange: HttpExchange = { method: 'GET', url: requestUri };
+    try {
+      const response = await fetch(requestUri, { headers: { accept: 'application/oauth-authz-req+jwt' } });
+      exchange.status = response.status;
+      exchange.contentType = response.headers.get('content-type');
+      exchange.body = await response.text();
+    } catch (error) {
+      exchange.error = (error as Error).message;
+    }
+    return exchange;
+  }
+
+  /**
+   * Answers the request behind `invocationUri` (redirect flow) with an Authorization Error Response instead of a
+   * presentation: `error` and the request's `state`, posted unencrypted to `response_uri` (OpenID4VP 1.0 section 8.5;
+   * encryption of an error response is optional). The redirect is not followed.
+   */
+  async respondWithError(invocationUri: string, error: string): Promise<PresentationEvidence> {
+    const evidence: PresentationEvidence = { invocationUri, findings: [] };
+    try {
+      const request = await this.resolve(invocationUri, evidence);
+      const form: Record<string, string> = { error, ...(typeof request.state === 'string' ? { state: request.state } : {}) };
+      evidence.responseForm = form;
+      const responseUri = request.response_uri as string;
+      evidence.response = await post(responseUri, form);
+    } catch (e) {
+      evidence.error = (e as Error).message;
+    }
+    return evidence;
+  }
+
+  /** Resolves a DC API request and answers it with an error object in `data` (OpenID4VP 1.0 Appendix A.4). */
+  async respondWithErrorDcApi(call: DcApiCall, error: string): Promise<{ evidence: PresentationEvidence; answer?: DcApiAnswer }> {
+    const evidence: PresentationEvidence = { invocationUri: call.pageUrl, dcApi: { origin: call.origin, requests: call.requests }, findings: [] };
+    try {
+      const { protocol } = await this.resolveDcApi(call, evidence);
+      const data = { error };
+      evidence.responseData = data;
+      return { evidence, answer: { protocol, data } };
+    } catch (e) {
+      evidence.error = (e as Error).message;
+      return { evidence };
+    }
   }
 
   /**
@@ -189,6 +278,7 @@ export class ConformanceWallet {
       evidence.responseJwe = form.response;
 
       const responseUri = request.response_uri as string;
+      await waitUntil(options.sendAt);
       const exchange: HttpExchange = { method: 'POST', url: responseUri };
       evidence.response = exchange;
       const response = await fetch(responseUri, { method: 'POST', body: new URLSearchParams(form) });
@@ -196,7 +286,7 @@ export class ConformanceWallet {
       exchange.contentType = response.headers.get('content-type');
       exchange.body = await response.text();
 
-      if (response.ok && this.options.followRedirect !== false) {
+      if (response.ok && (options.followRedirect ?? this.options.followRedirect) !== false) {
         let redirectUri: unknown;
         try {
           redirectUri = (JSON.parse(exchange.body) as { redirect_uri?: unknown }).redirect_uri;
@@ -259,6 +349,7 @@ export class ConformanceWallet {
       };
       const input = await this.responseInput(request, credential, binding, evidence, options);
       const data = await buildDcApiResponse(input, responseFaultOf(options));
+      await waitUntil(options.sendAt);
       evidence.responseData = data;
       if (typeof data.response === 'string') evidence.responseJwe = data.response;
       return { evidence, answer: { protocol, data } };
@@ -368,15 +459,40 @@ export class ConformanceWallet {
     return verified && path.ok ? jwk : undefined;
   }
 
-  /** Fetches and verifies the request of the redirect flow; refuses it on an error finding. */
-  private async resolve(invocationUri: string, evidence: PresentationEvidence): Promise<Record<string, unknown>> {
+  /**
+   * Fetches and verifies the request of the redirect flow; refuses it on an error finding. The wallet retrieves
+   * `request_uri` with GET, as a wallet that does not support `request_uri_method` `post` does (OpenID4VP 1.0 section
+   * 5.10), unless `post` names the `wallet_nonce` to post (ProtocolFlow_003); then the request object must echo it.
+   */
+  private async resolve(invocationUri: string, evidence: PresentationEvidence, post?: { walletNonce: string }): Promise<Record<string, unknown>> {
     const finding: Finding = (severity, code, message) => evidence.findings.push({ severity, code, message });
     const client = this.client(evidence, finding);
     const parsed = client.parseOpenid4vpAuthorizationRequest({ authorizationRequest: invocationUri });
+    const { request_uri_method: _method, ...params } = parsed.params as Record<string, unknown>;
+    if (post) {
+      // The library posts only wallet_metadata (0.9.2), so the wallet fetches the request object itself and passes it by value.
+      const requestUri = String(params.request_uri ?? '');
+      const exchange: HttpExchange = { method: 'POST', url: requestUri };
+      evidence.requestFetch = exchange;
+      const response = await fetch(requestUri, {
+        method: 'POST',
+        headers: { accept: 'application/oauth-authz-req+jwt', 'content-type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({ wallet_metadata: JSON.stringify(WALLET_METADATA), wallet_nonce: post.walletNonce }),
+      });
+      exchange.status = response.status;
+      exchange.contentType = response.headers.get('content-type');
+      exchange.body = await response.text();
+      if (!response.ok) throw new Error(`POST ${requestUri}: HTTP ${response.status}`);
+      delete params.request_uri;
+      params.request = exchange.body;
+    }
     const { authorizationRequestPayload: request, client: resolvedClient } = await client.resolveOpenId4vpAuthorizationRequest({
-      authorizationRequestPayload: parsed.params as never,
+      authorizationRequestPayload: params as never,
       responseMode: { type: 'direct_post' },
     });
+    if (post && (request as Record<string, unknown>).wallet_nonce !== post.walletNonce) {
+      finding('warning', 'wallet-nonce', 'the request object does not carry the wallet_nonce the wallet posted');
+    }
     this.checkRequest(request as Record<string, unknown>, evidence, finding, resolvedClient);
     return this.accept(request as Record<string, unknown>, evidence);
   }
@@ -493,3 +609,22 @@ export class ConformanceWallet {
   }
 }
 
+
+/** The `request_uri` of an invocation URI, if it carries one. */
+function requestUriOf(invocationUri: string): string | undefined {
+  try {
+    return new URL(invocationUri).searchParams.get('request_uri') ?? undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** Posts a form and records the exchange. */
+async function post(url: string, form: Record<string, string>): Promise<HttpExchange> {
+  const exchange: HttpExchange = { method: 'POST', url };
+  const response = await fetch(url, { method: 'POST', body: new URLSearchParams(form) });
+  exchange.status = response.status;
+  exchange.contentType = response.headers.get('content-type');
+  exchange.body = await response.text();
+  return exchange;
+}

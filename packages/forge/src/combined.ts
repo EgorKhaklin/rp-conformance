@@ -29,6 +29,7 @@ export function requestedClaimsOf(credentialQuery: CredentialQuery): RequestedCl
   return {
     disclose: [...new Set((credentialQuery.claims ?? []).map((claim) => String(claim.path[0])))],
     elements: requestedElements(credentialQuery.claims),
+    paths: (credentialQuery.claims ?? []).map((claim) => claim.path),
   };
 }
 

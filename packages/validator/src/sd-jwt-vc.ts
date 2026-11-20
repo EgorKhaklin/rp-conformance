@@ -1,8 +1,9 @@
 import { type CheckId, CREDENTIAL_CHECKS, STATUS_LIST_CHECKS } from '@rp-conformance/core';
-import { base64url, sha256, verifyEs256 } from '@rp-conformance/forge';
+import { base64url, PID_VCT, sha256, verifyEs256 } from '@rp-conformance/forge';
 import { describeKey, processDisclosures } from './disclosures';
+import { checkClaims, type RequestedClaim } from './claims';
 import { parseCertificate } from '@owf/x509';
-import { CheckRecorder, type ValidationMode, type ValidationResult } from './checks';
+import { CheckRecorder, NotApplicable, type ValidationMode, type ValidationResult } from './checks';
 import { decodeSegment, evaluateStatusList, type FetchedStatusList, fail, isUri, leafJwk } from './status-list';
 import type { MatchedIssuer, TrustRule, TrustStore } from './trust';
 
@@ -46,6 +47,8 @@ export interface SdJwtVcValidationOptions {
   validStatuses?: number[];
   /** `trusted_authorities` of the credential query the Relying Party sent (OpenID4VP section 6.1.1.1). */
   trustedAuthorities?: { type: string; values: string[] }[];
+  /** The claims of the credential query, for the check `claims`; left out, the check does not apply. */
+  requestedClaims?: RequestedClaim[];
   fetchStatusList: (uri: string) => Promise<FetchedStatusList>;
   mode?: ValidationMode;
   now?: Date;
@@ -183,6 +186,12 @@ export async function validateSdJwtVcPresentation(presentation: string, options:
       if (!Number.isInteger(list?.idx) || (list?.idx as number) < 0) fail(`idx ${JSON.stringify(list?.idx)} is not a non-negative integer`);
       if (!isUri(list?.uri)) fail(`uri ${JSON.stringify(list?.uri)} is not a URI`);
       reference = { idx: list?.idx as number, uri: list?.uri as string };
+    });
+
+    // The disclosed claims satisfy the query, and a PID's attributes have the types of the PID rulebook.
+    await recorder.run('claims', ['format', 'disclosures'], () => {
+      if (!options.requestedClaims) return new NotApplicable('no credential query given');
+      return checkClaims(claims ?? {}, options.requestedClaims, payload.vct === PID_VCT ? { encoding: 'sd-jwt-vc' } : undefined);
     });
 
     // Status list procedures (Token Status List section 8). In first-failure mode they run only for a valid credential.
