@@ -13,3 +13,6 @@ export * from './rp/wording';
 export * from './issuer/adapter';
 export * from './issuer/definition';
 export * from './issuer/ics';
+// Issue 24: metadata, offer and credential request checks, `credential-request` faults
+export * from './issuer/artifact-checks';
+export * from './issuer/credential-request-faults';

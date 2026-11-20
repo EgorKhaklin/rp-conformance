@@ -15,6 +15,8 @@ export { PID_FIELDS, PID_SUBJECTS } from './subjects';
 
 /** The ID of the PID credential configuration in SD-JWT VC format, as the Credential Issuer metadata names it. */
 export const PID_SD_JWT_CONFIGURATION = 'pid-sd-jwt-vc';
+/** A second PID configuration that no offer names (issue 24, PP_WS_MS_CredentialEndpoint_004_UF). */
+export const SECOND_SD_JWT_CONFIGURATION = 'pid-sd-jwt-vc-2';
 /** `vct` of the PID in SD-JWT VC format (PID Rulebook). */
 export const PID_VCT = 'urn:eudi:pid:1';
 /** The built-in authorization server of the tenant: the only one that redeems pre-authorized codes. */
@@ -267,13 +269,17 @@ export class IssuerEudiploAdapter implements IssuerAdapter {
       key_storage: icsList(env.ics, 'ICS-04.key_storage', ['iso_18045_high']),
       user_authentication: icsList(env.ics, 'ICS-04.user_authentication', ['iso_18045_high']),
     };
-    await this.call('POST', '/api/issuer/credentials', {
-      id: PID_SD_JWT_CONFIGURATION,
-      description: 'PID in SD-JWT VC format (PID Rulebook), default_configuration_PP_1',
+    const batchSize = icsNumber(env.ics, 'ICS-08.batch_size', 1);
+    const pidConfiguration = (id: string, description: string) => ({
+      id,
+      description,
       config: {
         format: 'dc+sd-jwt',
         display: [{ name: 'PID', locale: 'en-US', description: 'Person identification data of the conformance test subject' }],
         keyAttestationsRequired,
+        // Issue 24 (PP_WS_MS_Metadata_009): the reuse policy of ARF Annex II, method A (once_only) preferred over
+        // method B (limited_time), consistent with the batch size (ICS-08.credential_reuse_policy).
+        ...(batchSize >= 2 ? { credentialReusePolicy: reusePolicy(batchSize) } : {}),
       },
       vct: PID_VCT,
       keyBinding: true,
@@ -282,6 +288,14 @@ export class IssuerEudiploAdapter implements IssuerAdapter {
       lifeTime: PID_LIFETIME_SECONDS,
       fields: PID_FIELDS,
     });
+    await this.call('POST', '/api/issuer/credentials', pidConfiguration(PID_SD_JWT_CONFIGURATION, 'PID in SD-JWT VC format (PID Rulebook), default_configuration_PP_1'));
+    // Issue 24 (PP_WS_MS_CredentialEndpoint_004_UF): a second configuration that no offer of the suite names, so a
+    // credential request can name a configuration the access token was not issued for.
+    await this.call(
+      'POST',
+      '/api/issuer/credentials',
+      pidConfiguration(SECOND_SD_JWT_CONFIGURATION, 'Second PID configuration in SD-JWT VC format, never offered: target of PP_WS_MS_CredentialEndpoint_004_UF'),
+    );
 
     const tlWp = env.trustLists.find((list) => list.id === 'TL-WP');
     if (!tlWp) throw new Error('TL-WP is not published');
@@ -291,7 +305,7 @@ export class IssuerEudiploAdapter implements IssuerAdapter {
       authorizationServers: [{ type: 'built-in', id: BUILT_IN_AS, walletAttestationRequired: true }],
       walletAttestationRequired: true,
       walletProviderTrustLists,
-      batchSize: icsNumber(env.ics, 'ICS-08.batch_size', 1),
+      batchSize,
       dPopRequired: true,
       notificationEndpointEnabled: true,
       // 9.1.0 imports the Registrar's certificate with `mode` `import` (its default `generate` asks a registrar);
@@ -425,6 +439,15 @@ export class IssuerEudiploAdapter implements IssuerAdapter {
     this.method = undefined;
   }
 }
+
+/** ARF Annex II reuse policy: method A (once only) with the batch size, then method B (limited time, one day before expiry). */
+const reusePolicy = (batchSize: number) => ({
+  id: 'arf_annex_ii',
+  options: [
+    { details: ['once_only'], batch_size: batchSize, reissue_trigger_unused: Math.max(0, batchSize - 1) },
+    { details: ['limited_time'], reissue_trigger_lifetime_left: 86_400 },
+  ],
+});
 
 const derOf = (pem: string) => pem.replace(/-----(BEGIN|END) CERTIFICATE-----/g, '').replace(/\s+/g, '');
 
