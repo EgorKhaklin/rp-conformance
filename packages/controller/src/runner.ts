@@ -19,6 +19,7 @@ import {
   type RelyingPartyResult,
   type StartAction,
   type StepDefinition,
+  type TestBookItem,
   type TestCaseDefinition,
   type TrustListAction,
   type Verdict,
@@ -36,6 +37,7 @@ import { harnessInfo } from './info';
 import { writeJUnit } from './junit';
 import { describeFinding, type KnownFinding, knownFindingOf } from './known-findings';
 import { writeSummary } from './summary';
+import { combine, evaluateFlowCodes, redirectUriOf, runErrorResponse, runFlow, type TransactionTrace, withoutFlowCodes } from './flow';
 
 /** The flows the harness implements: redirects, and the W3C Digital Credentials API through the DC API shim. */
 export const IMPLEMENTED_FLOWS: Flow[] = FLOWS;
@@ -110,12 +112,21 @@ export interface RunReport {
     error?: string;
   };
   results: TestCaseRecord[];
+  /** The selected test book items, each REVIEW with its method: inspections the harness cannot execute. */
+  testBook?: TestBookRecord[];
+}
+
+/** A test book item in the report: always REVIEW, with the method of the inspection. */
+export interface TestBookRecord extends TestBookItem {
+  verdict: 'REVIEW';
 }
 
 export interface RunOptions {
   adapter: RelyingPartyAdapter;
   ics: Ics;
   definitions: TestCaseDefinition[];
+  /** The test book items, reported as REVIEW (`only` selects them like test cases). */
+  testBook?: TestBookItem[];
   /** Test case IDs or patterns with `*`. */
   only?: string[];
   flows?: Flow[];
@@ -141,10 +152,10 @@ const matches = (id: string, pattern: string) =>
  * Selects the executable test cases and adds the positive controls they depend on, controls first (harness design
  * section 4.1). Text-only definitions are left out.
  */
-export function selectTestCases(all: TestCaseDefinition[], only?: string[]): TestCaseDefinition[] {
+export function selectTestCases(all: TestCaseDefinition[], only?: string[], testBook: TestBookItem[] = []): TestCaseDefinition[] {
   const definitions = all.filter(isExecutable);
   const selected = only?.length ? definitions.filter((d) => only.some((p) => matches(d.id, p))) : [...definitions];
-  if (only?.length && selected.length === 0) {
+  if (only?.length && selected.length === 0 && selectTestBook(testBook, only).length === 0) {
     const textOnly = all.filter((d) => !isExecutable(d) && only.some((p) => matches(d.id, p)));
     throw new Error(`no executable test case matches ${only.join(', ')}${textOnly.length ? ` (text only: ${textOnly.map((d) => d.id).join(', ')})` : ''}`);
   }
@@ -155,6 +166,11 @@ export function selectTestCases(all: TestCaseDefinition[], only?: string[]): Tes
     for (const control of controls) if (!selected.includes(control)) selected.push(control);
   }
   return [...selected.filter((d) => !d.control), ...selected.filter((d) => d.control)];
+}
+
+/** Selects the test book items `only` names; all of them without `only`. */
+export function selectTestBook(items: TestBookItem[], only?: string[]): TestBookItem[] {
+  return only?.length ? items.filter((item) => only.some((p) => matches(item.id, p))) : [...items];
 }
 
 export { durationMs };
@@ -197,7 +213,11 @@ export async function runConformance(options: RunOptions): Promise<{ report: Run
   };
   try {
     log(`run ${runId}: harness services at ${harness.status.baseUrl} (status) and ${harness.trust.baseUrl} (trust)`);
-    const selected = selectTestCases(options.definitions, options.only);
+    const selected = selectTestCases(options.definitions, options.only, options.testBook);
+    report.testBook = selectTestBook(options.testBook ?? [], options.only).map((item) => ({ ...item, verdict: 'REVIEW' }));
+    for (const item of report.testBook) log(`${item.verdict.padEnd(14)} ${item.id} (test book) ${item.method}`);
+    // Only test book items selected: nothing to execute against the Relying Party.
+    if (selected.length === 0) return await writeReport(report, runDir);
     try {
       await options.adapter.setUp(harness.env, namespace);
     } catch (error) {
@@ -272,6 +292,8 @@ interface TestCaseState {
   pendingRetrieval?: { record: StepRecord; list: PublishableList; version: number; publishedAt: Date; checks: number };
   /** Whether the Relying Party answered a request of this test case (a started presentation). */
   rpReached: boolean;
+  /** The transaction of each presentation step, by step number, for the flow steps that continue it. */
+  traces?: Map<number, TransactionTrace>;
 }
 
 async function runTestCase(definition: TestCaseDefinition, flow: Flow, flowSupported: boolean, ctx: Context): Promise<TestCaseRecord> {
@@ -368,6 +390,18 @@ async function runStep(
       case 'request':
         await runRequest(step, step.run, flow, record, save, ctx, state);
         break;
+      case 'flow':
+        await runFlow(step, step.run, flow, record, save, flowContext(ctx), (state.traces ??= new Map()));
+        break;
+      case 'error-response': {
+        const action = step.run;
+        await runErrorResponse(step, action, flow, record, save, flowContext(ctx), async () => {
+          const started = await startPresentation(action, flow, record, save, ctx);
+          state.rpReached = true;
+          return started;
+        });
+        break;
+      }
       default:
         record.reason = 'the step is text only';
     }
@@ -386,6 +420,14 @@ async function runStep(
 }
 
 type Save = (name: string, content: string | Uint8Array | undefined) => Promise<void>;
+
+const flowContext = (ctx: Context) => ({
+  adapter: ctx.adapter,
+  wallet: ctx.wallet,
+  namespace: ctx.harness.namespace,
+  resultTimeoutMs: ctx.resultTimeoutMs,
+  dcApiShim: ctx.dcApiShim,
+});
 
 /** An error message with the code of its cause, for example `fetch failed (ECONNREFUSED)`. */
 const describeError = (error: unknown) => {
@@ -479,6 +521,10 @@ async function runPresentation(
 
   const query = ctx.harness.env.queries[action.query];
   const stepStart = new Date();
+  // A late response (ProtocolFlow_011) is sent once the transaction lifetime T_tx (ICS RP.P.7) has passed, plus 2 s.
+  const lifetimeMs = durationMs(String(ctx.ics.items['RP.P.7'] ?? ''));
+  if (action.wallet?.late && lifetimeMs === undefined) throw new Error('the ICS declares no transaction lifetime T_tx (RP.P.7)');
+  const sendAt = action.wallet?.late ? Date.now() + (lifetimeMs ?? 0) + 2000 : undefined;
   const { transactionId, uri } = await startPresentation(action, flow, record, save, ctx);
   state.rpReached = true;
   const otherKey = action.response.keyOfStep ? state.encryptionKeys.get(action.response.keyOfStep) : undefined;
@@ -495,6 +541,8 @@ async function runPresentation(
     replayedPresentation: replayed,
     skewSeconds,
     kbMaxAgeSeconds,
+    ...(action.wallet?.redirect === 'none' ? { followRedirect: false } : {}),
+    ...(sendAt ? { sendAt } : {}),
   };
 
   let evidence: PresentationEvidence;
@@ -508,7 +556,7 @@ async function runPresentation(
       // A wallet that cannot use the request answers with an OpenID4VP error (Appendix A.4), not a presentation.
       if (!answer) return { kind: 'respond', protocol: call.requests[0]?.protocol ?? '', data: { error: 'invalid_request', error_description: walletEvidence.error } };
       return { kind: 'respond', ...answer, marker: deliveryMarker(answer.data, walletEvidence.presentation) };
-    });
+    }, sendAt ? { callTimeoutMs: sendAt - Date.now() + 15_000 } : {});
     evidence = walletEvidence ?? { invocationUri: uri, findings: [], error: run.error ?? 'the page made no digital credential request' };
     await recordDcApiRun(run, walletEvidence, record, save);
     await save('response.data.json', evidence.responseData && JSON.stringify(evidence.responseData, null, 2));
@@ -538,7 +586,20 @@ async function runPresentation(
   const listUri = forged.statusList?.uri ?? forged.identifierList?.uri;
   record.statusLog = listUri ? ctx.harness.status.requestsFor(listUri, stepStart).map(({ url, at, status }) => ({ url, at, status })) : [];
 
-  const evaluation = evaluate(step.expect, {
+  const trace: TransactionTrace = {
+    transactionId,
+    query: action.query,
+    invocationUri: uri,
+    responseUri: evidence.response?.url,
+    responseForm: evidence.responseForm,
+    response: evidence.response,
+    redirectUri: redirectUriOf(evidence.response?.body),
+    result: record.rpResult,
+  };
+  const traces = (state.traces ??= new Map());
+  const flowEvaluation = evaluateFlowCodes(step.expect, { response: evidence.response, trace, earlier: [...traces.values()] });
+  traces.set(record.step, trace);
+  const presentationEvaluation = evaluate(withoutFlowCodes(step.expect), {
     result: record.rpResult,
     query,
     issuedClaims: forged.claims,
@@ -548,6 +609,7 @@ async function runPresentation(
     category: categoryOfQuery(action.query),
     statusRequests: record.statusLog.length,
   });
+  const evaluation = flowEvaluation ? combine(withoutFlowCodes(step.expect).codes.length ? presentationEvaluation : undefined, flowEvaluation) : presentationEvaluation;
   record.verdict = evaluation.verdict;
   record.reason = evidence.error && evaluation.verdict !== 'PASS' ? `${evaluation.reason}; Conformance Wallet: ${evidence.error}` : evaluation.reason;
 }
@@ -603,7 +665,7 @@ async function runRequest(step: StepDefinition, action: RequestAction, flow: Flo
       });
       if (!evidence) throw new Error(run.error ?? 'the page made no digital credential request');
     } else {
-      evidence = await ctx.wallet.start(uri);
+      evidence = await ctx.wallet.start(uri, { requestUri: action.requestUri });
     }
     if (!evidence.captured) throw new Error('the Conformance Wallet captured no request');
     captured.push(evidence.captured);

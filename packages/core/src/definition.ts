@@ -88,3 +88,29 @@ export function durationMs(value: string | undefined): number | undefined {
   const [, d = '0', h = '0', m = '0', s = '0'] = match;
   return ((Number(d) * 24 + Number(h)) * 60 + Number(m)) * 60_000 + Number(s) * 1000;
 }
+
+/**
+ * A test book item: a requirement checked by inspection (document, configuration or process review, walkthrough)
+ * instead of a protocol stimulus, so it has no steps. The harness reports each one as REVIEW with its method; the
+ * Relying Party class `RP_TB` (`rp-test-catalogue.md` section 5.4), the PID Provider and Attestation Provider class
+ * `PP_TB` (`issuer-test-catalogue.md` section 5.5).
+ */
+export interface TestBookItem {
+  /** `<class>_TB_<nnn>`, for example `RP_TB_001`. */
+  id: string;
+  objective: string;
+  /** How the item is inspected, for example `Document review.`. */
+  method: string;
+  references: string[];
+  relevancy: Relevancy;
+}
+
+/** Test book item IDs: the SUT class prefix, `TB` and a three-digit number. */
+export const TEST_BOOK_ID = /^(RP|PP)_TB_(\d{3})$/;
+
+/** Checks a test book item: a valid ID, and an objective and method to review. */
+export function defineTestBookItem(item: TestBookItem): TestBookItem {
+  if (!TEST_BOOK_ID.test(item.id)) throw new Error(`${item.id} is not a test book item ID`);
+  if (!item.objective.trim() || !item.method.trim()) throw new Error(`${item.id}: a test book item needs an objective and a method`);
+  return item;
+}

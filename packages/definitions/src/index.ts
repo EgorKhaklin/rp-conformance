@@ -13,6 +13,8 @@ import { definitions as sessionBinding } from './wallet_solution/SecurityMechani
 import { definitions as sessionEncryption } from './wallet_solution/SecurityMechanisms/SessionEncryption';
 import { definitions as trustMechanisms } from './wallet_solution/SecurityMechanisms/TrustMechanisms';
 import { definitions as validity } from './wallet_solution/SecurityMechanisms/Validity';
+import { definitions as engagement } from './wallet_solution/Interaction/Engagement';
+import { definitions as protocolFlow } from './wallet_solution/Interaction/ProtocolFlow';
 import { definitions as identifyingData } from './wallet_solution/DataModel/IdentifyingData';
 import { definitions as credentialMetadata } from './wallet_solution/DataModel/CredentialMetadata';
 
@@ -41,6 +43,8 @@ export const definitions: TestCaseDefinition[] = [
   ...metadata,
   ...credentialFormats,
   ...rpIntegrity,
+  ...engagement,
+  ...protocolFlow,
   ...furtherMainInteraction,
   ...identifyingData,
   ...credentialMetadata,
@@ -48,3 +52,6 @@ export const definitions: TestCaseDefinition[] = [
 
 /** The definitions the harness can execute. */
 export const executableDefinitions = definitions.filter(isExecutable);
+
+/** The test book items (class `RP_TB`): inspections, reported as REVIEW with their method in every run. */
+export { testBook } from './test_book/TestBook';

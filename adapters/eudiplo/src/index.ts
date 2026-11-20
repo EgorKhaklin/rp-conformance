@@ -3,6 +3,7 @@ import {
   categoryOfQuery,
   type DcqlQuery,
   type DefaultQueryId,
+  durationMs,
   type Flow,
   type RelyingPartyAdapter,
   type RelyingPartyResult,
@@ -162,6 +163,8 @@ export class EudiploAdapter implements RelyingPartyAdapter {
       ];
     }
 
+    const lifeTimeMs = durationMs(String(env.ics.items['RP.P.7'] ?? ''));
+    const lifeTimeSeconds = lifeTimeMs ? Math.round(lifeTimeMs / 1000) : undefined;
     for (const [id, query] of Object.entries(env.queries)) {
       // The ICS declares RP.P.3 No: EUDIPLO is configured with trusted_authorities of its own (etsi_tl below), so the
       // aki-restricted variant of default_query_pid (TrustMechanisms_016) is not configured.
@@ -183,6 +186,10 @@ export class EudiploAdapter implements RelyingPartyAdapter {
         accessKeyChainId,
         skewSeconds: this.skewSeconds,
         statusCheckMode: 'strict',
+        // The relying service's page the wallet returns to after a presentation via redirects, with the response code
+        // (RP_WS_IA_ProtocolFlow_005), and the transaction lifetime T_tx the ICS declares (RP.P.7, _011).
+        redirectUri: `${this.pageOrigin}/done/{sessionId}`,
+        ...(lifeTimeSeconds ? { lifeTime: lifeTimeSeconds } : {}),
       });
     }
   }
@@ -231,7 +238,10 @@ export class EudiploAdapter implements RelyingPartyAdapter {
     if (this.pageServer) return;
     const port = this.options.pagePort ?? Number(process.env.EUDIPLO_PAGE_PORT ?? 0);
     this.pageServer = await startServer({ host: '127.0.0.1', port }, (req, res) => {
-      const match = /^\/dc-api\/([^/?]+)$/.exec(new URL(req.url ?? '/', 'http://localhost').pathname);
+      const path = new URL(req.url ?? '/', 'http://localhost').pathname;
+      // The relying service's page behind EUDIPLO's redirect_uri; it does not redeem the response code (ICS RP.P.9 No).
+      if (req.method === 'GET' && path.startsWith('/done/')) return sendText(res, 200, '<!doctype html><title>Done</title>', 'text/html; charset=utf-8');
+      const match = /^\/dc-api\/([^/?]+)$/.exec(path);
       const page = match && this.pages.get(decodeURIComponent(match[1]));
       if (req.method !== 'GET' || !page) return sendJson(res, 404, { error: 'not_found' });
       return sendText(res, 200, dcApiPage(page), 'text/html; charset=utf-8');

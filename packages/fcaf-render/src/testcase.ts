@@ -17,6 +17,8 @@ export const AREA_TITLE: Record<string, string> = {
   Metadata: 'Metadata',
   CredentialFormats: 'Credential Formats',
   RpIntegrity: 'Relying Party Integrity',
+  Engagement: 'Engagement',
+  ProtocolFlow: 'Protocol Flow',
   IdentifyingData: 'Identifying Data',
   CredentialMetadata: 'Credential Metadata',
 };

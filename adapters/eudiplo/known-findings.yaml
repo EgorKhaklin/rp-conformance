@@ -10,40 +10,62 @@
     @owf/mdoc IssuerAuth.verify runs verifyStatus before the validityInfo check
   reference: cre8/rp-conformance#4
 
-# Found by the Phase 5 test cases against ghcr.io/eudiplo/eudiplo:main (9.1.0-main.ae0792a, 2026-11-17); not yet
-# reported upstream.
+# Found by the Phase 5 test cases against ghcr.io/eudiplo/eudiplo:main (9.1.0-main.ae0792a, 2026-11-17) and confirmed
+# against the same version on 2026-11-19 (cre8/rp-conformance#34); not yet reported upstream. The issue text prepared for
+# each is named in the comment above it, in adapters/eudiplo/upstream-findings/.
+
+# Upstream issue text: upstream-findings/dc-api-request-response-uri.md
 - testCase: RP_WS_MS_ProtocolMessages_005
   flows: [dc-api]
   finding: >-
-    The DC API request object carries a response_uri, which OpenID4VP 1.0 Appendix A.2 excludes for dc_api.jwt
+    The DC API request object carries a response_uri, which is not among the parameters OpenID4VP 1.0 Appendix
+    A.2 supports over the DC API
+# Upstream issue text: upstream-findings/dcql-credential-type-not-checked.md
 - testCase: RP_WS_SM_IssuerIntegrity_013_UF
   finding: EUDIPLO accepts an SD-JWT VC whose vct is not among the vct_values of its query (OpenID4VP section 8.6, 14.9)
+# Upstream issue text: upstream-findings/dcql-credential-type-not-checked.md
 - testCase: RP_WS_SM_IssuerIntegrity_025_UF
   finding: EUDIPLO accepts an mdoc whose docType is not the doctype_value of its query (OpenID4VP section 8.6, B.2.3)
+# Upstream issue text: upstream-findings/certificate-path-constraints.md
 - testCase: RP_WS_SM_IssuerIntegrity_027_UF
   finding: >-
     EUDIPLO accepts an mdoc signed by a certificate without the document signer extended key usage 1.0.18013.5.1.2
     (ISO/IEC 18013-5 Annex B)
+# Upstream issue text: upstream-findings/certificate-path-constraints.md
 - testCase: RP_WS_SM_IssuerIntegrity_034a_UF
   finding: >-
     EUDIPLO accepts an SD-JWT VC whose signing certificate is issued by a certificate with basicConstraints cA false
     (RFC 5280 section 6.1.4)
+# Upstream issue text: upstream-findings/certificate-path-constraints.md
 - testCase: RP_WS_SM_IssuerIntegrity_037a_UF
   finding: >-
     EUDIPLO accepts an SD-JWT VC whose signing certificate carries an unknown extension marked critical (RFC 5280
     section 4.2)
+# Upstream issue text: upstream-findings/trust-list-invalid-seal-discards-last-valid.md
 - testCase: RP_Inf_SM_TrustMechanisms_002_UF
   finding: >-
     After retrieving a version of TL-PID whose seal does not verify, EUDIPLO rejects every PID ("trust_list_unavailable")
     instead of keeping the last valid version in use
+# Upstream issue text: upstream-findings/trust-list-invalid-seal-discards-last-valid.md
 - testCase: RP_Inf_SM_TrustMechanisms_003_UF
   finding: >-
     After retrieving a version of TL-PID sealed by another key, EUDIPLO rejects every PID ("trust_list_unavailable")
     instead of keeping the last valid version in use
+# Upstream issue text: upstream-findings/lote-type-not-checked.md
 - testCase: RP_Inf_SM_TrustMechanisms_006_UF
   finding: >-
     EUDIPLO uses a list whose LoTEType is that of a Wallet Providers list as TL-PID and accepts a PID of the entity it
     adds (ETSI TS 119 602, LoTEType)
+# Upstream issue text: upstream-findings/certificate-path-constraints.md
+- testCase: RP_WS_SM_IssuerIntegrity_034b_UF
+  finding: >-
+    EUDIPLO accepts an mdoc whose document signer certificate is issued by a certificate with basicConstraints cA
+    false (RFC 5280 section 6.1.4)
+# Upstream issue text: upstream-findings/certificate-path-constraints.md
+- testCase: RP_WS_SM_IssuerIntegrity_037b_UF
+  finding: >-
+    EUDIPLO accepts an mdoc whose document signer certificate carries an unknown extension marked critical (RFC 5280
+    section 4.2)
 
 # Found by the data model test cases (issue 30) against ghcr.io/eudiplo/eudiplo:main (9.1.0-main.ae0792a, 2026-11-19);
 # not yet reported upstream. Evidence: the report of the run, kept as reports/r20261119T224543-ce85c7.

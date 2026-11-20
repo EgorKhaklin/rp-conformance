@@ -42,6 +42,8 @@ export interface CreateOfferRequest {
   configurations: string[];
   grant: IssuanceGrant;
   byReference: boolean;
+  /** Pre-authorized code grant: protect the code with a transaction code (`tx_code`), returned in `CreatedOffer.txCode`. */
+  txCode?: boolean;
 }
 
 export interface CreatedOffer {
@@ -58,10 +60,15 @@ export interface CreatedOffer {
  */
 export interface IssuerAdapter {
   name: string;
+  /** Host name under which the Provider reaches the harness services (`TL-WP`, `SL-WP-*`), for example from a container. */
+  harnessHost?: string;
   /** Configure the SUT: trust in TL-WP, its certificates from the Test Registrar, its configurations per the ICS. */
   setUp(env: IssuerTestEnvironment, namespace: string): Promise<void>;
-  /** CSRs for the SUT's keys (§5.3), or undefined when the Registrar must generate the keys. */
-  enrol(): Promise<EnrolmentRequest | undefined>;
+  /**
+   * CSRs for the SUT's keys (§5.3), or undefined when the Registrar must generate the keys. `namespace` is the one
+   * `setUp` will get, for a SUT whose keys belong to a tenant or namespace that must exist before its CSRs do.
+   */
+  enrol(namespace?: string): Promise<EnrolmentRequest | undefined>;
   createOffer(req: CreateOfferRequest): Promise<CreatedOffer>;
   /** Complete the subject's authentication for an authorization request and return the redirect with `code`. */
   authenticateSubject?(authorizationRequestUrl: string, subject: TestSubject): Promise<string>;

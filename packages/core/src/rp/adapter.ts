@@ -155,6 +155,25 @@ export interface RelyingPartyAdapter {
   describe?(): Promise<Record<string, string>>;
   /** Optional: release resources the adapter started. */
   tearDown?(): Promise<void>;
+  /**
+   * Optional (ICS RP.P.9): the Relying Party's front end in a user agent. With `url`, the user agent that started the
+   * transaction (`same`) or a fresh one (`fresh`) opens it, as a browser opens the `redirect_uri` the wallet hands back;
+   * without `url`, the user agent that started the transaction asks the front end for the transaction's result. Reports
+   * what the front end released to that user agent (RP_WS_IA_ProtocolFlow_006 to _009).
+   */
+  frontEnd?(req: { transactionId: string; url?: string; userAgent: 'same' | 'fresh' }): Promise<FrontEndResult>;
+}
+
+/** What the Relying Party's front end showed a user agent. */
+export interface FrontEndResult {
+  /** Whether the front end released verified attributes of the transaction to the user agent. */
+  released: boolean;
+  /** The released attributes, by claim path joined with `.`. */
+  attributes?: Record<string, unknown>;
+  /** HTTP status of the front end's answer, when there is one. */
+  status?: number;
+  /** The front end's own answer, kept as evidence. */
+  raw: unknown;
 }
 
 /** Implementation Conformance Statement of a Relying Party, keyed by ICS item ID (see `ics-rp.md`). */

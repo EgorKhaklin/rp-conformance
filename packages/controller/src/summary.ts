@@ -24,6 +24,24 @@ export async function writeSummary(report: RunReport, path: string): Promise<voi
       return `| ${r.testCase} | ${r.flow} | ${r.verdict}${r.knownFinding ? ' (known)' : ''} | ${reason} |`;
     }),
     '',
+    ...testBookSection(report),
   ];
   await writeFile(path, lines.join('\n'));
+}
+
+const cell = (text: string) => text.replace(/\|/g, '\\|').replace(/\n/g, ' ');
+
+/** The test book items as a section of their own: REVIEW with the method of the inspection. */
+function testBookSection(report: RunReport): string[] {
+  if (!report.testBook?.length) return [];
+  return [
+    '## Test book',
+    '',
+    `${report.testBook.length} item${report.testBook.length === 1 ? '' : 's'} to inspect; the harness cannot execute them, so each is REVIEW with its method and does not fail the run.`,
+    '',
+    '| Item | Verdict | Objective | Method |',
+    '| --- | --- | --- | --- |',
+    ...report.testBook.map((item) => `| ${item.id} | ${item.verdict} | ${cell(item.objective)} | ${cell(item.method)} |`),
+    '',
+  ];
 }
