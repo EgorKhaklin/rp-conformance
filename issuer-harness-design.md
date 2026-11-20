@@ -211,7 +211,7 @@ What this changes compared with the RP harness:
 - **Test cases are proven against EUDIPLO.** The reference run (§7, level 3) needs Docker and a running EUDIPLO, so it runs in its own CI job, not in `pnpm test`.
 - **A failure has two possible causes**: a fault in the harness or a defect in EUDIPLO. Every FAIL in the reference run is analysed before it is recorded. A defect in EUDIPLO becomes a known finding (`adapters/issuer-eudiplo/known-findings.yaml`) with a reference to the upstream issue. The report marks the test case **not validated** until EUDIPLO is fixed and the test case passes. A fault in the harness is fixed.
 - **Features EUDIPLO lacks** (for example a hook the adapter cannot offer, or an ICS item it declares No) leave the test cases that need them not validated as well. They stay in the suite, run against other Providers, and are listed in the report and in the delivery phases with the reason.
-- **Version pinning**: the reference run uses a pinned EUDIPLO release, so a change on EUDIPLO's `main` cannot invalidate the suite overnight. The nightly job (§8) runs against `main` separately and reports regressions as findings, not as harness failures.
+- **Version pinning**: the reference run uses a pinned EUDIPLO image, so a change on EUDIPLO's `main` cannot invalidate the suite overnight. Since 2026-11-20 the pin is a digest of the main image (`9.1.0-main.ae0792a`, in `adapters/issuer-eudiplo/reference.env`), not a release: the release 9.1.0 lacks enrolment by CSR, the strict status check of wallet and key attestations, the key attestation status check and revocation chaining (`revokeWithWalletUnit`), which the catalogue tests. The pin moves to a release once one has these features. The nightly job (§8) runs against `main` separately and reports regressions as findings, not as harness failures.
 - **Time-based test cases** (`REVOKED(t)`) need short `T_rev` and `T_chain` in EUDIPLO's configuration. The adapter sets the shortest values EUDIPLO allows, and the ICS declares them.
 
 ## 6. Definitions, steps, faults and expected results
@@ -275,7 +275,7 @@ The RP harness's three levels carry over:
 
 1. **Artifacts**: every WIA, PoP, KA, proof and DPoP proof the forge builds valid passes every issuer request check of the reference validator. Each fault fails exactly its target check and no other. The new issuer request checks (`wia-signature`, `wia-trust`, `wia-validity`, `wia-status`, `wia-pop`, `ka-signature`, `ka-trust`, `ka-levels`, `ka-status`, `proof-signature`, `proof-claims`, `proof-nonce`, `proof-key-attested`, `dpop-proof`, `dpop-binding`, `pkce`, …) are named per point, as the RP side's credential, status and request checks are. The checks for status lists and trust lists are the existing ones.
 2. **Definitions**: every step of every executable issuer definition, built as the controller builds it, passes every check when the step expects `ISS` and fails exactly one check when it expects `REJ`.
-3. **Reference run**: every executable test case passes against EUDIPLO (pinned release, §5.5) in every variant it runs in, or is marked not validated with an analysed reason (a known finding or a missing feature). This runs in its own CI job, since it needs Docker.
+3. **Reference run**: every executable test case passes against EUDIPLO (pinned image, §5.5) in every variant it runs in, or is marked not validated with an analysed reason (a known finding or a missing feature). This runs in its own CI job, since it needs Docker.
 
 The output side is validated without the SUT. Credentials and status lists that the forge builds valid (the PID and `default_credential_A`, both formats) must pass every `OBS-CRED` and `OBS-SL` check. For each `CONF` check, a forge-built credential or list with the matching fault must fail it. That reuses the RP harness's credential and Status List Token faults, which already exist for exactly these checks. Levels 1 and 2 and the output side run in `pnpm test`.
 
@@ -283,7 +283,7 @@ The output side is validated without the SUT. Credentials and status lists that 
 
 - The issuer run uses the same Compose file as the EUDIPLO RP run. One EUDIPLO instance serves both suites, in separate tenants.
 - The nightly job gets a second step after the RP run: `rp-conformance issuer run --adapter eudiplo --ics adapters/issuer-eudiplo/ics.yaml --known-findings adapters/issuer-eudiplo/known-findings.yaml`, with its own report, JUnit suite and artifact.
-- The fault and output self-validation of the issuer suite (§7, levels 1 and 2) is part of `pnpm test`. The reference run against the pinned EUDIPLO release is a CI job of its own on every pull request that touches the issuer suite, since it needs Docker.
+- The fault and output self-validation of the issuer suite (§7, levels 1 and 2) is part of `pnpm test`. The reference run against the pinned EUDIPLO image is a CI job of its own on every pull request that touches the issuer suite, since it needs Docker.
 
 ## 9. Gaps and risks
 
@@ -319,5 +319,5 @@ The catalogue stays the source of the objectives. The definitions are the source
 | # | Question | Decision | Applied in |
 | --- | --- | --- | --- |
 | 1 | Where the issuer test cases are rendered | A separate overlay, `fcaf-overlay-issuer/`, since the FCAF methodology does not reserve the issuer classes. The RP overlay stays as it is. | §4, §9, §10 |
-| 2 | What the executable test cases are proven against | EUDIPLO's issuer, through its adapter, at a pinned release. The harness builds no reference issuer of its own. Faults are still proven by the reference validator alone. | §0, §5.4, §5.5, §7, §8, §9, §10 |
+| 2 | What the executable test cases are proven against | EUDIPLO's issuer, through its adapter, at a pinned version. The harness builds no reference issuer of its own. Faults are still proven by the reference validator alone. Since 2026-11-20 the pinned version is a digest of the main image, not a release, until a release has the features the catalogue tests that 9.1.0 lacks (§5.5). | §0, §5.4, §5.5, §7, §8, §9, §10 |
 | 3 | OIDF OpenID4VCI issuer suite | Optional, as on the RP side: the harness implements every objective itself, and a bridge to the OIDF suite may come later, outside the phases. | §1 (no dependency) |

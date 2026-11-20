@@ -8,4 +8,5 @@ export * from './trust';
 export * from './x509-path';
 export * from './request';
 export * from './issued';
+export * from './issuer-request';
 export * from './issuer-grant';

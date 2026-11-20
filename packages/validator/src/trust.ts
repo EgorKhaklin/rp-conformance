@@ -19,6 +19,8 @@ export interface TrustedService {
   type: string;
   /** The service status, where the list carries one (ETSI TS 119 612; Pub-EAA Providers lists of TS 119 602). */
   status?: string;
+  /** The first ServiceName of a LoTE service: in `TL-WP` the Wallet Solution's `wallet_name` or the WSCD type (TS3 section 3.2). */
+  name?: string;
   anchors: Certificate[];
 }
 
@@ -188,6 +190,7 @@ export async function checkLote(jws: string, source: ListSource, options: ListCh
         services: entity.TrustedEntityServices.map((svc: any) => ({
           type: svc.ServiceInformation.ServiceTypeIdentifier,
           ...(svc.ServiceInformation.ServiceStatus ? { status: svc.ServiceInformation.ServiceStatus } : {}),
+          ...(svc.ServiceInformation.ServiceName?.[0]?.value ? { name: svc.ServiceInformation.ServiceName[0].value } : {}),
           anchors: (svc.ServiceInformation.ServiceDigitalIdentity?.X509Certificates ?? []).map((c: { val: string }) => parseCertificate(c.val)),
         })),
       })),
