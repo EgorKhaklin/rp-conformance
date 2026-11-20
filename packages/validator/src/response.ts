@@ -15,6 +15,8 @@ export interface ResponseValidationOptions {
   /** `state` of the request, if any. */
   state?: string;
   mode?: ValidationMode;
+  /** The maximum size of the `response` parameter the Relying Party accepts (ICS RP.P.11), bytes; default unlimited. */
+  maxResponseBytes?: number;
 }
 
 export interface ResponseValidation extends ValidationResult {
@@ -54,8 +56,12 @@ export async function validateAuthorizationResponse(form: Record<string, unknown
     });
     await recorder.run('response-format', ['response-encrypted'], () => {
       if (typeof form.response !== 'string') fail(`response is a ${typeof form.response}, not a compact JWE`);
+      if (options.maxResponseBytes && (form.response as string).length > options.maxResponseBytes) {
+        fail(`the response has ${(form.response as string).length} bytes, more than the maximum of ${options.maxResponseBytes}`);
+      }
       const parts = (form.response as string).split('.');
       if (parts.length !== 5) fail(`not a compact JWE (${parts.length} parts)`);
+      if (parts.some((part) => !/^[A-Za-z0-9_-]*$/.test(part))) fail('a segment of the JWE is not base64url');
       try {
         header = base64url.decodeJson(parts[0] ?? '');
       } catch {

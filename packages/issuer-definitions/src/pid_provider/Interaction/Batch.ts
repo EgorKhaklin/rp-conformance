@@ -110,7 +110,10 @@ const batch006 = (format: FormatVariant) =>
       {
         text: `${BATCH_SCN.replace('`SCN-I`', '`SCN-I` in the authorization code flow')} The adapter authenticates \`SUBJ-1\` once.`,
         run: issuance(format, 'AC', { batchSize: ICS_BATCH_SIZE }),
-        expect: both(iss(format), conf(['batch-size'], 'One authorization gives the whole batch: the Provider issues `batch_size` credentials for the single authentication.')),
+        expect: both(
+          iss(format),
+          conf(['batch-size', 'single-authentication'], 'One authorization gives the whole batch: the adapter authenticates `SUBJ-1` once, and the Provider issues `batch_size` credentials for it.'),
+        ),
       },
     ],
     comments: ['Runs only in the authorization code flow (`AC`), where the User authenticates.'],

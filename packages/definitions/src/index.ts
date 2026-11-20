@@ -13,10 +13,16 @@ import { definitions as sessionBinding } from './wallet_solution/SecurityMechani
 import { definitions as sessionEncryption } from './wallet_solution/SecurityMechanisms/SessionEncryption';
 import { definitions as trustMechanisms } from './wallet_solution/SecurityMechanisms/TrustMechanisms';
 import { definitions as validity } from './wallet_solution/SecurityMechanisms/Validity';
+import { definitions as encoding } from './wallet_solution/Shared/Encoding';
+import { definitions as supportive } from './pid_provider/Interaction/Supportive';
+import { definitions as revocationPolicy } from './pid_provider/SecurityMechanisms/RevocationPolicy';
+import { definitions as revocationMechanisms } from './wallet_solution/SecurityMechanisms/RevocationMechanisms';
+import { definitions as validityPolicy } from './wallet_solution/SecurityMechanisms/ValidityPolicy';
 import { definitions as engagement } from './wallet_solution/Interaction/Engagement';
 import { definitions as protocolFlow } from './wallet_solution/Interaction/ProtocolFlow';
 import { definitions as identifyingData } from './wallet_solution/DataModel/IdentifyingData';
 import { definitions as credentialMetadata } from './wallet_solution/DataModel/CredentialMetadata';
+import { definitions as ucPresentation } from './wallet_solution/UseCases/Presentation';
 
 /** The 121 baseline test definitions, in the order of the baseline lists. */
 export const baselineDefinitions: TestCaseDefinition[] = [
@@ -43,11 +49,17 @@ export const definitions: TestCaseDefinition[] = [
   ...metadata,
   ...credentialFormats,
   ...rpIntegrity,
+  ...encoding,
+  ...supportive,
+  ...revocationPolicy,
+  ...revocationMechanisms,
+  ...validityPolicy,
   ...engagement,
   ...protocolFlow,
   ...furtherMainInteraction,
   ...identifyingData,
   ...credentialMetadata,
+  ...ucPresentation,
 ];
 
 /** The definitions the harness can execute. */

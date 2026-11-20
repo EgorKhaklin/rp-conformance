@@ -9,6 +9,9 @@ import { join, relative } from 'node:path';
 import {
   type CheckResult,
   controlsOf,
+  durationMs,
+  grantFaultInfo,
+  PID_TEST_SUBJECTS,
   type IssuanceAction,
   type IssuerAdapter,
   type IssuerIcs,
@@ -16,19 +19,44 @@ import {
   type IssuerTestCaseDefinition,
   isCredentialRequestFault,
   isExecutable,
+  isGrantFault,
+  type TokenReuseAction,
   type Verdict,
   variantOf,
 } from '@rp-conformance/core';
-import { type HttpExchange, IssuanceClient, type IssuanceEvidence, oauthErrorOf, walletUnitOf } from '@rp-conformance/issuer-wallet';
-import { validateIssuedSdJwtVc } from '@rp-conformance/validator';
+import { type HttpExchange, IssuanceClient, type IssuanceEvidence, type IssueOptions, credentialIdentifierOf, oauthErrorOf, walletUnitOf } from '@rp-conformance/issuer-wallet';
+import { checkAuthorizationResponse, comparePidFormats, type IssuedOutputOptions, validateIssuedMdoc, validateIssuedSdJwtVc } from '@rp-conformance/validator';
 import { worst } from '../evaluate';
+import {
+  type AttestationState,
+  applyWalletEvent,
+  isIssuerRequestFault,
+  maintenancePeriodCheck,
+  newAttestationState,
+  prepareIssuance,
+  rememberIssuance,
+  sentAttestations,
+} from './attestations';
 import { isOfferCapture, issueWithFault, runMetadata, runOfferCapture } from './artifacts';
 import { harnessInfo } from '../info';
 import { evaluateIssuance, type IssuanceObservation } from './evaluate';
 import { type IssuerHarness, PID_TRUST_RULE, startIssuerHarness } from './harness';
-import { issuerApplicability, resolveConfigurations, usesTxCode } from './ics';
+import { issuerApplicability, issuerIcsValue, resolveConfigurations, usesTxCode } from './ics';
 import { describeIssuerFinding, type IssuerKnownFinding, issuerKnownFindingOf } from './known-findings';
 import { writeIssuerJUnit, writeIssuerSummary } from './report';
+// Lifecycle steps (issue 22): issuer-event, observe-status, present.
+import {
+  evaluateObservation,
+  evaluatePresentation,
+  type LifecycleState,
+  newLifecycleState,
+  observeStatus,
+  type PresentationObservation,
+  present,
+  runIssuerEvent,
+  type StatusObservation,
+  waits,
+} from './status';
 import { handlesSessionStep, noteSessionStep, runSessionStep, sessionApplicability } from './session';
 
 /** The validator's clock tolerance on the issuer side: the catalogue's cap of `T_skew` (section 3.5). */
@@ -49,8 +77,10 @@ export interface IssuedCredentialRecord {
   valid: boolean;
   /** The trusted entity the issuer matched, for example `PP-T`. */
   issuer?: string;
-  /** Issuer-signed claims with the disclosed values. */
+  /** Issuer-signed claims with the disclosed values; for an mdoc the elements by namespace. */
   claims?: Record<string, unknown>;
+  /** For an mdoc: the PID attributes of namespace `eu.europa.ec.eudi.pid.1`, for `pid-formats`. */
+  pidClaims?: Record<string, unknown>;
   checks: CheckResult[];
 }
 
@@ -73,12 +103,20 @@ export interface IssuerStepRecord {
   /** Whether the Provider issued an access token, and its type. */
   token?: { tokenType: string };
   credentials: IssuedCredentialRecord[];
+  /** Checks over all credentials of the step, for example `pid-formats` (both formats of one issuance). */
+  stepChecks?: CheckResult[];
   /** The named checks over the captured metadata or offer (`CONF`). */
   checks?: CheckResult[];
   /** The reference validator's credential request checks over the faulty request (point `credential-request`). */
   requestChecks?: CheckResult[];
   /** Why the flow stopped before a credential arrived. */
   error?: string;
+  /** `issuer-event`: what the adapter reported done (`OBS-ADM`). */
+  event?: { sessionId: string; at: string; status: string };
+  /** `observe-status`: every poll of the published lists and the publication checks (`OBS-SL`). */
+  statusObservation?: StatusObservation;
+  /** `present`: the reference Relying Party's result. */
+  presentation?: Omit<PresentationObservation, 'result'>;
   artifacts: string[];
   verdict: Verdict;
   reason: string;
@@ -136,6 +174,11 @@ export interface IssuerRunOptions {
   harnessHost: string;
   knownFindings?: IssuerKnownFinding[];
   log?: (line: string) => void;
+  /**
+   * The longest a step may wait for an artifact to expire (a lifetime plus one hour, catalogue section 3.5), seconds;
+   * default 0. A step that would wait longer is NOT APPLICABLE in the run, and the test cases with such steps run last.
+   */
+  maxWaitSeconds?: number;
 }
 
 const matches = (id: string, pattern: string) =>
@@ -166,6 +209,8 @@ export async function runIssuerConformance(options: IssuerRunOptions): Promise<{
   const runId = `i${new Date().toISOString().replace(/[-:]/g, '').slice(0, 15)}-${randomBytes(3).toString('hex')}`;
   const runDir = join(options.reportDir, runId);
   const namespace = runId;
+  // Issue 20: a grant fault that waits past a lifetime (`--max-wait`) puts its test case with the waiting ones.
+  const grantWaits = (d: IssuerTestCaseDefinition) => d.steps.some((step) => step.run?.kind === 'issuance' && step.run.faults.some((f) => isGrantFault(f) && grantFaultInfo(f).waitsFor));
   const selected = selectIssuerTestCases(options.definitions, options.only);
   const harness = await startIssuerHarness({ runId, namespace, harnessHost: options.harnessHost, ics: options.ics });
   const report: IssuerRunReport = {
@@ -213,7 +258,7 @@ export async function runIssuerConformance(options: IssuerRunOptions): Promise<{
     }
     report.run.provider = await options.adapter.describe?.().catch(() => undefined);
     log(`adapter ${options.adapter.name} set up${report.run.provider ? ` (${Object.entries(report.run.provider).map(([k, v]) => `${k} ${v}`).join(', ')})` : ''}`);
-    for (const definition of selected) {
+    const execute = async (definition: IssuerTestCaseDefinition) => {
       const started = Date.now();
       const record = await runIssuerTestCase(definition, { ...options, harness, runDir, report });
       record.durationMs = Date.now() - started;
@@ -222,7 +267,12 @@ export async function runIssuerConformance(options: IssuerRunOptions): Promise<{
       report.results.push(record);
       log(`${record.verdict.padEnd(14)} ${record.testCase} [${record.variant}]${record.knownFinding ? ' (known finding)' : ''}${record.reason ? ` ${record.reason}` : ''}`);
       for (const step of record.steps) log(`    step ${step.step} ${step.verdict}: ${step.reason}`);
-    }
+    };
+    // Test cases whose steps wait (`REVOKED(t)`, polling across `exp`) run after the others and in parallel (design
+    // section 6.3); a test case gated on a control still runs after it.
+    const waiting = selected.filter((d) => (waits(d.steps) || grantWaits(d)) && !d.control);
+    for (const definition of selected.filter((d) => !waiting.includes(d))) await execute(definition);
+    await Promise.all(waiting.map(execute));
   } finally {
     await options.adapter.tearDown?.().catch(() => {});
     await harness.stop();
@@ -248,11 +298,28 @@ interface Context extends IssuerRunOptions {
   report: IssuerRunReport;
 }
 
-/** State shared by the steps of one test case: one issuance client (one DPoP key) per Wallet Unit (design section 5.1). */
-interface TestCaseState {
+/**
+ * State shared by the steps of one test case: one issuance client (one DPoP key) per Wallet Unit (design section 5.1),
+ * and what the lifecycle steps read of earlier steps.
+ */
+interface TestCaseState extends LifecycleState {
   clients: Map<string, IssuanceClient>;
+  /** Moved status references and replay values of the Wallet Units (issue 19). */
+  attestations: AttestationState;
   /** Offers by value captured in the test case (`PP_WS_MS_Offer_002`). */
   offersByValue: Record<string, unknown>[];
+  /** The evidence of each issuance step (1-based), for `token-reuse` (issue 20). */
+  evidence: Map<number, IssuanceEvidence>;
+}
+
+/** The plain client of a Wallet Unit (one DPoP key per unit), as `token-reuse` sends with it. */
+async function clientOf(unit: string, ctx: Context, state: TestCaseState): Promise<IssuanceClient> {
+  let client = state.clients.get(unit);
+  if (!client) {
+    client = await IssuanceClient.create(walletUnitOf(ctx.harness.twp, unit as Parameters<typeof walletUnitOf>[1]), { allowInsecureUrls: true });
+    state.clients.set(unit, client);
+  }
+  return client;
 }
 
 async function runIssuerTestCase(definition: IssuerTestCaseDefinition, ctx: Context): Promise<IssuerTestCaseRecord> {
@@ -267,10 +334,13 @@ async function runIssuerTestCase(definition: IssuerTestCaseDefinition, ctx: Cont
   const unmet = [...issuerApplicability(definition, ctx.ics), ...sessionApplicability(definition, ctx.ics)];
   if (unmet.length) return end('NOT APPLICABLE', `profile not met: ${unmet.join('; ')}`);
   if (control && control.verdict !== 'PASS') return end('INCONCLUSIVE', `positive control ${outcomes.map((o) => o.id).join(' or ')} did not pass in ${variant}`);
-  const state: TestCaseState = { clients: new Map(), offersByValue: [] };
+  const state: TestCaseState = { clients: new Map(), attestations: newAttestationState(), offersByValue: [], evidence: new Map(), ...newLifecycleState() };
   const steps: IssuerStepRecord[] = [];
   for (const [index, step] of definition.steps.entries()) steps.push(noteSessionStep(state, await runIssuerStep(definition, variant, index + 1, step, ctx, state)));
-  return { ...base, verdict: worst(steps.map((s) => s.verdict)), control, steps };
+  // A step that does not apply to the Provider (NOT APPLICABLE) does not count, unless no step applies.
+  const applicable = steps.filter((s) => s.verdict !== 'NOT APPLICABLE');
+  const skipped = steps.filter((s) => s.verdict === 'NOT APPLICABLE').map((s) => `step ${s.step} not applicable: ${s.reason}`);
+  return { ...base, verdict: applicable.length ? worst(applicable.map((s) => s.verdict)) : 'NOT APPLICABLE', ...(skipped.length && applicable.length ? { reason: skipped.join('; ') } : {}), control, steps };
 }
 
 async function runIssuerStep(
@@ -306,7 +376,22 @@ async function runIssuerStep(
     if (handlesSessionStep(definition, step)) await runSessionStep(step, index, record, save, ctx, state);
     else if (step.run?.kind === 'metadata') await runMetadata(step.expect, record, save, ctx);
     else if (step.run?.kind === 'issuance') await runIssuance(step, step.run, record, save, ctx, state);
-    else record.reason = step.run ? `the step action ${step.run.kind} is not implemented yet` : 'the step is text only';
+    else if (step.run?.kind === 'token-reuse') await runTokenReuse(step, step.run, record, save, ctx, state);
+    else if (step.run?.kind === 'wallet-event' && step.expect.codes.every((code) => code === 'INFO')) {
+      record.walletUnit = step.run.walletUnit ?? 'CW-1';
+      const served = await applyWalletEvent(step.run, {
+        twp: ctx.harness.twp,
+        statusProvider: ctx.harness.status,
+        namespace: ctx.harness.namespace,
+        state: state.attestations,
+        skewSeconds: ISSUER_SKEW_SECONDS,
+      });
+      record.verdict = 'PASS';
+      record.reason = `recorded: ${served}`;
+    }
+    else if (step.run?.kind === 'issuer-event' || step.run?.kind === 'observe-status' || step.run?.kind === 'present') {
+      await runLifecycleStep(step, step.run, record, save, ctx, state);
+    } else record.reason = step.run ? `the step action ${step.run.kind} is not implemented yet` : 'the step is text only';
   } catch (error) {
     record.verdict = 'INCONCLUSIVE';
     record.reason = `the harness could not execute the step: ${(error as Error).message}`;
@@ -315,11 +400,11 @@ async function runIssuerStep(
 }
 
 /** What the issuance client and the issuance action support so far; anything else leaves the step INCONCLUSIVE. */
-function unsupported(action: IssuanceAction): string | undefined {
-  if (action.grant !== 'pre-authorized_code') return 'the issuance client implements the pre-authorized code flow only';
-  const notImplemented = action.faults.filter((fault) => !isCredentialRequestFault(fault));
+function unsupported(action: IssuanceAction, adapter: IssuerRunOptions['adapter']): string | undefined {
+  if (action.grant === 'authorization_code' && !adapter.authenticateSubject) return 'the adapter cannot authenticate the subject (no authenticateSubject)';
+  const notImplemented = action.faults.filter((fault) => !isCredentialRequestFault(fault) && !isIssuerRequestFault(fault) && !isGrantFault(fault));
   if (notImplemented.length) return `issuer faults are not implemented yet (${notImplemented.join(', ')})`;
-  const options: string[] = (['stopAfterToken', 'deferred', 'encryption', 'credentialIdentifier'] as const).filter((option) => action[option]);
+  const options: string[] = (['stopAfterToken', 'deferred', 'encryption'] as const).filter((option) => action[option]);
   if ((action.batchSize ?? 1) > 1) options.push('batchSize');
   return options.length ? `the issuance option(s) ${options.join(', ')} are not implemented yet` : undefined;
 }
@@ -333,8 +418,13 @@ async function runIssuance(
   ctx: Context,
   state: TestCaseState,
 ): Promise<void> {
+  if (action.portraitOptOut && issuerIcsValue(ctx.ics, 'ICS-17.portrait_opt_out') !== 'Yes') {
+    record.verdict = 'NOT APPLICABLE';
+    record.reason = 'the ICS declares no portrait opt-out (ICS-17.portrait_opt_out)';
+    return;
+  }
   if (isOfferCapture(step.expect)) return runOfferCapture(step.expect, action, record, save, ctx, state);
-  const missing = unsupported(action);
+  const missing = unsupported(action, ctx.adapter);
   if (missing) {
     record.reason = missing;
     return;
@@ -345,48 +435,287 @@ async function runIssuance(
   record.subject = subject;
   const configurations = resolveConfigurations(action.configurations, ctx.ics);
   const txCode = usesTxCode(ctx.ics);
+  const grantFault = action.faults.find(isGrantFault);
+  if (grantFault && grantFaultInfo(grantFault).target === 'tx-code' && !txCode) {
+    record.verdict = 'NOT APPLICABLE';
+    record.reason = 'the Provider declares offers without tx_code only (ICS-03.tx_code)';
+    return;
+  }
   const byReference = action.offerByReference ?? false;
-  const offer = await ctx.adapter.createOffer({ subject, configurations, grant: action.grant, byReference, txCode });
+  const offer = await ctx.adapter.createOffer({ subject, configurations, grant: action.grant, byReference, txCode, ...(action.portraitOptOut ? { portraitOptOut: true } : {}) });
   record.offer = { sessionId: offer.sessionId, offer: offer.offer, byReference, txCode: offer.txCode !== undefined, configurations };
 
-  let client = state.clients.get(unit);
+  // A plain issuance reuses the unit's client (one DPoP key per Wallet Unit); a step with a fault, a moved status
+  // reference or another proof type gets a client with its own binding and hooks (issue 19).
+  const plain = !action.faults.some(isIssuerRequestFault) && !action.proofType && !action.keyAttestationNonce && !state.attestations.status.has(unit);
+  const prepared = plain ? undefined : await prepareIssuance(action, ctx.harness.twp, state.attestations);
+  let client = plain ? state.clients.get(unit) : undefined;
   if (!client) {
-    client = await IssuanceClient.create(walletUnitOf(ctx.harness.twp, unit), { allowInsecureUrls: true });
-    state.clients.set(unit, client);
+    client = await IssuanceClient.create(prepared?.unit ?? walletUnitOf(ctx.harness.twp, unit), {
+      allowInsecureUrls: true,
+      ...(prepared ? { hooks: prepared.hooks } : {}),
+    });
+    if (plain) state.clients.set(unit, client);
   }
   const requestFault = action.faults.find(isCredentialRequestFault);
   let evidence: IssuanceEvidence;
   if (requestFault) {
-    const faulty = await issueWithFault(requestFault, offer, configurations[0] as string, unit, ctx);
+    const grant = await grantOptions(action, subject, txCode, ctx);
+    // `identifier-foreign` (issue 20 makes it executable, AC only): a `credential_identifier` of another session's token.
+    const foreignIdentifier = requestFault === 'credential-request.identifier-foreign' ? await foreignCredentialIdentifier(action, subject, configurations, txCode, ctx, state) : undefined;
+    const faulty = await issueWithFault(requestFault, offer, configurations[0] as string, unit, ctx, {
+      ...(grant.grant ? { grant: grant.grant } : {}),
+      ...(grant.authenticate ? { authenticate: grant.authenticate } : {}),
+      ...(foreignIdentifier !== undefined ? { foreignIdentifier } : {}),
+    });
     evidence = faulty.evidence;
     if (faulty.requestChecks) record.requestChecks = faulty.requestChecks;
     if (faulty.notApplicable) {
       record.exchanges = evidence.exchanges;
+      // The fault cannot be built against this Provider (nothing faulty was sent): NOT APPLICABLE, with the reason.
+      record.verdict = 'NOT APPLICABLE';
       record.reason = `the fault ${requestFault} cannot be applied: ${faulty.notApplicable}`;
       return;
     }
   } else {
-    evidence = await client.issue({ offer: offer.offer, ...(offer.txCode !== undefined ? { txCode: offer.txCode } : {}), credentialConfigurationId: configurations[0] });
+    evidence = await client.issue({ offer: offer.offer, ...(offer.txCode !== undefined ? { txCode: offer.txCode } : {}), credentialConfigurationIds: configurations, ...(action.credentialIdentifier ? { credentialIdentifier: true } : {}), ...(await grantOptions(action, subject, txCode, ctx)) });
   }
+  // `REJ:invalid_nonce, then ISS`: the same request again, without the fault, with a fresh `c_nonce`.
+  const firstAttempt = { exchanges: evidence.exchanges.length, credentials: evidence.credentials.length };
+  if (action.retryWithFreshNonce && prepared && evidence.error && evidence.token && evidence.metadata) {
+    prepared.withoutFault();
+    try {
+      const cNonce = await client.requestNonce(evidence.metadata.result, evidence);
+      await client.requestCredential(evidence.metadata.result, evidence.token, configurations[0], cNonce, evidence);
+      delete evidence.error;
+    } catch (error) {
+      evidence.error = `retry with a fresh c_nonce: ${(error as Error).message}`;
+    }
+  }
+  state.evidence.set(record.step, evidence);
+  rememberIssuance(state.attestations, unit, evidence);
+  state.issued.set(record.step, { sessionId: offer.sessionId, credentials: evidence.credentials });
   record.exchanges = evidence.exchanges;
+  if (evidence.waitExceeded) {
+    record.verdict = 'NOT APPLICABLE';
+    record.reason = `${evidence.error}; run with a larger --max-wait to execute it`;
+    await save('issuance.json', `${JSON.stringify({ offer: record.offer, grant: evidence.grant, exchanges: evidence.exchanges }, null, 2)}\n`);
+    return;
+  }
   if (evidence.token) record.token = { tokenType: evidence.token.tokenType };
   if (evidence.error) record.error = evidence.error;
-  record.credentials = await validateCredentials(evidence, ctx);
+  const output = outputOptions(step, action, subject, ctx);
+  record.credentials = await validateCredentials(evidence, ctx, output);
+  if (output.checks.includes('pid-formats')) {
+    const sdJwt = record.credentials.find((c) => c.format === 'dc+sd-jwt');
+    const mdoc = record.credentials.find((c) => c.format === 'mso_mdoc');
+    record.stepChecks = [comparePidFormats(sdJwt?.claims, mdoc?.pidClaims)];
+  }
+  if (step.expect.checks?.includes('maintenance-period')) {
+    const sent = sentAttestations(evidence.exchanges);
+    for (const credential of record.credentials) credential.checks.push(maintenancePeriodCheck(credential.credential, sent));
+  }
   for (const [i, credential] of record.credentials.entries()) await save(`credential-${i + 1}.txt`, credential.credential);
-  await save('issuance.json', `${JSON.stringify({ offer: record.offer, offerObject: evidence.offer, metadata: evidence.metadata, exchanges: evidence.exchanges }, null, 2)}\n`);
+  await save('issuance.json', `${JSON.stringify({ offer: record.offer, offerObject: evidence.offer, metadata: evidence.metadata, grant: evidence.grant, exchanges: evidence.exchanges }, null, 2)}\n`);
 
-  const evaluation = evaluateIssuance(step.expect, observationOf(evidence, record.credentials));
+  // `proof.p521` applies only where the configuration does not advertise ES512 for `jwt` proofs (catalogue
+  // PP_WS_SM_ProofOfPossession_009_UF: "P-521 if not advertised").
+  const proofAlgorithms = (evidence.metadata?.result.credentialIssuer.credential_configurations_supported[configurations[0]] as
+    | { proof_types_supported?: { jwt?: { proof_signing_alg_values_supported?: string[] } } }
+    | undefined)?.proof_types_supported?.jwt?.proof_signing_alg_values_supported;
+  if (action.faults.includes('proof.p521') && proofAlgorithms?.includes('ES512')) {
+    record.verdict = 'NOT APPLICABLE';
+    record.reason = `the configuration advertises ES512 for jwt proofs (${proofAlgorithms.join(', ')}); ${record.credentials.length ? `issued ${record.credentials.length} credential(s)` : 'no credential issued'}`;
+    return;
+  }
+  const evaluation = action.retryWithFreshNonce
+    ? evaluateRetry(step, evidence, record.credentials, firstAttempt)
+    : evaluateIssuance(step.expect, { ...observationOf(evidence, record.credentials, record.stepChecks), ...conformanceOf(evidence) });
   record.verdict = evaluation.verdict;
   record.reason = evaluation.reason;
 }
 
+/**
+ * What the output checks the step's expectation names (`checks`) compare with: the subject's data, and the validity
+ * period the ICS declares for the step's configuration (`ICS-05.validity_period`, `ICS-05.short.validity_period` for a
+ * short-lived one) within the declared timestamp precision (`ICS-16.timestamp_precision`).
+ */
+function outputOptions(step: IssuerStepDefinition, action: IssuanceAction, subject: string, ctx: Context): IssuedOutputOptions {
+  const seconds = (key: string) => {
+    const ms = durationMs(issuerIcsValue(ctx.ics, key));
+    return ms === undefined ? undefined : ms / 1000;
+  };
+  const short = action.configurations.some((c) => c.startsWith('ICS-05.short.'));
+  const declared = seconds(short ? 'ICS-05.short.validity_period' : 'ICS-05.validity_period');
+  const precision = seconds('ICS-16.timestamp_precision');
+  return {
+    checks: (step.expect.checks ?? []) as IssuedOutputOptions['checks'],
+    subject: PID_TEST_SUBJECTS[subject as keyof typeof PID_TEST_SUBJECTS],
+    ...(declared !== undefined ? { declaredValiditySeconds: declared } : {}),
+    ...(precision !== undefined ? { precisionSeconds: precision } : {}),
+    fetchTypeMetadata: async (url) => {
+      const response = await ctx.harness.fetch(url);
+      return { status: response.status, body: new Uint8Array(await response.arrayBuffer()) };
+    },
+  };
+}
+
+/** The lifecycle steps (status.ts): `issuer-event`, `observe-status` and `present`, with their evidence. */
+async function runLifecycleStep(
+  step: IssuerStepDefinition,
+  action: Extract<IssuerStepDefinition['run'], { kind: 'issuer-event' | 'observe-status' | 'present' }>,
+  record: IssuerStepRecord,
+  save: (name: string, content: string) => Promise<void>,
+  ctx: Context,
+  state: TestCaseState,
+): Promise<void> {
+  const lifecycle = { harness: ctx.harness, ics: ctx.ics, harnessHost: ctx.harnessHost, ...(ctx.log ? { log: ctx.log } : {}) };
+  if (action.kind === 'issuer-event') {
+    const { event, ...evaluation } = await runIssuerEvent(action, record.step, state, { ...lifecycle, adapter: ctx.adapter });
+    if (event) record.event = event;
+    Object.assign(record, evaluation);
+    return;
+  }
+  if (action.kind === 'observe-status') {
+    const observation = await observeStatus(action, record.step, state, lifecycle);
+    record.statusObservation = observation;
+    await save('status-observation.json', `${JSON.stringify(observation, null, 2)}\n`);
+    Object.assign(record, evaluateObservation(step.expect, observation, ctx.ics));
+    return;
+  }
+  const { result, ...presentation } = await present(action, state, lifecycle);
+  record.presentation = presentation;
+  await save('presentation.json', `${JSON.stringify({ ...presentation, result }, null, 2)}\n`);
+  Object.assign(record, evaluatePresentation(step.expect, { ...presentation, ...(result ? { result } : {}) }));
+}
+
+/**
+ * A step with `retryWithFreshNonce`: its first code (`REJ:invalid_nonce`) is judged on the faulty attempt, the others
+ * (`ISS`) on the retry; the step's verdict is the worse of both.
+ */
+function evaluateRetry(step: IssuerStepDefinition, evidence: IssuanceEvidence, credentials: IssuedCredentialRecord[], first: { exchanges: number; credentials: number }) {
+  const [rejected, ...retried] = step.expect.codes;
+  const attempt = observationOf({ exchanges: evidence.exchanges.slice(0, first.exchanges), ...(evidence.error && evidence.exchanges.length === first.exchanges ? { error: evidence.error } : {}) }, credentials.slice(0, first.credentials));
+  const one = evaluateIssuance({ ...step.expect, codes: [rejected] }, attempt);
+  if (evidence.exchanges.length === first.exchanges) {
+    return { verdict: worst([one.verdict, 'FAIL']), reason: `${one.reason}; no retry was sent${evidence.error ? ` (${evidence.error})` : ''}` };
+  }
+  const retry = { exchanges: evidence.exchanges.slice(first.exchanges), ...(evidence.error ? { error: evidence.error } : {}) };
+  const two = evaluateIssuance({ ...step.expect, codes: retried }, observationOf(retry, credentials.slice(first.credentials)));
+  return { verdict: worst([one.verdict, two.verdict]), reason: `first request: ${one.reason}; retry with a fresh c_nonce: ${two.reason}` };
+}
+
+/**
+ * The issuance options of the grant (issue 20): the adapter's `authenticateSubject` for the authorization code flow,
+ * the grant fault, the second offer `token-request.pre-authorized-code-other-offer` needs (for `ICS-02.second`), the
+ * declared lifetime of a pre-authorized code, and the run's wait limit.
+ */
+async function grantOptions(action: IssuanceAction, subject: IssuanceAction['subject'] & string, txCode: boolean, ctx: Context): Promise<Partial<IssueOptions>> {
+  const fault = action.faults.find(isGrantFault);
+  const lifetime = durationMs(issuerIcsValue(ctx.ics, 'ICS-14.pre_authorized_code'));
+  const options: Partial<IssueOptions> = {
+    grant: action.grant,
+    ...(action.stopAfterAuthorization ? { stopAfterAuthorization: true } : {}),
+    ...(fault ? { grantFault: fault } : {}),
+    ...(lifetime !== undefined ? { preAuthorizedCodeLifetimeSeconds: lifetime / 1000 } : {}),
+    maxWaitSeconds: ctx.maxWaitSeconds ?? 0,
+  };
+  const authenticate = ctx.adapter.authenticateSubject?.bind(ctx.adapter);
+  if (action.grant === 'authorization_code' && authenticate) options.authenticate = (url) => authenticate(url, subject);
+  if (fault && grantFaultInfo(fault).otherOffer) {
+    const [second] = resolveConfigurations(['ICS-02.second'], ctx.ics);
+    const other = await ctx.adapter.createOffer({ subject, configurations: [second], grant: 'pre-authorized_code', byReference: false, txCode });
+    options.otherOffer = { offer: other.offer, ...(other.txCode !== undefined ? { txCode: other.txCode } : {}) };
+  }
+  return options;
+}
+
+/**
+ * A `credential_identifier` another session's token response issued for the step's configuration: a valid issuance of a
+ * second offer for the same subject and grant with `CW-2`, whose token response is read (`identifier-foreign`).
+ */
+async function foreignCredentialIdentifier(action: IssuanceAction, subject: IssuanceAction['subject'] & string, configurations: string[], txCode: boolean, ctx: Context, state: TestCaseState): Promise<string | undefined> {
+  const other = await ctx.adapter.createOffer({ subject, configurations, grant: action.grant, byReference: false, txCode });
+  const client = await clientOf('CW-2', ctx, state);
+  const evidence = await client.issue({
+    offer: other.offer,
+    ...(other.txCode !== undefined ? { txCode: other.txCode } : {}),
+    credentialConfigurationIds: configurations,
+    ...(await grantOptions({ ...action, faults: [] }, subject, txCode, ctx)),
+  });
+  if (!evidence.token) return undefined;
+  try {
+    return credentialIdentifierOf(evidence.token, configurations[0] as string);
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * `token-reuse` (issuer harness design section 6.1): sends the request of an earlier issuance step again with one of its
+ * artifacts, as the Wallet Unit the action names (default that of the step): its pre-authorized or authorization code
+ * at the token endpoint, or its PAR `request_uri` at the authorization endpoint through the adapter.
+ */
+async function runTokenReuse(
+  step: IssuerStepDefinition,
+  action: TokenReuseAction,
+  record: IssuerStepRecord,
+  save: (name: string, content: string) => Promise<void>,
+  ctx: Context,
+  state: TestCaseState,
+): Promise<void> {
+  const earlier = state.evidence.get(action.ofStep);
+  if (!earlier?.grant || !earlier.metadata) {
+    record.reason = `step ${action.ofStep} obtained no ${action.artifact} to reuse${earlier?.error ? ` (${earlier.error})` : ''}`;
+    return;
+  }
+  const unit = action.walletUnit ?? earlier.walletUnit;
+  record.walletUnit = unit;
+  const client = await clientOf(unit, ctx, state);
+  let evidence: IssuanceEvidence;
+  if (action.artifact === 'par-request-uri') {
+    const authenticate = ctx.adapter.authenticateSubject?.bind(ctx.adapter);
+    if (!authenticate) {
+      record.reason = 'the adapter cannot authenticate the subject (no authenticateSubject)';
+      return;
+    }
+    evidence = await client.reuseRequestUri(earlier.metadata, earlier.grant, (url) => authenticate(url, 'SUBJ-1'));
+  } else if (action.artifact === 'authorization-code' || action.artifact === 'pre-authorized-code') {
+    const expected = action.artifact === 'authorization-code' ? 'authorization_code' : 'pre-authorized_code';
+    if (earlier.grant.grant !== expected) {
+      record.reason = `step ${action.ofStep} ran the ${earlier.grant.grant} grant, not ${expected}`;
+      return;
+    }
+    evidence = await client.redeemAgain(earlier.metadata, earlier.grant);
+  } else {
+    record.reason = `token-reuse of ${action.artifact} is not implemented yet`;
+    return;
+  }
+  record.exchanges = evidence.exchanges;
+  if (evidence.token) record.token = { tokenType: evidence.token.tokenType };
+  if (evidence.error) record.error = evidence.error;
+  await save('token-reuse.json', `${JSON.stringify({ artifact: action.artifact, ofStep: action.ofStep, walletUnit: unit, grant: evidence.grant, exchanges: evidence.exchanges }, null, 2)}\n`);
+  const evaluation = evaluateIssuance(step.expect, { ...observationOf(evidence, []), ...conformanceOf(evidence) });
+  record.verdict = evaluation.verdict;
+  record.reason = evaluation.reason;
+}
+
+/** The `CONF` checks of an issuance step: the authorization response, when the flow had one (`IA_AuthorizationCode_007`). */
+function conformanceOf(evidence: IssuanceEvidence): Pick<IssuanceObservation, 'conformance'> {
+  const authorization = evidence.grant?.authorization;
+  if (!authorization) return {};
+  return { conformance: checkAuthorizationResponse(authorization.response, { state: authorization.state, issuer: authorization.authorizationServer }) };
+}
+
 /** `OBS-CRED`: every credential the step received through the reference validator, with the suite's trust configuration. */
-async function validateCredentials(evidence: IssuanceEvidence, ctx: Context): Promise<IssuedCredentialRecord[]> {
+async function validateCredentials(evidence: IssuanceEvidence, ctx: Context, output?: IssuedOutputOptions): Promise<IssuedCredentialRecord[]> {
   const trust = ctx.harness.trustStore;
   if (!trust) throw new Error('the reference validator has no trust configuration (no enrolment)');
   const records: IssuedCredentialRecord[] = [];
   for (const issued of evidence.credentials) {
-    const configuration = evidence.metadata?.result.credentialIssuer.credential_configurations_supported[issued.credentialConfigurationId] as { vct?: string } | undefined;
+    const configuration = evidence.metadata?.result.credentialIssuer.credential_configurations_supported[issued.credentialConfigurationId] as
+      | { vct?: string; doctype?: string }
+      | undefined;
     const base = {
       configuration: issued.credentialConfigurationId,
       format: issued.format,
@@ -394,20 +723,44 @@ async function validateCredentials(evidence: IssuanceEvidence, ctx: Context): Pr
       proofKey: issued.proofKey.publicJwk,
       keyAttestation: issued.keyAttestation,
     };
-    if (issued.format !== 'dc+sd-jwt') {
-      records.push({ ...base, valid: false, checks: [{ check: 'format', status: 'fail', detail: `the reference validator checks dc+sd-jwt only, not ${issued.format}` }] });
-      continue;
-    }
-    const validation = await validateIssuedSdJwtVc(issued.credential, {
+    const common = {
       trust,
       trustRule: PID_TRUST_RULE,
       issuerEntity: ctx.harness.enrolment?.entity ?? 'PP-T',
-      expectedVct: configuration?.vct ? [configuration.vct] : [],
       proofKeys: [issued.proofKey.publicJwk],
       keyAttestations: [issued.keyAttestation],
       skewSeconds: ISSUER_SKEW_SECONDS,
       requireStatus: true,
       maxStatusListBytes: MAX_STATUS_LIST_BYTES,
+      ...(output ? { output } : {}),
+    };
+    if (issued.format === 'mso_mdoc') {
+      // The MSO references the Status List Token in CWT format (ISO/IEC 18013-5 second edition, Token Status List).
+      const validation = await validateIssuedMdoc(issued.credential, {
+        ...common,
+        expectedDocType: configuration?.doctype ?? '',
+        fetchStatusList: async (uri) => {
+          const response = await ctx.harness.fetch(uri, { headers: { accept: 'application/statuslist+cwt' } });
+          return { status: response.status, body: new Uint8Array(await response.arrayBuffer()), contentType: response.headers.get('content-type') };
+        },
+      });
+      records.push({
+        ...base,
+        valid: validation.valid,
+        ...(validation.issuer ? { issuer: validation.issuer } : {}),
+        ...(validation.claims ? { claims: validation.claims } : {}),
+        ...(validation.pidClaims ? { pidClaims: validation.pidClaims } : {}),
+        checks: validation.checks,
+      });
+      continue;
+    }
+    if (issued.format !== 'dc+sd-jwt') {
+      records.push({ ...base, valid: false, checks: [{ check: 'format', status: 'fail', detail: `the reference validator checks dc+sd-jwt and mso_mdoc only, not ${issued.format}` }] });
+      continue;
+    }
+    const validation = await validateIssuedSdJwtVc(issued.credential, {
+      ...common,
+      expectedVct: configuration?.vct ? [configuration.vct] : [],
       fetchStatusList: async (uri) => {
         const response = await ctx.harness.fetch(uri, { headers: { accept: 'application/statuslist+jwt' } });
         return { status: response.status, body: await response.text(), contentType: response.headers.get('content-type') };
@@ -425,10 +778,13 @@ async function validateCredentials(evidence: IssuanceEvidence, ctx: Context): Pr
 }
 
 /** What the evaluators need of the evidence: every exchange with its status and OAuth error, and the checks. */
-export function observationOf(evidence: Pick<IssuanceEvidence, 'exchanges' | 'token' | 'error'>, credentials: { checks: CheckResult[] }[]): IssuanceObservation {
+export function observationOf(evidence: Pick<IssuanceEvidence, 'exchanges' | 'token' | 'error'>, credentials: { checks: CheckResult[] }[], stepChecks?: CheckResult[]): IssuanceObservation {
   return {
     exchanges: evidence.exchanges.map((exchange) => {
-      const error = exchange.response && exchange.response.status >= 400 ? oauthErrorOf(exchange.response) : undefined;
+      // The authorization endpoint answers with a redirect to the wallet; an error travels in its query (RFC 6749 section 4.1.2.1).
+      const redirect = exchange.step === 'authorization' && exchange.response?.headers.location;
+      const redirectError = redirect ? (new URL(redirect).searchParams.get('error') ?? undefined) : undefined;
+      const error = redirectError ?? (exchange.response && exchange.response.status >= 400 ? oauthErrorOf(exchange.response) : undefined);
       return {
         step: exchange.step,
         ...(exchange.response ? { status: exchange.response.status } : {}),
@@ -438,6 +794,7 @@ export function observationOf(evidence: Pick<IssuanceEvidence, 'exchanges' | 'to
     }),
     tokenIssued: evidence.token !== undefined,
     credentials: credentials.map((c) => ({ checks: c.checks })),
+    ...(stepChecks?.length ? { stepChecks } : {}),
     ...(evidence.error ? { error: evidence.error } : {}),
   };
 }

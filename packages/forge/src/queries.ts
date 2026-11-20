@@ -44,6 +44,16 @@ export const PID_PLACE_OF_BIRTH_QUERY: DcqlQuery = {
   credentials: [{ ...PID_QUERY.credentials[0], claims: [...(PID_QUERY.credentials[0].claims ?? []), { path: ['place_of_birth'] }] }],
 };
 
+/**
+ * The variants of `default_query_pid` that also request the administrative expiry date of the PID: `date_of_expiry` in
+ * SD-JWT VC format, `expiry_date` in mdoc format (PID Rulebook; RP_WS_SM_Validity_020).
+ */
+export const PID_EXPIRY_DATE_QUERY: DcqlQuery = {
+  credentials: [{ ...PID_QUERY.credentials[0], claims: [...(PID_QUERY.credentials[0].claims ?? []), { path: ['date_of_expiry'] }] }],
+};
+export const PID_MDOC_EXPIRY_DATE_QUERY: DcqlQuery = {
+  credentials: [{ ...PID_MDOC_QUERY.credentials[0], claims: [...(PID_MDOC_QUERY.credentials[0].claims ?? []), { path: [PID_NAMESPACE, 'expiry_date'] }] }],
+};
 /** A variant of `default_query_pid` (SD-JWT VC) or of its mdoc form that requests the claims at `paths` instead. */
 const pidQueryWith = (base: DcqlQuery, paths: (string | number)[][], values?: (string | number | boolean)[]): DcqlQuery => ({
   credentials: [{ ...base.credentials[0], claims: paths.map((path) => ({ path, ...(values ? { values } : {}) })) }],
@@ -142,6 +152,50 @@ export function defaultQueries(pki: TestPki): Record<DefaultQueryId, DcqlQuery> 
     default_query_pubeaa_mdoc: attestationMdocQuery('pubeaa'),
     default_query_eaa: attestationQuery('eaa'),
     default_query_eaa_mdoc: attestationMdocQuery('eaa'),
+    default_query_pid_expiry_date: PID_EXPIRY_DATE_QUERY,
+    default_query_pid_mdoc_expiry_date: PID_MDOC_EXPIRY_DATE_QUERY,
+    default_query_pid_eaa: pidAndEaaQuery(PID_QUERY, attestationQuery('eaa')),
+    default_query_pid_eaa_mdoc: pidAndEaaQuery(PID_MDOC_QUERY, attestationMdocQuery('eaa')),
+    default_query_pid_or_eaa: pidOrEaaQuery(PID_QUERY, attestationQuery('eaa'), attestationQuery('pubeaa')),
+    default_query_pid_or_eaa_mdoc: pidOrEaaQuery(PID_MDOC_QUERY, attestationMdocQuery('eaa'), attestationMdocQuery('pubeaa')),
+    default_query_pid_eaa_identifying: pidAndEaaQuery(PID_QUERY, withIdentifyingClaims(attestationQuery('eaa'), ['family_name', 'given_name', 'birthdate'])),
+    default_query_pid_eaa_identifying_mdoc: pidAndEaaQuery(
+      PID_MDOC_QUERY,
+      withIdentifyingClaims(attestationMdocQuery('eaa'), ['family_name', 'given_name', 'birth_date'].map((name) => [CREDENTIAL_A_NAMESPACE, name])),
+    ),
     ...PID_DATA_MODEL_QUERIES,
+  };
+}
+
+/**
+ * `default_query_pid_eaa` (UC_Presentation): the credential queries of `default_query_pid` and `default_query_eaa` in
+ * one DCQL query, both required, without `credential_sets`.
+ */
+export function pidAndEaaQuery(pidQuery: DcqlQuery, eaaQuery: DcqlQuery): DcqlQuery {
+  return { credentials: [...pidQuery.credentials, ...eaaQuery.credentials] };
+}
+
+/**
+ * `default_query_pid_or_eaa` (UC_Presentation_006 to _008): the credential queries `pid`, `eaa` and `pubeaa`, with a
+ * required credential set whose options are the PID or the non-qualified EAA, and an optional credential set with the
+ * PuB-EAA (OpenID4VP 1.0 section 6.2).
+ */
+export function pidOrEaaQuery(pidQuery: DcqlQuery, eaaQuery: DcqlQuery, pubEaaQuery: DcqlQuery): DcqlQuery {
+  return {
+    credentials: [...pidQuery.credentials, ...eaaQuery.credentials, ...pubEaaQuery.credentials],
+    credential_sets: [{ options: [['pid'], ['eaa']] }, { options: [['pubeaa']], required: false }],
+  };
+}
+
+/**
+ * The query of `default_credential_A` that also requests identifying attributes (UC_Presentation_010, _011): names in
+ * SD-JWT VC format, `[namespace, element]` paths in mdoc format.
+ */
+function withIdentifyingClaims(query: DcqlQuery, claims: (string | string[])[]): DcqlQuery {
+  return {
+    credentials: query.credentials.map((credential) => ({
+      ...credential,
+      claims: [...(credential.claims ?? []), ...claims.map((claim) => ({ path: Array.isArray(claim) ? claim : [claim] }))],
+    })),
   };
 }

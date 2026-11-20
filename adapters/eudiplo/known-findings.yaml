@@ -56,6 +56,19 @@
   finding: >-
     EUDIPLO uses a list whose LoTEType is that of a Wallet Providers list as TL-PID and accepts a PID of the entity it
     adds (ETSI TS 119 602, LoTEType)
+
+# Found by the RP_WS_SH_Encoding, RP_PP_IA_Supportive and single-objective test cases (issue 32) against
+# ghcr.io/eudiplo/eudiplo:main (9.1.0-main.ae0792a, 2026-11-19); not yet reported upstream. `evidence` names the file
+# in the run's report directory that shows the finding.
+- testCase: RP_WS_SH_Encoding_004_UF
+  flows: [dc-api]
+  finding: >-
+    EUDIPLO answers an Authorization Response above its 10 MB body limit with HTTP 413 without the
+    Access-Control-Allow-Origin header its other answers carry, and leaves the session active: the Relying Party's page
+    sees only a network error, and the verification result never reports a failure
+  evidence: >-
+    artifacts/RP_WS_SH_Encoding_004_UF/dc-api/step-1/dc-api-run.json (network: the POST fails with net::ERR_FAILED;
+    console: blocked by CORS policy) and step-1/rp-result.json (session active), run r20261119T231252-dc8385
 # Upstream issue text: upstream-findings/certificate-path-constraints.md
 - testCase: RP_WS_SM_IssuerIntegrity_034b_UF
   finding: >-

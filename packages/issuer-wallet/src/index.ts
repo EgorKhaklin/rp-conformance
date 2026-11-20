@@ -7,3 +7,4 @@ export * from './jwe';
 export * from './session';
 export * from './session-faults';
 export * from './credential-request-faults';
+export * from './grant-faults';

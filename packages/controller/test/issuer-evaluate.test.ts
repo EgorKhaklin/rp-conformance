@@ -104,3 +104,72 @@ describe('observationOf', () => {
     expect(observation.tokenIssued).toBe(true);
   });
 });
+
+// Issue 20: the authorization endpoint, `CONF` on the authorization response.
+describe('authorization endpoint', () => {
+  const at = (status: number, error?: string): IssuanceObservation => ({
+    exchanges: [ok('metadata'), ok('par'), { step: 'authorization', status, ...(error ? { error } : {}) }],
+    tokenIssued: false,
+    credentials: [],
+  });
+
+  it('REJ passes for a redirect with error, or an error page without an error object', () => {
+    expect(evaluateRejected(at(302, 'invalid_request_uri'))).toMatchObject({ verdict: 'PASS', reason: expect.stringContaining('redirect with error invalid_request_uri') });
+    expect(evaluateRejected(at(409))).toMatchObject({ verdict: 'PASS', reason: expect.stringContaining('error page') });
+  });
+
+  it('REJ fails for a redirect with a code, and REJ:<code> needs the error object', () => {
+    expect(evaluateRejected(at(302)).verdict).toBe('FAIL');
+    expect(evaluateRejected(at(400), 'invalid_request').verdict).toBe('FAIL');
+  });
+
+  it('observationOf reads the error from the redirect to the wallet', () => {
+    const observation = observationOf(
+      {
+        exchanges: [
+          {
+            step: 'authorization',
+            attempt: 1,
+            at: '',
+            request: { method: 'GET', url: 'https://pp.example/authorize', headers: {} },
+            response: { status: 302, headers: { location: 'https://wallet.example/cb?error=access_denied&state=s' }, body: '' },
+          },
+        ],
+      },
+      [],
+    );
+    expect(observation.exchanges).toEqual([{ step: 'authorization', status: 302, error: 'access_denied' }]);
+  });
+
+  it('CONF passes when every named check passed, fails naming a failed one, and is INCONCLUSIVE when one was not captured', () => {
+    const conformance: CheckResult[] = [
+      { check: 'authorization-response-state', status: 'pass' },
+      { check: 'authorization-response-iss', status: 'fail', detail: 'no iss' },
+    ];
+    const expectation = (checks: string[]) => ({ codes: ['CONF' as const], text: '', checks });
+    const observation = { ...at(302), conformance };
+    expect(evaluateIssuance(expectation(['authorization-response-state']), observation).verdict).toBe('PASS');
+    expect(evaluateIssuance(expectation(['authorization-response-iss']), observation)).toMatchObject({ verdict: 'FAIL', reason: expect.stringContaining('no iss') });
+    expect(evaluateIssuance(expectation(['authorization-response-code']), observation).verdict).toBe('INCONCLUSIVE');
+  });
+});
+
+describe('CONF on an issuance step with output checks', () => {
+  const named = (status: CheckResult['status'], detail = 'detail'): CheckResult => ({ check: 'pid-attributes', status, detail });
+
+  it('passes when every check and the named check pass, and fails naming the named check', () => {
+    expect(evaluateIssuance({ codes: ['CONF'], text: '', checks: ['pid-attributes'] }, issued([...passing, named('pass')])).verdict).toBe('PASS');
+    expect(evaluateIssuance({ codes: ['CONF'], text: '', checks: ['pid-attributes'] }, issued([...passing, named('fail', 'birth_date is a text string')]))).toMatchObject({
+      verdict: 'FAIL',
+      reason: expect.stringContaining('pid-attributes failed (birth_date is a text string)'),
+    });
+  });
+
+  it('judges a step check (pid-formats) on the step, not on each credential', () => {
+    const both: IssuanceObservation = { ...issued(), credentials: [{ checks: passing }, { checks: passing }] };
+    expect(evaluateIssuance({ codes: ['CONF'], text: '', checks: ['pid-formats'] }, { ...both, stepChecks: [{ check: 'pid-formats', status: 'pass' }] }).verdict).toBe('PASS');
+    expect(
+      evaluateIssuance({ codes: ['CONF'], text: '', checks: ['pid-formats'] }, { ...both, stepChecks: [{ check: 'pid-formats', status: 'fail', detail: 'given_name differs' }] }),
+    ).toMatchObject({ verdict: 'FAIL', reason: expect.stringContaining('pid-formats failed on the step (given_name differs)') });
+  });
+});

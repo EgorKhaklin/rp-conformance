@@ -1,9 +1,8 @@
 // PP_WS_IA_MainInteraction: the positive baseline of the issuer suite and the positive controls of its `_UF` test
 // cases (issuer catalogue section 5.1.2). One definition per variant, expanded by a function as the RP definitions
-// expand their formats; this issue implements `SD` × `PA`, the `MD` and `AC` variants follow with mdoc and the
-// authorization code flow.
-import { defineIssuerTestCase, type FormatVariant, type GrantVariant, relevancy } from '@rp-conformance/core';
-import { FORMAT_NAMES, GRANT_NAMES, iss, issuance, pidProfile, preconditions, technologyOf } from '../../wording';
+// expand their formats: `SD` and `MD` × `PA` and `AC` (`AC` with issue 20).
+import { defineIssuerTestCase, type FormatVariant, type GrantVariant, issuerProfiles, relevancy } from '@rp-conformance/core';
+import { configurationOf, FORMAT_NAMES, GRANT_NAMES, iss, issuance, pidProfile, preconditions, technologyOf } from '../../wording';
 
 const mainInteraction001 = (format: FormatVariant, grant: GrantVariant) =>
   defineIssuerTestCase({
@@ -17,7 +16,7 @@ const mainInteraction001 = (format: FormatVariant, grant: GrantVariant) =>
     preconditions: preconditions.base,
     steps: [
       {
-        text: `The adapter creates a credential offer for \`SUBJ-1\` and the PID configuration in ${FORMAT_NAMES[format]} format, ${grant === 'PA' ? 'pre-authorized code with `tx_code` unless the ICS declares offers without one' : 'authorization code'}. \`CW-1\` runs \`SCN-I\` without mutation: metadata, token request with WIA, PoP and DPoP proof, nonce request, credential request with one \`openid4vci-proof+jwt\` that carries the KA.`,
+        text: `The adapter creates a credential offer for \`SUBJ-1\` and the PID configuration in ${FORMAT_NAMES[format]} format, ${grant === 'PA' ? 'pre-authorized code with `tx_code` unless the ICS declares offers without one' : 'authorization code with `issuer_state`'}. \`CW-1\` runs \`SCN-I\` without mutation: metadata, ${grant === 'PA' ? '' : 'pushed authorization request with PKCE `S256`, `authorization_details`, WIA, PoP and DPoP proof, the authorization request through the adapter (`authenticateSubject`), '}token request with WIA, PoP and DPoP proof${grant === 'PA' ? '' : ' and the `code_verifier`'}, nonce request, credential request with one \`openid4vci-proof+jwt\` that carries the KA.`,
         run: issuance(format, grant),
         expect: iss(format),
       },
@@ -28,4 +27,36 @@ const mainInteraction001 = (format: FormatVariant, grant: GrantVariant) =>
     ],
   });
 
-export const definitions = [mainInteraction001('SD', 'PA')];
+/** `_003`: both formats of the PID in one authorization, one access token and two credential requests (ISSU_12a). */
+const mainInteraction003 = (grant: GrantVariant) =>
+  defineIssuerTestCase({
+    id: 'PP_WS_IA_MainInteraction_003',
+    variants: [grant],
+    objective: `Verify that the PID Provider issues the PID in both formats, SD-JWT VC and mdoc, in one authorization in the ${GRANT_NAMES[grant]}: one access token, two credential requests, and that both credentials pass every check of the reference validator.`,
+    references: ['[ARF] Annex 2, ISSU_12, ISSU_12a', '[OpenID4VCI] sections 6 and 8'],
+    profile: [issuerProfiles['P-PID'], issuerProfiles['P-SD'], issuerProfiles['P-MD'], issuerProfiles[`P-${grant}`]],
+    relevancy: relevancy.specificRequired,
+    technology: ['OpenID4VCI', 'SD-JWT VC', 'ISO/IEC 18013-5 mdoc'],
+    preconditions: preconditions.base,
+    steps: [
+      {
+        text: `The adapter creates one credential offer for \`SUBJ-1\` and the PID configurations in SD-JWT VC and mdoc format. \`CW-1\` runs \`SCN-I\` in the ${GRANT_NAMES[grant]} without mutation and, with the one access token, sends a credential request for each configuration, each with a fresh \`c_nonce\` and proof.`,
+        run: issuance('SD', grant, { configurations: [configurationOf('SD'), configurationOf('MD')] }),
+        expect: {
+          codes: ['ISS'],
+          text: 'The Provider issues both credentials (HTTP 200 to each credential request), one in SD-JWT VC format (`dc+sd-jwt`) and one in mdoc format (`mso_mdoc`). Every credential passes every check of the reference validator.',
+        },
+      },
+    ],
+    comments: ['Execute this test case once for each grant the Provider declares in its ICS (ICS-03).'],
+  });
+
+// SD+PA (issue 17); MD+PA and `_003` (issue 21, mdoc issuance); SD+AC and MD+AC (issue 20, authorization code flow).
+export const definitions = [
+  mainInteraction001('SD', 'PA'),
+  mainInteraction001('MD', 'PA'),
+  mainInteraction001('SD', 'AC'),
+  mainInteraction001('MD', 'AC'),
+  mainInteraction003('PA'),
+  mainInteraction003('AC'),
+];

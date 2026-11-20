@@ -20,3 +20,7 @@ export * from './issuer/session-faults';
 // Issue 24: metadata, offer and credential request checks, `credential-request` faults
 export * from './issuer/artifact-checks';
 export * from './issuer/credential-request-faults';
+// Issue 21: test subjects and their PID encodings
+export * from './issuer/pid';
+// Issue 20: grant checks and faults
+export * from './issuer/grant-faults';

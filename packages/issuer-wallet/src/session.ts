@@ -9,14 +9,14 @@
 // any of them.
 import { randomUUID } from 'node:crypto';
 import { type CredentialOfferObject, determineAuthorizationServerForCredentialOffer, type IssuerMetadataResult } from '@openid4vc/openid4vci';
-import { type EcKeyPair, generateEcKeyPair } from '@rp-conformance/forge';
+import type { EcKeyPair } from '@rp-conformance/forge';
 import { type JwtParts, keySigner, signJwt, wiaPopParts } from '@rp-conformance/wallet-provider';
 import { CLIENT_ATTESTATION_HEADER, CLIENT_ATTESTATION_POP_HEADER } from '@rp-conformance/wallet-provider';
-import { IssuanceClient, IssuanceError, type IssuanceEvidence, type JwtPoint, type KeyAttestationWithKeys, type MessageHooks, type WalletUnitBinding } from './client';
+import { type Authenticate, IssuanceClient, IssuanceError, type IssuanceEvidence, type JwtPoint, type KeyAttestationWithKeys, type MessageHooks, type WalletUnitBinding } from './client';
 import { type HttpExchange, type HttpRequestMessage, type HttpResponseRecord, type IssuanceStep, jsonOf, oauthErrorOf, send } from './http';
 import { decryptJwe, encryptJwe, generateEncryptionKey } from './jwe';
 import { dpopProofParts, keyProofParts } from './jwts';
-import { nonceRequest, PRE_AUTHORIZED_CODE_GRANT, tokenRequest } from './requests';
+import { AUTHORIZATION_CODE_GRANT, nonceRequest, PRE_AUTHORIZED_CODE_GRANT, tokenRequest } from './requests';
 
 export const REFRESH_TOKEN_GRANT = 'refresh_token';
 
@@ -117,7 +117,9 @@ export class SessionClient {
 
   static async create(unit: WalletUnitBinding, keyAttestation: KeyAttestationSource, options: SessionClientOptions = {}): Promise<SessionClient> {
     const base = await IssuanceClient.create(unit, { ...(options.allowInsecureUrls ? { allowInsecureUrls: true } : {}), ...(options.hooks ? { hooks: options.hooks } : {}) });
-    return new SessionClient(unit, options.dpopKey ?? (await generateEcKeyPair()), keyAttestation, base, options);
+    // Without a given key the session signs with the DPoP key of its IssuanceClient, which runs PAR and the token request
+    // of the authorization code flow: code, access token and credential request are then bound to one key.
+    return new SessionClient(unit, options.dpopKey ?? base.dpopKey, keyAttestation, base, options);
   }
 
   /** A client of the same Wallet Unit and DPoP key with other hooks (the fault of a later step). */
@@ -134,8 +136,8 @@ export class SessionClient {
   async start(offerInput: string, evidence: SessionEvidence, credentialConfigurationId?: string): Promise<SessionState> {
     const offer = await this.base.resolveOffer(offerInput, evidence as unknown as IssuanceEvidence);
     const metadata = await this.base.fetchMetadata(offer.offer.credential_issuer, evidence as unknown as IssuanceEvidence, { signed: false });
-    const grant = offer.offer.grants?.[PRE_AUTHORIZED_CODE_GRANT];
-    if (!grant) throw new IssuanceError('the offer has no pre-authorized code grant');
+    const grant = offer.offer.grants?.[PRE_AUTHORIZED_CODE_GRANT] ?? offer.offer.grants?.[AUTHORIZATION_CODE_GRANT];
+    if (!grant) throw new IssuanceError('the offer has neither a pre-authorized code nor an authorization code grant');
     const issuer = determineAuthorizationServerForCredentialOffer({ issuerMetadata: metadata.result, grantAuthorizationServer: grant.authorization_server });
     const as = metadata.result.authorizationServers.find((server) => server.issuer === issuer);
     if (!as?.token_endpoint) throw new IssuanceError(`authorization server ${issuer} has no token_endpoint`);
@@ -167,6 +169,22 @@ export class SessionClient {
       });
     const response = await this.sendWithDpopRetry('token', build, evidence);
     this.acceptToken(state, response, evidence, 'token');
+  }
+
+  /**
+   * The authorization code flow (issue 20's `authorize`): PAR with PKCE, the authorization request through the adapter's
+   * `authenticateSubject`, and the token request with the code, all with the session's DPoP key.
+   */
+  async authorizationCode(state: SessionState, evidence: SessionEvidence, authenticate: Authenticate): Promise<void> {
+    const shared = evidence as unknown as IssuanceEvidence;
+    const authorization = await this.base.authorize(state.offer, state.metadata, state.credentialConfigurationId, shared, { authenticate });
+    const token = await this.base.requestAuthorizationCodeToken(state.metadata, authorization, shared);
+    state.accessToken = token.accessToken;
+    state.tokenType = token.tokenType;
+    if (typeof token.response.refresh_token === 'string') state.refreshToken = token.response.refresh_token;
+    state.boundKey = this.dpopKey.publicJwk;
+    state.tokenResponse = token.response;
+    evidence.token = token;
   }
 
   /** The refresh grant (RFC 6749 section 6) with the refresh token of the session, WIA, PoP and the session's DPoP key. */

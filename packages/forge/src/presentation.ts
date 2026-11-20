@@ -10,9 +10,13 @@ import { flipBitInBytes } from './faults-cose';
 import { decodeJws, flipBitInSegment, resignJws } from './jose';
 import { encodeDeviceResponse, jwkThumbprint, type Oid4vpHandover, PID_NAMESPACE, presentMdoc } from './mdoc';
 import { presentSdJwtVc } from './pid';
+import { isRobustDeviceResponseFault, isRobustSdJwtPresentationFault, robustDeviceResponse, robustSdJwtPresentation } from './robustness';
 
 /** A credential the Conformance Wallet holds: an SD-JWT VC (compact, without KB-JWT) or an mdoc's `IssuerSigned` (CBOR). */
-export type HeldCredential = { format: 'dc+sd-jwt'; value: string } | { format: 'mso_mdoc'; value: Uint8Array; docType?: string };
+export type HeldCredential = ({ format: 'dc+sd-jwt'; value: string } | { format: 'mso_mdoc'; value: Uint8Array; docType?: string }) & {
+  /** The `id` of the credential query the credential answers, in a combined presentation (UC_Presentation). */
+  query?: string;
+};
 
 /** A key pair on secp256k1, as Node.js key objects: WebCrypto has no secp256k1. */
 export interface Secp256k1KeyPair {
@@ -138,6 +142,7 @@ async function presentSdJwtVcWithFault(
   });
   const { fault } = options;
   if (!fault) return valid;
+  if (isRobustSdJwtPresentationFault(fault)) return robustSdJwtPresentation(valid, fault, keys.holder.privateKey);
   const cut = valid.lastIndexOf('~') + 1;
   const sdJwt = valid.slice(0, cut);
   const kbJwt = valid.slice(cut);
@@ -209,6 +214,10 @@ async function presentMdocWithFault(
   fault?: FaultId,
   docType?: string,
 ): Promise<string> {
+  if (isRobustDeviceResponseFault(fault)) {
+    const valid = await presentMdocWithFault(issuerSigned, requested, binding, keys, undefined, docType);
+    return encodeDeviceResponse(robustDeviceResponse(base64url.decode(valid), fault as FaultId));
+  }
   let handover = binding.handover;
   let { nonce, jwkThumbprint: thumbprint } = binding;
   let holderPrivateKey = keys.holder.privateKey;

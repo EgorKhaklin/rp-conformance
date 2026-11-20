@@ -10,7 +10,7 @@ import type { Flow } from './rp/definition';
  * Where a fault is applied: the issued credential, the status list or identifier list the Test Status Provider serves,
  * the presentation the Conformance Wallet builds for the request (KB-JWT, DeviceAuth), or the Authorization Response.
  */
-export type FaultPoint = 'credential' | 'status-list' | 'identifier-list' | 'presentation' | 'response' | 'trust-list' | 'request';
+export type FaultPoint = 'credential' | 'status-list' | 'identifier-list' | 'presentation' | 'response' | 'trust-list' | 'request' | 'vp-token';
 
 /** The artifact format a fault applies to: a credential format, or the format of a status or identifier list. */
 export type FaultFormat = 'dc+sd-jwt' | 'mso_mdoc' | 'jwt' | 'cwt' | 'lote' | 'trusted-list';
@@ -51,6 +51,7 @@ const lote = (target: CheckId | null, text: string): FaultInfo => ({ point: 'tru
 const trustedList = (target: CheckId | null, text: string): FaultInfo => ({ point: 'trust-list', format: 'trusted-list', target, text });
 const request = (target: CheckId, text: string, flow?: Flow): FaultInfo => ({ point: 'request', target, text, ...(flow ? { flow } : {}) });
 const kbJwt = (target: CheckId, text: string, flow?: Flow): FaultInfo => ({ point: 'presentation', format: 'dc+sd-jwt', target, text, ...(flow ? { flow } : {}) });
+const vpToken = (target: CheckId, text: string): FaultInfo => ({ point: 'vp-token', target, text });
 const deviceAuth = (target: CheckId, text: string, flow?: Flow): FaultInfo => ({ point: 'presentation', format: 'mso_mdoc', target, text, ...(flow ? { flow } : {}) });
 
 /** Wording shared by faults of both formats. */
@@ -580,6 +581,75 @@ export const FAULTS = {
   'response.alg-none': response('response-format', 'the `response` parameter is an unsecured JWT with `alg` `none` instead of a JWE'),
   'response.extra-member': response(null, 'its decrypted payload additionally contains the member `foo` with the value `bar`'),
 
+  // RP_WS_SH_Encoding: malformed encodings of the Authorization Response, the presentation and the credential, built
+  // from the valid artifact (packages/forge/src/robustness.ts).
+  'response.jwe-four-segments': response('response-format', 'its `response` parameter is the JWE without its last segment, the authentication tag, so it has four segments instead of five'),
+  'response.jwe-not-base64url': response(
+    'response-format',
+    'the protected header segment of the JWE in its `response` parameter contains the characters `*` and `!`, which are not in the base64url alphabet',
+  ),
+  'response.oversized': response(
+    'response-format',
+    'its decrypted payload additionally carries the member `padding`, a string long enough that the `response` parameter exceeds the maximum response size the Relying Party declares in its ICS by one MiB',
+  ),
+  'presentation.sd-jwt-no-separator': kbJwt(
+    'format',
+    'the `~` that separates the last disclosure from the KB-JWT is missing, so the last disclosure and the KB-JWT form one segment',
+  ),
+  'presentation.sd-jwt-empty-disclosure': kbJwt(
+    'disclosures',
+    'it carries an empty segment between two disclosures (`~~`), while the `sd_hash` of its KB-JWT is computed over the presented SD-JWT with that segment',
+  ),
+  'presentation.kb-payload-nan': kbJwt('format', 'the payload of its KB-JWT is not valid JSON: its `iat` member has the value `NaN`, while the KB-JWT is signed over that payload'),
+  'presentation.kb-duplicate-alg': kbJwt(
+    'key-binding',
+    'the header of its KB-JWT carries the member `alg` twice: first `ES256`, with which it is signed, and last `none`',
+  ),
+  'presentation.kb-duplicate-nonce': kbJwt(
+    'key-binding',
+    'the payload of its KB-JWT carries the member `nonce` twice: first the `nonce` of the request and last a newly generated random value',
+  ),
+  'presentation.device-response-truncated': deviceAuth('format', 'its DeviceResponse is cut after half of its bytes'),
+  'presentation.device-response-documents-map': deviceAuth(
+    'format',
+    'the `documents` member of its DeviceResponse is a map (major type 5) whose key 0 holds the document, instead of an array (major type 4)',
+  ),
+  'presentation.device-response-deep-nesting': deviceAuth(
+    'format',
+    'the `documents` member of its DeviceResponse is 10,000 arrays nested in each other, the innermost one empty, instead of the array of documents',
+  ),
+  'presentation.device-response-unterminated': deviceAuth(
+    'format',
+    'its DeviceResponse is encoded as a map of indefinite length (initial byte 0xbf) without the terminating `break` byte (0xff), so it is not well-formed CBOR',
+  ),
+  'credential.disclosure-invalid-json': credential(
+    'disclosures',
+    'its disclosure of `family_name` is replaced by a disclosure whose base64url decoding is not valid JSON (the closing bracket of the array is missing), and the `_sd` array of its Issuer-signed JWT carries the digest of that disclosure',
+  ),
+  'credential.x5c-50': credential(
+    'issuer-trust',
+    'the `x5c` header of its Issuer-signed JWT carries 50 certificates: its signing certificate followed by 49 self-signed CA certificates that are not part of `default_trust_configuration_rp`',
+  ),
+  'mdoc.x5chain-50': mdoc(
+    'issuer-trust',
+    'the `x5chain` of its `IssuerAuth` carries 50 certificates: its document signer certificate followed by 49 self-signed CA certificates that are not part of `default_trust_configuration_rp`',
+  ),
+
+  // Single objectives of issue 32 (packages/forge/src/policy-faults.ts): faults whose outcome the policy the Relying
+  // Party declares decides (RP_PP_SM_Revocation_014), that it records only (RP_WS_SM_Validity_004), or that a valid
+  // credential may carry (RP_PP_SM_Revocation_031).
+  'status-list.iat-future': statusList('status-list-validity', 'its `iat` claim is set to the current time plus `T_skew` plus one hour'),
+  'status-list.iat-old': statusList('status-list-validity', 'its `iat` claim lies 30 days in the past, while its `exp` claim lies one day in the future'),
+  'status-list-cwt.iat-future': statusListCwt('status-list-validity', 'its issued at claim (6) is set to the current time plus `T_skew` plus one hour'),
+  'status-list-cwt.iat-old': statusListCwt(
+    'status-list-validity',
+    'its issued at claim (6) lies 30 days in the past, while its expiration time (4) lies one day in the future',
+  ),
+  'credential.iat-future': credential(null, 'its Issuer-signed JWT carries an `iat` claim set to the current time plus `T_skew` plus one hour'),
+  'mdoc.status-certificate': mdoc(
+    null,
+    'the `status_list` map in the `status` element of its MSO additionally carries `certificate`: the DER encoding of the certificate that signs the referenced Status List Token, issued under the revocation anchor of `PP-A`',
+  ),
   // RP_WS_IA_Engagement and RP_WS_IA_ProtocolFlow: request faults of the invocation and of the answers at `request_uri`
   // (self-validation only), and the `state` of the Authorization Response (ProtocolFlow_013).
   'request.invocation-scheme-other': request('invocation-scheme', 'its invocation URI uses the scheme `mdoc-openid4vp://`', 'redirect'),
@@ -593,6 +663,22 @@ export const FAULTS = {
   // variants change what the Conformance Wallet discloses. Target `claims`: the disclosed claims do not satisfy the
   // query, or a PID attribute has a data type the PID rulebook does not give it.
   ...DATA_MODEL_FAULTS,
+  // vp_token (UC_Presentation): the presentations are valid, the `vp_token` that carries them is not.
+  'vp-token.entry-missing': vpToken('vp-token', 'its `vp_token` has no entry for the credential query `pid`'),
+  'vp-token.unknown-id': vpToken(
+    'vp-token',
+    'its `vp_token` additionally holds an entry with the key `x`, which is the `id` of no credential query of the request, with a valid presentation of the same PID that discloses every attribute of the PID',
+  ),
+  'vp-token.two-presentations': vpToken(
+    'vp-token',
+    'the entry of its `vp_token` for the credential query `pid`, which does not set `multiple`, holds two valid presentations of the PID',
+  ),
+  'vp-token.combined-device-response': {
+    point: 'vp-token',
+    format: 'mso_mdoc',
+    target: 'vp-token',
+    text: 'the entries of its `vp_token` for both credential queries hold one and the same DeviceResponse, which carries the documents of both credentials, each with a valid device signature',
+  },
 } as const satisfies Record<string, FaultInfo>;
 
 export type FaultId = keyof typeof FAULTS;

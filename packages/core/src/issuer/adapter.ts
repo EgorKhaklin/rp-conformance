@@ -12,7 +12,15 @@ export interface EnrolmentRequest {
   statusListSigning?: string;
   /** The key of the access certificate from `AC-A`. */
   access: string;
+  /**
+   * The format each credential signing key signs, in the order of `credentialSigning`: `sd-jwt-vc` (issuance signer) or
+   * `mdoc` (document signer, ISO/IEC 18013-5 Annex B). Default `sd-jwt-vc` for every key.
+   */
+  credentialSigningProfiles?: CredentialSigningProfile[];
 }
+
+/** The certificate profile of a credential signing key: SD-JWT VC issuance signer, or mdoc document signer. */
+export type CredentialSigningProfile = 'sd-jwt-vc' | 'mdoc';
 
 /** A certificate the Test Registrar issued; with its key only when the Registrar generated the key (no CSR). */
 export type EnrolledCertificate = Omit<KeyedCertificate, 'privateJwk' | 'privateKeyPem'> &
@@ -28,6 +36,8 @@ export interface IssuerTestEnvironment {
   trustLists: PublishedTrustList[];
   /** Credential signing certificate(s) under the SUT's issuance CA. */
   credentialSigningCertificates: EnrolledCertificate[];
+  /** The profile of each credential signing certificate, in the same order; default `sd-jwt-vc` for each. */
+  credentialSigningProfiles?: CredentialSigningProfile[];
   /** Status list signing certificate under the SUT's revocation CA; left out when it signs with its issuance key. */
   statusListSigningCertificate?: EnrolledCertificate;
   /** Access certificate issued by `AC-A`. */
@@ -44,6 +54,8 @@ export interface CreateOfferRequest {
   byReference: boolean;
   /** Pre-authorized code grant: protect the code with a transaction code (`tx_code`), returned in `CreatedOffer.txCode`. */
   txCode?: boolean;
+  /** The User opts out of the portrait (PID_03, `DM_Portrait_001`); only where the ICS declares the opt-out (ICS-17). */
+  portraitOptOut?: boolean;
   /** Issue 25: the Provider defers the issuance (ICS-10) until `completeDeferred` is called for its `transaction_id`. */
   deferred?: boolean;
 }
@@ -53,6 +65,21 @@ export interface CreatedOffer {
   offer: string;
   txCode?: string;
   sessionId: string;
+}
+
+/**
+ * Thrown by `authenticateSubject` when the authorization endpoint answers without redirecting to the client: an error
+ * page (RFC 6749 section 4.1.2.1) or any other answer that is not a redirect. The issuance client records it as the
+ * answer of the authorization endpoint.
+ */
+export class AuthorizationEndpointError extends Error {
+  constructor(
+    readonly status: number,
+    readonly body: string,
+    readonly headers: Record<string, string> = {},
+  ) {
+    super(`the authorization endpoint answered HTTP ${status} without a redirect to the client`);
+  }
 }
 
 /**
@@ -72,7 +99,11 @@ export interface IssuerAdapter {
    */
   enrol(namespace?: string): Promise<EnrolmentRequest | undefined>;
   createOffer(req: CreateOfferRequest): Promise<CreatedOffer>;
-  /** Complete the subject's authentication for an authorization request and return the redirect with `code`. */
+  /**
+   * Complete the subject's authentication for an authorization request (the URL the wallet would open) and return the
+   * URL the Authorization Server redirects to: the wallet's `redirect_uri` with `code`, `state` and `iss`, or with
+   * `error`. Throws `AuthorizationEndpointError` when the endpoint does not redirect to the client.
+   */
   authenticateSubject?(authorizationRequestUrl: string, subject: TestSubject): Promise<string>;
   /** Revoke, suspend or unsuspend what the session issued; resolves when the SUT reports it done (`OBS-ADM`). */
   setStatus?(sessionId: string, status: 'revoked' | 'suspended' | 'valid'): Promise<{ at: string }>;

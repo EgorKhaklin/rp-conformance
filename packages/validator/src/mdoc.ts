@@ -28,7 +28,7 @@ import { describeKey } from './disclosures';
 import { checkClaims, type RequestedClaim } from './claims';
 import { CheckRecorder, NotApplicable, type ValidationMode, type ValidationResult } from './checks';
 import { evaluateIdentifierList } from './identifier-list';
-import { attempt, base64Of, evaluateStatusList, type FetchedStatusList, fail, isUri } from './status-list';
+import { attempt, base64Of, evaluateStatusList, type FetchedStatusList, fail, isUri, type StatusListFreshness } from './status-list';
 import type { MatchedIssuer, TrustRule, TrustStore } from './trust';
 
 /** The checks of an mdoc presentation that references a Status List Token in CWT format. */
@@ -72,6 +72,10 @@ export interface MdocValidationOptions {
   fetchIdentifierList: (uri: string) => Promise<FetchedStatusList>;
   mode?: ValidationMode;
   now?: Date;
+  /** Freshness policy for Status List Tokens (ICS RP.R.7, RP.R.8). */
+  statusListFreshness?: StatusListFreshness;
+  /** Reject a PID whose administrative expiry date has passed (ICS RP.P.12 Reject). */
+  rejectPastExpiryDate?: boolean;
 }
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -91,7 +95,7 @@ export function openid4vpSessionTranscript(options: Pick<MdocValidationOptions, 
 }
 
 /** An attribute value as JSON: `full-date` and `tdate` as their text, maps as objects. */
-function jsonOf(value: unknown): unknown {
+export function jsonOf(value: unknown): unknown {
   if (value instanceof Tagged) return value.tag === 1004 || value.tag === 0 ? value.value : jsonOf(value.value);
   if (value instanceof Map) return Object.fromEntries([...value].map(([k, v]) => [String(k), jsonOf(v)]));
   if (Array.isArray(value)) return value.map(jsonOf);
@@ -100,7 +104,7 @@ function jsonOf(value: unknown): unknown {
 }
 
 /** The JWK of an EC2 P-256 COSE key (RFC 9053 section 7.1). */
-function jwkOfCoseKey(key: unknown): JsonWebKey {
+export function jwkOfCoseKey(key: unknown): JsonWebKey {
   if (!(key instanceof Map)) fail('the device key is not a COSE key');
   const map = key as CborMap;
   const [kty, crv, x, y] = [map.get(1), map.get(-1), map.get(-2), map.get(-3)];
@@ -108,10 +112,169 @@ function jwkOfCoseKey(key: unknown): JsonWebKey {
   return { kty: 'EC', crv: 'P-256', x: base64url.encode(x as Uint8Array), y: base64url.encode(y as Uint8Array) };
 }
 
-const asMap = (value: unknown, what: string): CborMap => {
+export const asMap = (value: unknown, what: string): CborMap => {
   if (!(value instanceof Map)) fail(`${what} is not a map`);
   return value as CborMap;
 };
+
+/** An `IssuerSigned` structure (ISO/IEC 18013-5 section 8.3.2.1.2.2) with its IssuerAuth and MSO decoded. */
+export interface ParsedIssuerSigned {
+  issuerSigned: CborMap;
+  issuerAuth: ReturnType<typeof readCose>;
+  mso: CborMap;
+  x5chain: Uint8Array[];
+}
+
+/**
+ * Reads an `IssuerSigned` structure: `nameSpaces`, an IssuerAuth COSE_Sign1 (tag 18 or untagged) with `x5chain`, and its
+ * payload, the MSO, with version 1.x, `valueDigests` and a `validityInfo` of `tdate`s. Fails (`fail`) on the first
+ * structural defect; used by the `format` check of a presentation and of an issued mdoc.
+ */
+export function readIssuerSigned(value: unknown): ParsedIssuerSigned {
+  const issuerSigned = asMap(value, 'issuerSigned');
+  asMap(issuerSigned.get('nameSpaces'), 'issuerSigned.nameSpaces');
+  const issuerAuth = attempt(() => readCose(issuerSigned.get('issuerAuth')), 'IssuerAuth');
+  if (issuerAuth.tag !== undefined && issuerAuth.tag !== 18) fail(`IssuerAuth carries tag ${issuerAuth.tag}`);
+  const chain = x5chainOf(issuerAuth.unprotectedHeader.get(COSE.x5chain) ?? issuerAuth.protectedHeader.get(COSE.x5chain));
+  if (!chain) fail('IssuerAuth carries no x5chain');
+  if (!issuerAuth.payload) fail('IssuerAuth has no payload');
+  const mso = asMap(attempt(() => decodeEmbedded(decodeCbor(issuerAuth.payload as Uint8Array)), 'the IssuerAuth payload is not MobileSecurityObjectBytes'), 'the MSO');
+  if (typeof mso.get('version') !== 'string' || !/^1\./.test(mso.get('version') as string)) fail(`MSO version ${String(mso.get('version'))}`);
+  asMap(mso.get('valueDigests'), 'valueDigests');
+  const validityInfo = asMap(mso.get('validityInfo'), 'validityInfo');
+  for (const key of ['signed', 'validFrom', 'validUntil']) if (!dateOf(validityInfo.get(key))) fail(`validityInfo.${key} is not a tdate`);
+  return { issuerSigned, issuerAuth, mso, x5chain: chain as Uint8Array[] };
+}
+
+/**
+ * `issuer-trust` of an mdoc: the document signer chains to an anchor of `rule`, carries the extended key usage of
+ * ISO/IEC 18013-5 Annex B, and the MSO was signed within its validity period (section 9.3.1).
+ */
+export async function checkDocumentSignerTrust(trust: TrustStore, rule: TrustRule, x5chain: Uint8Array[], mso: CborMap, now: Date) {
+  const match = await trust.match(rule, base64Of(x5chain), now);
+  if (!match.ok) return fail(match.reason);
+  // ISO/IEC 18013-5 Annex B, Table B.3: a document signer certificate carries this extended key usage.
+  if (!match.leaf.extendedKeyUsage?.includes(MDOC_DS_EXTENDED_KEY_USAGE)) fail('the signing certificate is not a document signer (no extended key usage 1.0.18013.5.1.2)');
+  // ISO/IEC 18013-5 section 9.3.1: the MSO was signed within the validity period of the document signer certificate.
+  const signed = dateOf((mso.get('validityInfo') as CborMap).get('signed')) as Date;
+  if (signed < match.leaf.notBefore || signed > match.leaf.notAfter) {
+    fail(`the MSO was signed (${signed.toISOString()}) outside the validity period of the document signer certificate`);
+  }
+  return match;
+}
+
+/** `issuer-signature` of an mdoc: ES256 by a P-256 document signer, the IssuerAuth signature verifies. */
+export async function verifyIssuerAuth(issuerAuth: ReturnType<typeof readCose>, x5chain: Uint8Array[]): Promise<void> {
+  const key = describeKey(x5chain[0]);
+  if (key !== 'P-256') fail(`the document signer certificate holds a key ${key}, not on P-256`);
+  if (issuerAuth.protectedHeader.get(COSE.alg) !== COSE_ALG.ES256) fail(`IssuerAuth alg ${String(issuerAuth.protectedHeader.get(COSE.alg))} is not supported`);
+  const jwk = parseCertificate(x5chain[0]).publicKey.jwk as JsonWebKey;
+  if (!(await verifyEs256(jwk as JsonWebKey, sigStructure(issuerAuth.protectedBytes, issuerAuth.payload as Uint8Array), issuerAuth.signature))) {
+    fail('the IssuerAuth signature does not verify');
+  }
+}
+
+/** One `IssuerSignedItem` as decoded from `nameSpaces`, with its raw CBOR value. */
+export interface IssuerSignedElement {
+  namespace: string;
+  identifier: string;
+  value: unknown;
+}
+
+/**
+ * `disclosures` of an mdoc: SHA-256 digests, every `IssuerSignedItemBytes` of `nameSpaces` matches its value digest in
+ * the MSO. A presentation also rejects an element disclosed twice (`rejectDuplicates`); for an issued mdoc that is the
+ * data model check `pid-unique`. Returns the elements as JSON by namespace, and as decoded.
+ */
+export function checkValueDigests(issuerSigned: CborMap, mso: CborMap, options: { rejectDuplicates: boolean }) {
+  if (mso.get('digestAlgorithm') !== 'SHA-256') fail(`digestAlgorithm ${String(mso.get('digestAlgorithm'))} is not supported`);
+  const digests = mso.get('valueDigests') as CborMap;
+  const claims: Record<string, Record<string, unknown>> = {};
+  const elements: IssuerSignedElement[] = [];
+  for (const [namespace, items] of issuerSigned.get('nameSpaces') as CborMap) {
+    if (typeof namespace !== 'string' || !Array.isArray(items)) fail('issuerSigned.nameSpaces is not a map of arrays');
+    const namespaceDigests = digests.get(namespace);
+    if (!(namespaceDigests instanceof Map)) fail(`the MSO has no value digests for namespace ${String(namespace)}`);
+    claims[namespace as string] ??= {};
+    for (const item of items as unknown[]) {
+      const signedItem = asMap(attempt(() => decodeEmbedded(item), 'an IssuerSignedItem is not IssuerSignedItemBytes'), 'an IssuerSignedItem');
+      const [digestId, identifier] = [signedItem.get('digestID'), signedItem.get('elementIdentifier')];
+      if (typeof identifier !== 'string') fail('an IssuerSignedItem has no elementIdentifier');
+      if (options.rejectDuplicates && Object.hasOwn(claims[namespace as string], identifier as string)) fail(`${String(identifier)} is disclosed twice`);
+      const expected = (namespaceDigests as CborMap).get(digestId);
+      if (!(expected instanceof Uint8Array)) fail(`the MSO has no digest with ID ${String(digestId)} for ${String(identifier)}`);
+      if (!Buffer.from(sha256(encodeCbor(item))).equals(Buffer.from(expected as Uint8Array))) fail(`the digest of ${String(identifier)} does not match the MSO`);
+      claims[namespace as string][identifier as string] = jsonOf(signedItem.get('elementValue'));
+      elements.push({ namespace: namespace as string, identifier: identifier as string, value: signedItem.get('elementValue') });
+    }
+  }
+  return { claims, elements };
+}
+
+/** The MSO's `validityInfo` as dates (after `readIssuerSigned`). */
+export function validityOf(mso: CborMap) {
+  const validityInfo = mso.get('validityInfo') as CborMap;
+  return {
+    signed: dateOf(validityInfo.get('signed')) as Date,
+    validFrom: dateOf(validityInfo.get('validFrom')) as Date,
+    validUntil: dateOf(validityInfo.get('validUntil')) as Date,
+    expectedUpdate: dateOf(validityInfo.get('expectedUpdate')),
+  };
+}
+
+/** `validity` of an mdoc: `now` lies within `validFrom` and `validUntil`, with `T_skew`. */
+export function checkMdocValidity(mso: CborMap, now: Date, skewSeconds: number): string | void {
+  const { validFrom, validUntil, expectedUpdate } = validityOf(mso);
+  const skewMs = skewSeconds * 1000;
+  if (now.getTime() > validUntil.getTime() + skewMs) fail(`expired: validUntil ${validUntil.toISOString()}, T_skew ${skewSeconds} s`);
+  if (now.getTime() < validFrom.getTime() - skewMs) fail(`not yet valid: validFrom ${validFrom.toISOString()}, T_skew ${skewSeconds} s`);
+  // expectedUpdate is informative (ISO/IEC 18013-5 section 9.1.2.4): Validity_012.
+  if (expectedUpdate && expectedUpdate < now) return `expectedUpdate ${expectedUpdate.toISOString()} has passed (informative)`;
+}
+
+/**
+ * `status-reference` of an mdoc: the MSO's `status` with a `status_list` (`idx`, `uri`) or an `identifier_list` (`id`,
+ * `uri`) entry; without `status`, the validity period must be at most 24 hours unless `requireStatus` is false.
+ */
+export function readMsoStatus(mso: CborMap, requireStatus: boolean) {
+  const status = mso.get('status');
+  let statusList: { uri: string; idx: number; certificate?: Uint8Array } | undefined;
+  let identifierList: { uri: string; id: Uint8Array } | undefined;
+  if (status === undefined) {
+    const { validFrom, validUntil } = validityOf(mso);
+    const period = validUntil.getTime() - validFrom.getTime();
+    if (!requireStatus) return { detail: 'no status (accepted by policy)' };
+    if (period <= DAY_MS) return { detail: `no status; validity period ${period / 1000} s is at most 24 hours` };
+    fail(`no status, and the validity period (${period / 1000} s) exceeds 24 hours`);
+  }
+  const entries = asMap(status, 'status');
+  const statusListEntry = entries.get('status_list');
+  const identifierListEntry = entries.get('identifier_list');
+  if (statusListEntry === undefined && identifierListEntry === undefined) fail('status has neither a status_list nor an identifier_list entry');
+  if (statusListEntry !== undefined) {
+    const entry = asMap(statusListEntry, 'status_list');
+    const idx = entry.get('idx');
+    if (typeof idx !== 'number' || !Number.isInteger(idx) || idx < 0) fail(`idx ${JSON.stringify(jsonOf(idx))} is not an unsigned integer`);
+    if (!isUri(entry.get('uri'))) fail(`uri ${JSON.stringify(entry.get('uri'))} is not a URI`);
+    const certificate = entry.get('certificate');
+    if (certificate !== undefined && !(certificate instanceof Uint8Array)) fail('the status_list certificate is not a byte string');
+    statusList = { idx: idx as number, uri: entry.get('uri') as string, ...(certificate ? { certificate: certificate as Uint8Array } : {}) };
+  }
+  if (identifierListEntry !== undefined) {
+    const entry = asMap(identifierListEntry, 'identifier_list');
+    if (!(entry.get('id') instanceof Uint8Array)) fail('the identifier_list id is not a byte string');
+    if (!isUri(entry.get('uri'))) fail(`uri ${JSON.stringify(entry.get('uri'))} is not a URI`);
+    identifierList = { id: entry.get('id') as Uint8Array, uri: entry.get('uri') as string };
+  }
+  return { statusList, identifierList };
+}
+
+/** The device key of the MSO (`deviceKeyInfo.deviceKey`) as a JWK; fails without one. */
+export function deviceKeyOfMso(mso: CborMap): JsonWebKey {
+  const deviceKeyInfo = mso.get('deviceKeyInfo');
+  if (!(deviceKeyInfo instanceof Map) || !deviceKeyInfo.has('deviceKey')) fail('the MSO carries no deviceKeyInfo, so it is bound to no device key');
+  return jwkOfCoseKey((deviceKeyInfo as CborMap).get('deviceKey'));
+}
 
 /**
  * Validates an mdoc presentation: a base64url DeviceResponse with one document (`vp_token` entry, OpenID4VP B.2.4).
@@ -123,7 +286,6 @@ const asMap = (value: unknown, what: string): CborMap => {
 export async function validateMdocPresentation(presentation: string, options: MdocValidationOptions): Promise<MdocValidation> {
   const recorder = new CheckRecorder(options.mode ?? 'first-failure');
   const now = options.now ?? new Date();
-  const skewMs = options.skewSeconds * 1000;
   let document: CborMap = new Map();
   let issuerSigned: CborMap = new Map();
   let issuerAuth: ReturnType<typeof readCose> | undefined;
@@ -149,40 +311,18 @@ export async function validateMdocPresentation(presentation: string, options: Md
       if (!Array.isArray(documents) || documents.length !== 1) fail('the DeviceResponse does not carry exactly one document');
       document = asMap((documents as unknown[])[0], 'the document');
       if (document.get('docType') !== options.expectedDocType) fail(`docType ${String(document.get('docType'))} was not requested`);
-      issuerSigned = asMap(document.get('issuerSigned'), 'issuerSigned');
-      asMap(issuerSigned.get('nameSpaces'), 'issuerSigned.nameSpaces');
-      issuerAuth = attempt(() => readCose(issuerSigned.get('issuerAuth')), 'IssuerAuth');
-      if (issuerAuth.tag !== undefined && issuerAuth.tag !== 18) fail(`IssuerAuth carries tag ${issuerAuth.tag}`);
-      const chain = x5chainOf(issuerAuth.unprotectedHeader.get(COSE.x5chain) ?? issuerAuth.protectedHeader.get(COSE.x5chain));
-      if (!chain) fail('IssuerAuth carries no x5chain');
-      x5chain = chain as Uint8Array[];
-      if (!issuerAuth.payload) fail('IssuerAuth has no payload');
-      mso = asMap(attempt(() => decodeEmbedded(decodeCbor(issuerAuth?.payload as Uint8Array)), 'the IssuerAuth payload is not MobileSecurityObjectBytes'), 'the MSO');
-      if (typeof mso.get('version') !== 'string' || !/^1\./.test(mso.get('version') as string)) fail(`MSO version ${String(mso.get('version'))}`);
+      ({ issuerSigned, issuerAuth, mso, x5chain } = readIssuerSigned(document.get('issuerSigned')));
       if (mso.get('docType') !== document.get('docType')) fail('the MSO docType differs from the document docType');
-      asMap(mso.get('valueDigests'), 'valueDigests');
-      const validityInfo = asMap(mso.get('validityInfo'), 'validityInfo');
-      for (const key of ['signed', 'validFrom', 'validUntil']) if (!dateOf(validityInfo.get(key))) fail(`validityInfo.${key} is not a tdate`);
       // deviceKeyInfo and deviceAuth are checked by key-binding, so a credential without device binding fails there.
       const deviceSigned = asMap(document.get('deviceSigned'), 'deviceSigned');
       attempt(() => decodeEmbedded(deviceSigned.get('nameSpaces')), 'deviceSigned.nameSpaces');
     });
 
     await recorder.run('issuer-trust', ['format'], async () => {
-      const match = await options.trust.match(options.trustRule, base64Of(x5chain), now);
-      if (!match.ok) fail(match.reason);
-      if (match.ok) {
-        // ISO/IEC 18013-5 Annex B, Table B.3: a document signer certificate carries this extended key usage.
-        if (!match.leaf.extendedKeyUsage?.includes(MDOC_DS_EXTENDED_KEY_USAGE)) fail('the signing certificate is not a document signer (no extended key usage 1.0.18013.5.1.2)');
-        // ISO/IEC 18013-5 section 9.3.1: the MSO was signed within the validity period of the document signer certificate.
-        const signed = dateOf((mso.get('validityInfo') as CborMap).get('signed')) as Date;
-        if (signed < match.leaf.notBefore || signed > match.leaf.notAfter) {
-          fail(`the MSO was signed (${signed.toISOString()}) outside the validity period of the document signer certificate`);
-        }
-        issuer = { name: match.entity.name, statusAnchors: options.trustRule.statusAnchors(match.entity, match.service) };
-        trustListStale = match.stale;
-        return `${match.entity.name} under ${match.anchor.subject.commonName} (${match.list.id}${match.stale ? ', stale within the grace period' : ''})`;
-      }
+      const match = await checkDocumentSignerTrust(options.trust, options.trustRule, x5chain, mso, now);
+      issuer = { name: match.entity.name, statusAnchors: options.trustRule.statusAnchors(match.entity, match.service) };
+      trustListStale = match.stale;
+      return `${match.entity.name} under ${match.anchor.subject.commonName} (${match.list.id}${match.stale ? ', stale within the grace period' : ''})`;
     });
 
     await recorder.run('trusted-authorities', ['format'], () => {
@@ -198,53 +338,21 @@ export async function validateMdocPresentation(presentation: string, options: Md
       fail('no certificate in x5chain has an authority key identifier that trusted_authorities names');
     });
 
-    await recorder.run('issuer-signature', ['format'], async () => {
-      const key = describeKey(x5chain[0]);
-      if (key !== 'P-256') fail(`the document signer certificate holds a key ${key}, not on P-256`);
-      const auth = issuerAuth as ReturnType<typeof readCose>;
-      if (auth.protectedHeader.get(COSE.alg) !== COSE_ALG.ES256) fail(`IssuerAuth alg ${String(auth.protectedHeader.get(COSE.alg))} is not supported`);
-      const jwk = parseCertificate(x5chain[0]).publicKey.jwk as JsonWebKey;
-      if (!(await verifyEs256(jwk as JsonWebKey, sigStructure(auth.protectedBytes, auth.payload as Uint8Array), auth.signature))) {
-        fail('the IssuerAuth signature does not verify');
-      }
-    });
+    await recorder.run('issuer-signature', ['format'], () => verifyIssuerAuth(issuerAuth as ReturnType<typeof readCose>, x5chain));
 
     await recorder.run('disclosures', ['format'], () => {
-      if (mso.get('digestAlgorithm') !== 'SHA-256') fail(`digestAlgorithm ${String(mso.get('digestAlgorithm'))} is not supported`);
-      const digests = mso.get('valueDigests') as CborMap;
-      const disclosed: Record<string, Record<string, unknown>> = {};
-      let count = 0;
-      for (const [namespace, items] of issuerSigned.get('nameSpaces') as CborMap) {
-        if (typeof namespace !== 'string' || !Array.isArray(items)) fail('issuerSigned.nameSpaces is not a map of arrays');
-        const namespaceDigests = digests.get(namespace);
-        if (!(namespaceDigests instanceof Map)) fail(`the MSO has no value digests for namespace ${String(namespace)}`);
-        disclosed[namespace as string] = {};
-        for (const item of items as unknown[]) {
-          const signedItem = asMap(attempt(() => decodeEmbedded(item), 'an IssuerSignedItem is not IssuerSignedItemBytes'), 'an IssuerSignedItem');
-          const [digestId, identifier] = [signedItem.get('digestID'), signedItem.get('elementIdentifier')];
-          if (typeof identifier !== 'string') fail('an IssuerSignedItem has no elementIdentifier');
-          if (Object.hasOwn(disclosed[namespace as string], identifier as string)) fail(`${String(identifier)} is disclosed twice`);
-          const expected = (namespaceDigests as CborMap).get(digestId);
-          if (!(expected instanceof Uint8Array)) fail(`the MSO has no digest with ID ${String(digestId)} for ${String(identifier)}`);
-          if (!Buffer.from(sha256(encodeCbor(item))).equals(Buffer.from(expected as Uint8Array))) fail(`the digest of ${String(identifier)} does not match the MSO`);
-          disclosed[namespace as string][identifier as string] = jsonOf(signedItem.get('elementValue'));
-          (rawClaims[namespace as string] ??= {})[identifier as string] = signedItem.get('elementValue');
-          count++;
-        }
-      }
-      claims = disclosed;
-      return `${count} elements`;
+      const disclosed = checkValueDigests(issuerSigned, mso, { rejectDuplicates: true });
+      claims = disclosed.claims;
+      for (const element of disclosed.elements) (rawClaims[element.namespace] ??= {})[element.identifier] = element.value;
+      return `${disclosed.elements.length} elements`;
     });
 
     await recorder.run('validity', ['format'], () => {
-      const validityInfo = mso.get('validityInfo') as CborMap;
-      const validFrom = dateOf(validityInfo.get('validFrom')) as Date;
-      const validUntil = dateOf(validityInfo.get('validUntil')) as Date;
-      if (now.getTime() > validUntil.getTime() + skewMs) fail(`expired: validUntil ${validUntil.toISOString()}, T_skew ${options.skewSeconds} s`);
-      if (now.getTime() < validFrom.getTime() - skewMs) fail(`not yet valid: validFrom ${validFrom.toISOString()}, T_skew ${options.skewSeconds} s`);
-      // expectedUpdate is informative (ISO/IEC 18013-5 section 9.1.2.4): Validity_012.
-      const expectedUpdate = dateOf(validityInfo.get('expectedUpdate'));
-      if (expectedUpdate && expectedUpdate < now) return `expectedUpdate ${expectedUpdate.toISOString()} has passed (informative)`;
+      const detail = checkMdocValidity(mso, now, options.skewSeconds);
+      // RP_WS_SM_Validity_020: the administrative expiry date of a PID, under the policy of ICS RP.P.12.
+      const expiry = claims?.[PID_NAMESPACE]?.expiry_date;
+      if (options.rejectPastExpiryDate && typeof expiry === 'string' && expiry < now.toISOString().slice(0, 10)) fail(`the administrative expiry date ${expiry} has passed`);
+      return detail;
     });
 
     // Device binding and session binding (ISO/IEC 18013-5 section 9.1.3, OpenID4VP Appendix B.2.6): a device signature
@@ -260,9 +368,7 @@ export async function validateMdocPresentation(presentation: string, options: Md
       const deviceNameSpaces = deviceSigned.get('nameSpaces') as Tagged;
       const elements = decodeEmbedded<unknown>(deviceNameSpaces);
       if (!(elements instanceof Map) || elements.size > 0) fail('DeviceNameSpaces is not empty, and the MSO authorizes no device-signed element');
-      const deviceKeyInfo = mso.get('deviceKeyInfo');
-      if (!(deviceKeyInfo instanceof Map) || !deviceKeyInfo.has('deviceKey')) fail('the MSO carries no deviceKeyInfo, so it is bound to no device key');
-      const jwk = jwkOfCoseKey((deviceKeyInfo as CborMap).get('deviceKey'));
+      const jwk = deviceKeyOfMso(mso);
       const transcript = openid4vpSessionTranscript(options);
       const deviceAuthentication = encodeCbor(embedded(['DeviceAuthentication', transcript, document.get('docType'), deviceNameSpaces]));
       if (!(await verifyEs256(jwk, sigStructure(signature.protectedBytes, deviceAuthentication), signature.signature))) {
@@ -271,31 +377,10 @@ export async function validateMdocPresentation(presentation: string, options: Md
     });
 
     await recorder.run('status-reference', ['format'], () => {
-      const status = mso.get('status');
-      if (status === undefined) {
-        const validityInfo = mso.get('validityInfo') as CborMap;
-        const period = (dateOf(validityInfo.get('validUntil')) as Date).getTime() - (dateOf(validityInfo.get('validFrom')) as Date).getTime();
-        if (!options.requireStatus) return 'no status (accepted by policy)';
-        if (period <= DAY_MS) return `no status; validity period ${period / 1000} s is at most 24 hours`;
-        fail(`no status, and the validity period (${period / 1000} s) exceeds 24 hours`);
-      }
-      const entries = asMap(status, 'status');
-      const statusList = entries.get('status_list');
-      const identifierList = entries.get('identifier_list');
-      if (statusList === undefined && identifierList === undefined) fail('status has neither a status_list nor an identifier_list entry');
-      if (statusList !== undefined) {
-        const entry = asMap(statusList, 'status_list');
-        const idx = entry.get('idx');
-        if (typeof idx !== 'number' || !Number.isInteger(idx) || idx < 0) fail(`idx ${JSON.stringify(jsonOf(idx))} is not an unsigned integer`);
-        if (!isUri(entry.get('uri'))) fail(`uri ${JSON.stringify(entry.get('uri'))} is not a URI`);
-        statusListReference = { idx: idx as number, uri: entry.get('uri') as string };
-      }
-      if (identifierList !== undefined) {
-        const entry = asMap(identifierList, 'identifier_list');
-        if (!(entry.get('id') instanceof Uint8Array)) fail('the identifier_list id is not a byte string');
-        if (!isUri(entry.get('uri'))) fail(`uri ${JSON.stringify(entry.get('uri'))} is not a URI`);
-        identifierListReference = { id: entry.get('id') as Uint8Array, uri: entry.get('uri') as string };
-      }
+      const read = readMsoStatus(mso, options.requireStatus);
+      statusListReference = read.statusList;
+      identifierListReference = read.identifierList;
+      return read.detail;
     });
 
     // The disclosed elements satisfy the query, and a PID's elements have the types of the PID rulebook.
@@ -323,6 +408,7 @@ export async function validateMdocPresentation(presentation: string, options: Md
         onFetched: () => {
           statusListFetched = true;
         },
+        freshness: options.statusListFreshness,
       });
     }
     if (hasIdentifierList) {

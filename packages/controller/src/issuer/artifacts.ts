@@ -8,6 +8,7 @@ import {
   type HttpResponseRecord,
   IssuanceClient,
   type IssuanceEvidence,
+  type IssueOptions,
   issueWithCredentialRequestFault,
   nonceRequest,
   send,
@@ -203,10 +204,12 @@ export async function issueWithFault(
   configurationId: string,
   unit: 'CW-1' | 'CW-2' | 'CW-B',
   ctx: ArtifactStepContext,
+  /** The grant and, for the authorization code flow, the adapter's `authenticateSubject` (issue 20). */
+  grant: Partial<Pick<IssueOptions, 'grant' | 'authenticate'>> & { foreignIdentifier?: string } = {},
 ): Promise<{ evidence: IssuanceEvidence; notApplicable?: string; requestChecks?: CheckResult[] }> {
   const result = await issueWithCredentialRequestFault(
     walletUnitOf(ctx.harness.twp, unit),
-    { offer: offer.offer, ...(offer.txCode !== undefined ? { txCode: offer.txCode } : {}), credentialConfigurationId: configurationId, fault },
+    { offer: offer.offer, ...(offer.txCode !== undefined ? { txCode: offer.txCode } : {}), credentialConfigurationId: configurationId, fault, ...grant },
     { allowInsecureUrls: true },
   );
   const sent = result.evidence.exchanges.find((e) => e.step === 'credential');
