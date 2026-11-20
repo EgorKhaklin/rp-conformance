@@ -29,9 +29,11 @@ export interface AttestationState {
   status: Map<WalletUnitId, { wia?: StatusReference; ka?: StatusReference }>;
   /** The last `c_nonce` answered at the credential endpoint and the last PoP `jti` sent, per Wallet Unit. */
   last: Map<WalletUnitId, { cNonce?: string; popJti?: string }>;
+  /** Issue 26: the entries of each list a wallet-event step served, so a later event of the test case changes it in place. */
+  served?: Map<string, number[]>;
 }
 
-export const newAttestationState = (): AttestationState => ({ status: new Map(), last: new Map() });
+export const newAttestationState = (): AttestationState => ({ status: new Map(), last: new Map(), served: new Map() });
 
 export const isIssuerRequestFault = (fault: string): fault is IssuerFaultId => Object.hasOwn(ISSUER_FAULTS, fault);
 
@@ -64,7 +66,8 @@ export async function prepareIssuance(action: IssuanceAction, twp: TestWalletPro
     keyAttestationNonce: Boolean(action.keyAttestationNonce || attestation),
   });
   const moved = state.status.get(id);
-  if (moved && fault) throw new Error(`a step after a wallet-event applies no fault, not ${fault}`);
+  // Issue 26: a fault of the proof, DPoP or PoP leaves the moved WIA and KA as they are; one of the WIA or KA does not.
+  if (moved && fault && ['wia', 'ka'].includes(ISSUER_FAULTS[fault].point)) throw new Error(`a step after a wallet-event applies no WIA or KA fault, not ${fault}`);
   const unit: WalletUnitBinding = {
     ...applied.unit,
     ...(moved?.wia ? { wia: () => twp.wia(id, { status: moved.wia! }) } : {}),
@@ -140,8 +143,11 @@ export async function applyWalletEvent(action: WalletEventAction, ctx: WalletEve
   const list = twp.statusLists[unit.provider];
   const of = action.event === 'revoke-wscd' ? 'ka' : action.event === 'revoke-instance' ? 'wia' : (action.statusList?.of ?? 'wia');
   const reference = of === 'wia' ? unit.wiaStatus : unit.kaStatus;
-  const uri = ctx.statusProvider.allocate(ctx.namespace);
-  const statuses = [...list.statuses];
+  // Issue 26: a list this test case already moved the attestation to is changed in place (revocation chaining: the
+  // Provider must see the change at the URL the credential's WIA or KA referenced); otherwise a new URL of the test case.
+  const moved = ctx.state.status.get(id)?.[of];
+  const uri = moved?.uri ?? ctx.statusProvider.allocate(ctx.namespace);
+  const statuses = [...(ctx.state.served?.get(uri) ?? list.statuses)];
   if (action.event !== 'status-list') statuses[reference.idx] = REVOKED;
   const now = new Date();
   const signer = signerFor(entity, 'status');
@@ -167,6 +173,7 @@ export async function applyWalletEvent(action: WalletEventAction, ctx: WalletEve
     ctx.statusProvider.register(uri, token);
     served = action.event === 'status-list' ? 'a valid token' : `a valid token with the ${of === 'wia' ? 'Wallet Instance' : 'WSCD'} entry ${reference.idx} revoked`;
   }
+  ctx.state.served?.set(uri, statuses);
   ctx.state.status.set(id, { ...ctx.state.status.get(id), [of]: { idx: reference.idx, uri } });
   return `${list.id} of ${id}'s ${of === 'wia' ? 'WIA' : 'KA'} (entry ${reference.idx}) served at ${uri}: ${served}`;
 }

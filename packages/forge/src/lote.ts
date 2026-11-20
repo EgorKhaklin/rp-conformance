@@ -91,7 +91,7 @@ function serviceNameOf(entity: TestEntity, type: string, anchor: CertifiedKey, p
   return `${entity.spec.id} ${type.split('/').pop()}`;
 }
 
-function buildEntity(entity: TestEntity, profile: ListProfile, restoreIssuance = false) {
+function buildEntity(entity: TestEntity, profile: ListProfile, restoreIssuance = false, withdrawIssuance = false) {
   const informationUri = `${profile.informationUriPrefix}DE`;
   const builder = trustedEntity()
     .name(entity.spec.id)
@@ -100,7 +100,7 @@ function buildEntity(entity: TestEntity, profile: ListProfile, restoreIssuance =
     .infoUri(informationUri);
   // A withdrawn issuance service is left out: TS 119 602 Annex D has no ServiceStatus for it (PP-W).
   const services: [string, CertifiedKey][] = [
-    ...(entity.spec.issuanceWithdrawn && !restoreIssuance ? [] : [[profile.issuanceServiceType, entity.anchors.issuance] as [string, CertifiedKey]]),
+    ...((entity.spec.issuanceWithdrawn && !restoreIssuance) || withdrawIssuance ? [] : [[profile.issuanceServiceType, entity.anchors.issuance] as [string, CertifiedKey]]),
     [profile.revocationServiceType, entity.anchors.revocation],
   ];
   // A Wallet Provider's separate KA anchor is a second issuance service, withdrawn with the first (TS3 section 3.2).
@@ -124,6 +124,8 @@ export interface LoteBuildOptions {
   distributionPoint?: string;
   /** Entities whose withdrawn issuance service the list carries again (`PP-W`, RP_Inf_SM_TrustMechanisms_005). */
   restoreIssuance?: string[];
+  /** Issue 26: entities whose issuance services the list leaves out, as if withdrawn (`WP-A` withdrawn, PP_Inf_002_UF). */
+  withdrawIssuance?: string[];
   /** `ListIssueDateTime`; default `now`. */
   issued?: Date;
   /** `NextUpdate`; default one month after `ListIssueDateTime`. */
@@ -168,7 +170,7 @@ export function buildLoteDocument(options: LoteBuildOptions) {
       NextUpdate: (options.nextUpdate ?? new Date(issued.getTime() + MONTH)).toISOString(),
       ...(options.distributionPoint ? { DistributionPoints: [options.distributionPoint] } : {}),
     } as never,
-    ids.map((id) => buildEntity(options.pki.entities[id], profile, options.restoreIssuance?.includes(id))),
+    ids.map((id) => buildEntity(options.pki.entities[id], profile, options.restoreIssuance?.includes(id), options.withdrawIssuance?.includes(id))),
   );
 }
 

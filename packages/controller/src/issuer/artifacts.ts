@@ -2,7 +2,7 @@
 // sections 2 and 6): the `metadata` action (`SCN-M`, `OBS-META`), the capture of a credential offer for an `issuance`
 // step that expects `CONF` (`PP_WS_MS_Offer`), and an issuance with one `credential-request` fault. Each fills the step
 // record and evaluates its expectation; the runner calls them from `runIssuerStep` and `runIssuance`.
-import { type CheckResult, type CredentialRequestFaultId, type IssuanceAction, type IssuerExpectation, type IssuerIcs, OFFER_CHECKS } from '@rp-conformance/core';
+import { type CheckResult, type CredentialRequestFaultId, type IssuanceAction, type IssuerExpectation, type IssuerIcs, OFFER_CHECKS, type WalletUnit } from '@rp-conformance/core';
 import {
   type HttpExchange,
   type HttpResponseRecord,
@@ -80,7 +80,7 @@ const anchorsOf = (harness: IssuerHarness, list: string) =>
     .filter((e) => e.spec.list === list)
     .map((e) => e.anchors.issuance.certificate);
 
-async function clientFor(ctx: ArtifactStepContext, unit: 'CW-1' | 'CW-2' | 'CW-B' = 'CW-1') {
+async function clientFor(ctx: ArtifactStepContext, unit: WalletUnit = 'CW-1') {
   return IssuanceClient.create(walletUnitOf(ctx.harness.twp, unit), { allowInsecureUrls: true });
 }
 
@@ -201,7 +201,7 @@ export async function issueWithFault(
   fault: CredentialRequestFaultId,
   offer: { offer: string; txCode?: string },
   configurationId: string,
-  unit: 'CW-1' | 'CW-2' | 'CW-B',
+  unit: WalletUnit,
   ctx: ArtifactStepContext,
 ): Promise<{ evidence: IssuanceEvidence; notApplicable?: string; requestChecks?: CheckResult[] }> {
   const result = await issueWithCredentialRequestFault(

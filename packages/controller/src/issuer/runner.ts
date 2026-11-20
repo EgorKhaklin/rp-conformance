@@ -54,6 +54,10 @@ import {
   type StatusObservation,
   waits,
 } from './status';
+// Issue 26: trust-list and inspect steps, batch issuance, change of subject data.
+import { batchBinding, bindBatchKeys } from './batch';
+import { type InspectState, runInspection } from './inspect';
+import { policyExpectation, restoreTrustList, runTrustListStep, type TrustListState } from './trust';
 
 /** The validator's clock tolerance on the issuer side: the catalogue's cap of `T_skew` (section 3.5). */
 export const ISSUER_SKEW_SECONDS = 300;
@@ -113,6 +117,8 @@ export interface IssuerStepRecord {
   statusObservation?: StatusObservation;
   /** `present`: the reference Relying Party's result. */
   presentation?: Omit<PresentationObservation, 'result'>;
+  /** Issue 26, `inspect`: the named checks over what earlier steps captured. */
+  inspection?: CheckResult[];
   artifacts: string[];
   verdict: Verdict;
   reason: string;
@@ -261,7 +267,10 @@ export async function runIssuerConformance(options: IssuerRunOptions): Promise<{
     // section 6.3); a test case gated on a control still runs after it.
     const waiting = selected.filter((d) => waits(d.steps) && !d.control);
     for (const definition of selected.filter((d) => !waiting.includes(d))) await execute(definition);
-    await Promise.all(waiting.map(execute));
+    // Issue 26: a test case that changes the subject's data (`changeSubject`) runs alone, after every other one.
+    const exclusive = waiting.filter(changesSubject);
+    await Promise.all(waiting.filter((d) => !exclusive.includes(d)).map(execute));
+    for (const definition of exclusive) await execute(definition);
   } finally {
     await options.adapter.tearDown?.().catch(() => {});
     await harness.stop();
@@ -291,7 +300,7 @@ interface Context extends IssuerRunOptions {
  * State shared by the steps of one test case: one issuance client (one DPoP key) per Wallet Unit (design section 5.1),
  * and what the lifecycle steps read of earlier steps.
  */
-interface TestCaseState extends LifecycleState {
+interface TestCaseState extends LifecycleState, InspectState, TrustListState {
   clients: Map<string, IssuanceClient>;
   /** Moved status references and replay values of the Wallet Units (issue 19). */
   attestations: AttestationState;
@@ -311,9 +320,16 @@ async function runIssuerTestCase(definition: IssuerTestCaseDefinition, ctx: Cont
   const unmet = issuerApplicability(definition, ctx.ics);
   if (unmet.length) return end('NOT APPLICABLE', `profile not met: ${unmet.join('; ')}`);
   if (control && control.verdict !== 'PASS') return end('INCONCLUSIVE', `positive control ${outcomes.map((o) => o.id).join(' or ')} did not pass in ${variant}`);
-  const state: TestCaseState = { clients: new Map(), attestations: newAttestationState(), offersByValue: [], ...newLifecycleState() };
+  // Issue 26: a test case that needs an adapter hook the adapter lacks does not apply (issuer harness design section 5.4).
+  if (changesSubject(definition) && !ctx.adapter.changeSubject) return end('NOT APPLICABLE', 'the adapter offers no changeSubject (ICS-06.change_subject)');
+  const state: TestCaseState = { clients: new Map(), attestations: newAttestationState(), offersByValue: [], ...newLifecycleState(), captured: new Map(), startedAt: new Date() };
   const steps: IssuerStepRecord[] = [];
-  for (const [index, step] of definition.steps.entries()) steps.push(await runIssuerStep(definition, variant, index + 1, step, ctx, state));
+  try {
+    for (const [index, step] of definition.steps.entries()) steps.push(await runIssuerStep(definition, variant, index + 1, step, ctx, state));
+  } finally {
+    // Issue 26: the default TL-WP again after a test case that published another version.
+    await restoreTrustList(state, trustContext(ctx)).catch((error) => ctx.log?.(`    could not restore TL-WP: ${(error as Error).message}`));
+  }
   // A step that does not apply to the Provider (NOT APPLICABLE) does not count, unless no step applies.
   const applicable = steps.filter((s) => s.verdict !== 'NOT APPLICABLE');
   return { ...base, verdict: applicable.length ? worst(applicable.map((s) => s.verdict)) : 'NOT APPLICABLE', control, steps };
@@ -349,7 +365,11 @@ async function runIssuerStep(
   };
   try {
     if (step.run?.kind === 'metadata') await runMetadata(step.expect, record, save, ctx);
-    else if (step.run?.kind === 'issuance') await runIssuance(step, step.run, record, save, ctx, state);
+    // Issue 26: issuances of test cases that run in parallel go one at a time; only their waits overlap.
+    else if (step.run?.kind === 'issuance') {
+      const action = step.run;
+      await oneAtATime(() => runIssuance(step, action, record, save, ctx, state));
+    }
     else if (step.run?.kind === 'wallet-event' && step.expect.codes.every((code) => code === 'INFO')) {
       record.walletUnit = step.run.walletUnit ?? 'CW-1';
       const served = await applyWalletEvent(step.run, {
@@ -361,6 +381,16 @@ async function runIssuerStep(
       });
       record.verdict = 'PASS';
       record.reason = `recorded: ${served}`;
+      // Issue 26: a revocation by the Test Wallet Provider is the event `REVOKED(T_chain)` counts from.
+      if (step.run.event !== 'status-list') state.events.set(index, { at: new Date(), status: step.run.event });
+    }
+    // Issue 26: trust-list and inspect steps.
+    else if (step.run?.kind === 'trust-list') Object.assign(record, await runTrustListStep(step.run, state, trustContext(ctx)));
+    else if (step.run?.kind === 'inspect') {
+      const { checks, ...evaluation } = await runInspection(step.run, step.expect, state, { harness: ctx.harness, ics: ctx.ics, harnessHost: ctx.harnessHost });
+      record.inspection = checks;
+      await save('inspection.json', `${JSON.stringify(checks, null, 2)}\n`);
+      Object.assign(record, evaluation);
     }
     else if (step.run?.kind === 'issuer-event' || step.run?.kind === 'observe-status' || step.run?.kind === 'present') {
       await runLifecycleStep(step, step.run, record, save, ctx, state);
@@ -378,7 +408,8 @@ function unsupported(action: IssuanceAction): string | undefined {
   const notImplemented = action.faults.filter((fault) => !isCredentialRequestFault(fault) && !isIssuerRequestFault(fault));
   if (notImplemented.length) return `issuer faults are not implemented yet (${notImplemented.join(', ')})`;
   const options: string[] = (['stopAfterToken', 'deferred', 'encryption', 'credentialIdentifier'] as const).filter((option) => action[option]);
-  if ((action.batchSize ?? 1) > 1) options.push('batchSize');
+  // Issue 26: a valid batch (batch.ts); a batch with a fault is issue 25's.
+  if ((action.batchSize ?? 1) > 1 && action.faults.length) options.push('batchSize with a fault');
   return options.length ? `the issuance option(s) ${options.join(', ')} are not implemented yet` : undefined;
 }
 
@@ -404,6 +435,9 @@ async function runIssuance(
   }
   const unit = action.walletUnit ?? 'CW-1';
   const subject = action.subject ?? 'SUBJ-1';
+  // Issue 26: POLICY (ICS-15) becomes the expectation the declaration gives.
+  const policy = policyExpectation(step.expect, state, ctx.ics);
+  if (policy) step = { ...step, expect: policy.expect };
   record.walletUnit = unit;
   record.subject = subject;
   const configurations = resolveConfigurations(action.configurations, ctx.ics);
@@ -414,13 +448,16 @@ async function runIssuance(
 
   // A plain issuance reuses the unit's client (one DPoP key per Wallet Unit); a step with a fault, a moved status
   // reference or another proof type gets a client with its own binding and hooks (issue 19).
-  const plain = !action.faults.some(isIssuerRequestFault) && !action.proofType && !action.keyAttestationNonce && !state.attestations.status.has(unit);
+  const batch = (action.batchSize ?? 1) > 1 ? action.batchSize! : undefined;
+  const plain = !batch && !action.faults.some(isIssuerRequestFault) && !action.proofType && !action.keyAttestationNonce && !state.attestations.status.has(unit);
   const prepared = plain ? undefined : await prepareIssuance(action, ctx.harness.twp, state.attestations);
+  // Issue 26: a valid batch over the keys of one KA.
+  const batched = batch ? batchBinding(ctx.harness.twp, unit, batch, prepared?.unit) : undefined;
   let client = plain ? state.clients.get(unit) : undefined;
   if (!client) {
-    client = await IssuanceClient.create(prepared?.unit ?? walletUnitOf(ctx.harness.twp, unit), {
+    client = await IssuanceClient.create(batched?.unit ?? prepared?.unit ?? walletUnitOf(ctx.harness.twp, unit), {
       allowInsecureUrls: true,
-      ...(prepared ? { hooks: prepared.hooks } : {}),
+      ...(batched ? { hooks: batched.hooks } : prepared ? { hooks: prepared.hooks } : {}),
     });
     if (plain) state.clients.set(unit, client);
   }
@@ -450,13 +487,16 @@ async function runIssuance(
       evidence.error = `retry with a fresh c_nonce: ${(error as Error).message}`;
     }
   }
+  if (batched) bindBatchKeys(evidence.credentials, batched.keys());
   rememberIssuance(state.attestations, unit, evidence);
   state.issued.set(record.step, { sessionId: offer.sessionId, credentials: evidence.credentials });
   record.exchanges = evidence.exchanges;
   if (evidence.token) record.token = { tokenType: evidence.token.tokenType };
   if (evidence.error) record.error = evidence.error;
-  const output = outputOptions(step, action, subject, ctx);
+  // Issue 26: after `changeSubject` the subject's data are those of the subject it was changed to.
+  const output = outputOptions(step, action, state.subjects?.get(subject) ?? subject, ctx);
   record.credentials = await validateCredentials(evidence, ctx, output);
+  state.captured?.set(record.step, { evidence, checks: record.credentials.map((c) => c.checks), receivedAt: new Date() });
   if (output.checks.includes('pid-formats')) {
     const sdJwt = record.credentials.find((c) => c.format === 'dc+sd-jwt');
     const mdoc = record.credentials.find((c) => c.format === 'mso_mdoc');
@@ -483,7 +523,7 @@ async function runIssuance(
     ? evaluateRetry(step, evidence, record.credentials, firstAttempt)
     : evaluateIssuance(step.expect, observationOf(evidence, record.credentials, record.stepChecks));
   record.verdict = evaluation.verdict;
-  record.reason = evaluation.reason;
+  record.reason = policy ? `${policy.reason}: ${evaluation.reason}` : evaluation.reason;
 }
 
 /**
@@ -643,4 +683,25 @@ export function observationOf(evidence: Pick<IssuanceEvidence, 'exchanges' | 'to
     ...(stepChecks?.length ? { stepChecks } : {}),
     ...(evidence.error ? { error: evidence.error } : {}),
   };
+}
+
+// Issue 26: helpers of the trust-list and change-subject test cases.
+/** A test case with an `issuer-event` that changes the subject's data. */
+function changesSubject(definition: IssuerTestCaseDefinition): boolean {
+  return definition.steps.some((step) => step.run?.kind === 'issuer-event' && step.run.event === 'change-subject');
+}
+
+const trustContext = (ctx: Context) => ({ harness: ctx.harness, adapter: ctx.adapter, ics: ctx.ics, namespace: ctx.harness.namespace, ...(ctx.log ? { log: ctx.log } : {}) });
+
+/**
+ * Issue 26: runs issuance steps one after another, also when the test cases they belong to run in parallel. The waiting
+ * test cases overlap in their waits, not in their issuances: concurrent credential requests are not what they test, and
+ * the reference image refuses some of them (`credential_request_denied` "Could not allocate status entry after maximum
+ * retries", seen with a dozen issuances in the same second).
+ */
+let issuing: Promise<unknown> = Promise.resolve();
+function oneAtATime<T>(task: () => Promise<T>): Promise<T> {
+  const run = issuing.then(task, task);
+  issuing = run.catch(() => undefined);
+  return run;
 }

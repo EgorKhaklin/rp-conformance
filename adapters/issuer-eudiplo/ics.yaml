@@ -42,7 +42,7 @@ items:
   ICS-05.identifier_list: "No"               # source: EUDIPLO reads identifier lists as verifier (trust/status-list-verifier.service.ts) but publishes none
   ICS-05.suspension: "Yes"                   # live: status list bits 2 (PUT /api/status-list-config); status 2 = suspended
   ICS-06: revoke, suspend, unsuspend         # setStatus: POST /api/session/revoke, confirmed by GET /api/session/{id}/credential-status. A revoked credential cannot be changed again (409)
-  ICS-06.change_subject: "No"                # no changeSubject: EUDIPLO keeps no subject record to change; claims travel with each offer
+  ICS-06.change_subject: "Yes"               # issue 26: EUDIPLO keeps no subject record (claims travel with each offer); the adapter plays the back office: changeSubject revokes every session of the subject and later offers carry the new data
   ICS-06.user_revocation_request: "No"
   ICS-06.T_rev: PT1M                         # live: immediateUpdate true re-signs the list on every change; ttl 60 s, the minimum PUT /api/status-list-config accepts (">=60")
   ICS-07: "Yes"                              # live: revokeWithWalletUnit true on pid-sd-jwt-vc (read back by GET /api/issuer/credentials/{id}); EUDIPLO follows the key attestation's status list and revokes the PID when it says revoked (1); suspended (2) changes nothing (docs trust/attestation.md)

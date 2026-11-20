@@ -16,9 +16,16 @@ import { definitions as revocation } from './pid_provider/SecurityMechanisms/Rev
 import { definitions as rpSupportive } from './pid_provider_rp/Interaction/Supportive';
 import { definitions as rpRevocation } from './pid_provider_rp/SecurityMechanisms/Revocation';
 import { definitions as validity } from './pid_provider/SecurityMechanisms/Validity';
+// Issue 26: revocation chaining, PP_Inf, SM_IssuerIntegrity and SM_Unlinkability.
+import { definitions as issuerIntegrity } from './pid_provider/SecurityMechanisms/IssuerIntegrity';
+import { definitions as revocationLifecycle } from './pid_provider/SecurityMechanisms/RevocationLifecycle';
+import { definitions as unlinkability } from './pid_provider/SecurityMechanisms/Unlinkability';
+import { definitions as trustMechanisms } from './pid_provider_inf/SecurityMechanisms/TrustMechanisms';
 
 export * from './wording';
 export * from './status';
+// Issue 26
+export * from './inspection';
 
 /**
  * Every issuer test definition (issuer harness design section 6.1), one per test case and variant: the source of truth
@@ -43,6 +50,11 @@ export const issuerDefinitions: IssuerTestCaseDefinition[] = [
   ...pidSdJwt,
   ...pidMdoc,
   ...portrait,
+  // Issue 26: revocation chaining, PP_Inf, SM_IssuerIntegrity and SM_Unlinkability.
+  ...revocationLifecycle,
+  ...issuerIntegrity,
+  ...unlinkability,
+  ...trustMechanisms,
 ];
 
 /** The issuer definitions the harness can execute. */

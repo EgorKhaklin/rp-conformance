@@ -20,3 +20,9 @@ HTTP 404/500 or is a bad Status List Token (bad signature, `alg` `none`, expired
 TS3 KA either.
 
 Expected: read `client_status.status` and `key_storage_status.status` (and keep `status` for pre-1.5 attestations).
+
+Revocation chaining (cre8/rp-conformance issue 26): with `revokeWithWalletUnit` on both PID configurations and
+`WALLET_UNIT_STATUS_CHECK_INTERVAL` 30 s, revoking the Wallet Instance (`PP_WS_SM_Revocation_006`) or the WSCD (`_007`)
+in a list that the TS3 WIA or KA of the issuance references leaves the PID valid in every poll for 7 minutes. No wallet
+unit is recorded for a KA without a top-level `status` (`openid-credential-proof-verifier.ts` `checkStatus`), and a
+WIA's status is checked once at the token endpoint only, so neither revocation can chain.

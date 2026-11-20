@@ -20,3 +20,5 @@ export * from './issuer/artifact-checks';
 export * from './issuer/credential-request-faults';
 // Issue 21: test subjects and their PID encodings
 export * from './issuer/pid';
+// Issue 26: issuer integrity, unlinkability and trust infrastructure checks
+export * from './issuer/integrity-checks';

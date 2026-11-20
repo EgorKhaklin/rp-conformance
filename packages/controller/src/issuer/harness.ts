@@ -1,12 +1,12 @@
 // The harness services of an issuer run (issuer harness design sections 3 and 5.3): the test PKI, the Test Status
 // Provider (`SL-WP-A`, `SL-WP-B`), the Test Trust Infrastructure (`TL-WP`, `TL-PID`, `TL-AC`, `TL-RC`), the Test Wallet
 // Provider with its Wallet Units, and the enrolment of the Provider under test by the Test Registrar.
-import type { CredentialSigningProfile, IssuerAdapter, IssuerIcs, IssuerTestEnvironment, PublishedTrustList } from '@rp-conformance/core';
-import { buildSealedLote, createTestPki, type Enrolment, enrolSut, LIST_PROFILES, type LoteListId, PID_DOCTYPE, PID_VCT, type TestPki, toEnrolledCertificate } from '@rp-conformance/forge';
+import { type CredentialSigningProfile, durationMs, type IssuerAdapter, type IssuerIcs, type IssuerTestEnvironment, type IssuerTrustListAction, type PublishedTrustList } from '@rp-conformance/core';
+import { buildSealedLote, buildTrustListVersion, createTestPki, type Enrolment, enrolSut, LIST_PROFILES, type LoteListId, PID_DOCTYPE, PID_VCT, type TestPki, toEnrolledCertificate } from '@rp-conformance/forge';
 import { StatusProvider } from '@rp-conformance/status-provider';
 import { TrustInfrastructure } from '@rp-conformance/trust-infrastructure';
 import { TRUST_RULES, TrustStore } from '@rp-conformance/validator';
-import { publishTlWp, TestWalletProvider } from '@rp-conformance/wallet-provider';
+import { publishTlWp, TestWalletProvider, tlWpEntities } from '@rp-conformance/wallet-provider';
 
 /** What the access certificate from `AC-A` names for the Provider under test (`default_configuration_PP_1`). */
 export const PROVIDER_ACCESS = { entityIdentifier: 'VATDE-987654321', serviceIdentifier: 'S1', tradeName: 'PID Provider under conformance test' };
@@ -38,6 +38,12 @@ export interface IssuerHarness {
    * `PP-T` as enrolled, and builds the environment `setUp` gets.
    */
   enrol(adapter: IssuerAdapter): Promise<IssuerTestEnvironment>;
+  /**
+   * Issue 26: publishes a version of `TL-WP` (`trust-list` step): the default entities with the step's changes and at
+   * most one trust-list fault, under the next sequence number (one lower than the latest for `trust-list.rollback`).
+   * Without an action, the default version again under the next sequence number (restoring trust after a test case).
+   */
+  publishTlWp(action?: IssuerTrustListAction): Promise<{ version: number; sequenceNumber: number; entities: string[]; publishedAt: Date }>;
   stop(): Promise<void>;
 }
 
@@ -78,6 +84,11 @@ export async function startIssuerHarness(options: IssuerHarnessOptions): Promise
     url,
     schemeOperatorCertificatePem: pki.schemeOperators[id].certificate.pem,
   });
+
+  // Issue 26: sequence numbers of `TL-WP` count up; a rolled back version does not become the latest one.
+  let tlWpSequence = 1;
+  let tlWpLatest = tlWpSequence;
+  const graceMs = durationMs(String(options.ics.items['ICS-15.next_update_grace'] ?? '')) ?? 0;
 
   const harness: IssuerHarness = {
     pki,
@@ -124,6 +135,23 @@ export async function startIssuerHarness(options: IssuerHarnessOptions): Promise
       if (refused.length) throw new Error(`the reference validator refused ${refused.map((r) => `${r.id}: ${r.error}`).join('; ')}`);
       Object.assign(harness, { env, enrolment, trustStore });
       return env;
+    },
+    async publishTlWp(action) {
+      const entities = tlWpEntities(pki, 1).filter((id) => !action?.remove?.includes(id));
+      for (const id of action?.add ?? []) if (!entities.includes(id)) entities.push(id);
+      tlWpSequence += 1;
+      const built = await buildTrustListVersion(action ?? { kind: 'trust-list', list: 'TL-WP' }, {
+        pki,
+        entities,
+        sequenceNumber: tlWpSequence,
+        previousSequenceNumber: tlWpLatest,
+        location: trust.urlOf(options.namespace, 'TL-WP'),
+        graceMs,
+      });
+      if (!action?.faults?.includes('trust-list.rollback')) tlWpLatest = built.sequenceNumber;
+      const publishedAt = new Date();
+      const { version } = trust.publish(options.namespace, 'TL-WP', built.body, built.contentType);
+      return { version, sequenceNumber: built.sequenceNumber, entities, publishedAt };
     },
     async stop() {
       await status.stop();
