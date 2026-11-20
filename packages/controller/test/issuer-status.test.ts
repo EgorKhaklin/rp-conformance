@@ -63,6 +63,20 @@ describe('REVOKED(t)', () => {
   });
 });
 
+// Issue 26: suspension and reinstatement within T_rev (PP_WS_SM_Revocation_005).
+describe('CONF sl-suspended and sl-reinstated', () => {
+  const conf = (check: string) => ({ codes: ['CONF' as const], checks: [check], text: '' });
+  it('passes when the entry reaches the value within T_rev and keeps it', () => {
+    expect(evaluateObservation(conf('sl-suspended'), observation([credential([poll(0, 0), poll(5, 2), poll(40, 2)])]), ics)).toMatchObject({ verdict: 'PASS', reason: expect.stringContaining('suspended (0x02)') });
+    expect(evaluateObservation(conf('sl-reinstated'), observation([credential([poll(0, 2), poll(5, 0), poll(40, 0)])]), ics).verdict).toBe('PASS');
+  });
+
+  it('fails when the value is never reached, or left again', () => {
+    expect(evaluateObservation(conf('sl-suspended'), observation([credential([poll(0, 0), poll(40, 0)])]), ics).verdict).toBe('FAIL');
+    expect(evaluateObservation(conf('sl-suspended'), observation([credential([poll(5, 2), poll(40, 1)])]), ics).verdict).toBe('FAIL');
+  });
+});
+
 describe('UNCHANGED', () => {
   it('passes when valid in every poll and fails on any other value', () => {
     expect(evaluateUnchanged(observation([credential([poll(0, 0), poll(3, 0)])])).verdict).toBe('PASS');

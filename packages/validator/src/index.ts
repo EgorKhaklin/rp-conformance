@@ -15,4 +15,5 @@ export * from './issuer-metadata';
 export * from './vp-token';
 export * from './published-status';
 export * from './pid-rulebook';
+export * from './issuer-integrity';
 export * from './issuer-grant';

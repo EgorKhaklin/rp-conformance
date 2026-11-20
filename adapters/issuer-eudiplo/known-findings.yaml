@@ -109,6 +109,54 @@
     (tag 1004) or tdate (tag 0) as the PID Rulebook section 4.2 requires: its claim field types have no date type
   reference: adapters/issuer-eudiplo/upstream-findings/mdoc-full-date.md (not yet reported upstream)
 
+# Issue 26: revocation chaining, PP_Inf, SM_IssuerIntegrity (found 2026-11-20 against 9.1.0-main.ae0792a)
+
+# Upstream issue text: upstream-findings/wallet-attestation-status-claim.md (the existing finding of issue 19)
+- testCase: PP_WS_SM_Revocation_006
+  variants: [SD+PA, MD+PA]
+  finding: >-
+    No revocation chaining for a revoked Wallet Instance: the PID stays valid (0x00) in every poll for T_chain (7 min)
+    after the Test Wallet Provider revoked the WIA's entry. EUDIPLO checks a WIA's status only at the token endpoint and
+    reads it only from a top-level status claim, not from TS3's client_status.status ("Wallet attestation does not
+    contain status claim"), and revokeWithWalletUnit follows the KA only
+  reference: adapters/issuer-eudiplo/upstream-findings/wallet-attestation-status-claim.md (not yet reported upstream)
+
+# Upstream issue text: upstream-findings/wallet-attestation-status-claim.md (the existing finding of issue 19)
+- testCase: PP_WS_SM_Revocation_007
+  variants: [SD+PA, MD+PA]
+  finding: >-
+    No revocation chaining for a revoked WSCD: the PID stays valid (0x00) in every poll for T_chain (7 min) after the
+    Test Wallet Provider revoked the KA's entry. revokeWithWalletUnit records a wallet unit only from a KA's top-level
+    status claim; a TS3 KA carries it in key_storage_status.status, so no wallet unit is recorded and the list of the
+    KA is never fetched
+  reference: adapters/issuer-eudiplo/upstream-findings/wallet-attestation-status-claim.md (not yet reported upstream)
+
+# Upstream issue text: upstream-findings/sd-jwt-array-element-disclosure.md
+- testCase: PP_WS_SM_IssuerIntegrity_005
+  variants: [SD+PA]
+  finding: >-
+    The elements of an array claim are not selectively disclosable one by one: nationalities is one disclosure as a
+    whole (selective-disclosure: "nationalities[0] is not an array element disclosure"); buildDisclosureFrame turns an
+    element path into a string key, which @sd-jwt/core never matches to an array index
+  reference: adapters/issuer-eudiplo/upstream-findings/sd-jwt-array-element-disclosure.md (not yet reported upstream)
+
+# Upstream issue text: upstream-findings/sd-jwt-salt-length.md
+- testCase: PP_WS_SM_IssuerIntegrity_006
+  variants: [SD+PA]
+  finding: >-
+    SD-JWT VC disclosure salts carry 64 bits (16 hexadecimal characters from @owf/crypto generateSalt(16)), below the
+    128 bits of RFC 9901 section 9.3; the mdoc random values (32 bytes) pass
+  reference: adapters/issuer-eudiplo/upstream-findings/sd-jwt-salt-length.md (not yet reported upstream)
+
+# Upstream issue text: upstream-findings/trust-list-last-known-good.md
+- testCase: PP_Inf_SM_TrustMechanisms_004_UF
+  variants: [SD+PA, MD+PA, SD+AC, MD+AC]
+  finding: >-
+    A TL-WP version with a broken seal, or sealed under CA-X, is refused, but EUDIPLO keeps no last valid list: after
+    the refresh every token request fails with 401 invalid_client "Wallet provider trust lists could not be loaded"
+    (PA), every pushed authorization request with 400 invalid_client "Client attestation validation failed" (AC),
+    instead of the previous list applying
+  reference: adapters/issuer-eudiplo/upstream-findings/trust-list-last-known-good.md (not yet reported upstream)
 # Issue 20: authorization code and pre-authorized code.
 - testCase: PP_WS_IA_AuthorizationCode_006_UF
   variants: [SD+AC]

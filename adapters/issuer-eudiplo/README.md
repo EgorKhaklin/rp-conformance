@@ -112,6 +112,31 @@ list response, a known finding of `PP_RP_IA_Supportive_002` (issue text in
 identifier lists and the adapter configures no mdoc PID, so `PP_WS_SM_Revocation_002` and the `MD` variants of
 `PP_RP_SM_Revocation_001` and `_007` are NOT APPLICABLE.
 
+## Revocation chaining, trust lists, issuer integrity and unlinkability (issue 26)
+
+- **Chaining** (`PP_WS_SM_Revocation_006`, `_007`): `revokeWithWalletUnit` is on for both PID configurations, and the
+  Compose file polls wallet units every 30 s (`WALLET_UNIT_STATUS_CHECK_INTERVAL`). The test case serves `SL-WP-A`
+  under a URL of its own, the WIA or KA of the issuance points there, and the Test Wallet Provider then revokes the
+  entry in place. Both fail: EUDIPLO never reads the TS3 status claims (the finding of issue 19).
+- **Suspension** (`_005`): status lists have 2 bits per entry; suspend, reinstate and revoke show within a second.
+- **Change of subject data** (`_008`): EUDIPLO keeps no subject record, so `changeSubject` plays the back office. It
+  revokes every session issued for the subject, and later offers carry the new data. The test case runs alone, last.
+- **`TL-WP` versions** (`PP_Inf_SM_TrustMechanisms_*`): `refreshTrust` clears EUDIPLO's trust list cache. EUDIPLO keeps
+  the highest accepted `LoTESequenceNumber` in its database, so the harness publishes the default list again under a
+  higher number after each test case. A withdrawn Wallet Provider has no issuance service on the list, which EUDIPLO
+  treats as untrusted.
+- **Signed metadata** carries the access certificate (`PP_Inf_SM_TrustMechanisms_007`, `anchor-access`).
+
+| Finding | Test cases |
+| --- | --- |
+| A TS3 WIA or KA status is never read, so revocation does not chain (issue 19 finding, [`wallet-attestation-status-claim.md`](upstream-findings/wallet-attestation-status-claim.md)) | `PP_WS_SM_Revocation_006`, `_007` (SD, MD) |
+| Array elements of an SD-JWT VC are never disclosable one by one ([`sd-jwt-array-element-disclosure.md`](upstream-findings/sd-jwt-array-element-disclosure.md)) | `PP_WS_SM_IssuerIntegrity_005` |
+| SD-JWT VC salts have 64 bits ([`sd-jwt-salt-length.md`](upstream-findings/sd-jwt-salt-length.md)) | `PP_WS_SM_IssuerIntegrity_006` (SD) |
+| A `TL-WP` with a bad seal leaves no list in force: every wallet is refused ([`trust-list-last-known-good.md`](upstream-findings/trust-list-last-known-good.md)) | `PP_Inf_SM_TrustMechanisms_004_UF` (SD, MD; PA and AC) |
+
+Concurrent credential requests of a fresh tenant sometimes fail with `credential_request_denied` "Could not allocate
+status entry after maximum retries". The runner therefore issues one credential at a time, also for test cases that
+wait in parallel.
 ## The authorization code flow (`P-AC`, issue 20)
 
 EUDIPLO's built-in authorization server (PAR with PKCE `S256` required, `request_uri` single-use for 60 s, codes bound
@@ -134,7 +159,7 @@ Checked against the running image and EUDIPLO's source at `ae0792a`.
 | No DPoP server nonce (no `DPoP-Nonce` or `use_dpop_nonce` in the source) | NOT APPLICABLE (`ICS-13.dpop_nonce` No; `P-DPN` stands for the nonce endpoint only) | `PP_WS_SM_TokenBinding_006_UF` |
 | Identifier lists are read as verifier but never published by the issuer | `P-IL` No | `PP_RP_SM_Revocation_007` and the identifier list variants of `SCN-P` |
 | A proof's `iat` is checked only against the future in the source; its age is bounded only by the `c_nonce`, which lives 10 minutes | `ICS-14.T_proof` "not bounded"; the test cases take the 5 minute cap | none: `PP_WS_SM_ProofOfPossession_006_UF` passes, the pinned image refuses `iat` − 1 h with `invalid_proof` (issue 19 run) |
-| No subject record to change: the claims travel with each offer | No `changeSubject` | `PP_WS_SM_Revocation_008` (NOT APPLICABLE) |
+| No subject record to change: the claims travel with each offer | The adapter plays the back office (issue 26): `changeSubject` revokes every session of the subject, and later offers for it carry the new data | none: `PP_WS_SM_Revocation_008` runs, alone, after every other test case |
 | With `walletAttestationRequired`, the authorization server metadata still lists `none` next to `attest_jwt_client_auth` in `token_endpoint_auth_methods_supported` | A token request without WIA, or without PoP, is still refused with `invalid_client` | none: `PP_WS_SM_ClientAttestation_002_UF` passes |
 | Shortest status list lifetime 60 s (`ttl` minimum, live) | `T_rev` PT1M with `immediateUpdate` | none: `REVOKED(T_rev)` test cases (`PP_WS_SM_Revocation_003`, `PP_RP_SM_Revocation_008`) poll for a minute, `PP_RP_SM_Revocation_005` across one `exp` |
 | Revocation chaining is a poll, and a suspended wallet unit changes nothing | `T_chain` PT7M; a suspended WIA or KA is still rejected at issuance (strict), but suspension does not chain | none (the catalogue chains revocation only) |

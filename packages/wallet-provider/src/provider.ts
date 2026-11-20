@@ -18,14 +18,20 @@ import { signerFor } from './trust';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
-export type WalletProviderId = 'WP-A' | 'WP-B';
-export type WalletUnitId = 'CW-1' | 'CW-2' | 'CW-B';
-export type WalletProviderStatusListId = 'SL-WP-A' | 'SL-WP-B';
+// Issue 26: `WP-C` (on `TL-WP` from a later version) and the withdrawn `WP-W` have a Wallet Unit each, for
+// PP_Inf_SM_TrustMechanisms; they are not default units, since no default version of `TL-WP` trusts them.
+export type WalletProviderId = 'WP-A' | 'WP-B' | 'WP-C' | 'WP-W';
+export type DefaultWalletUnitId = 'CW-1' | 'CW-2' | 'CW-B';
+export type WalletUnitId = DefaultWalletUnitId | 'CW-C' | 'CW-W';
+export type WalletProviderStatusListId = 'SL-WP-A' | 'SL-WP-B' | 'SL-WP-C' | 'SL-WP-W';
 
-/** The Wallet Provider of each Wallet Unit (issuer catalogue section 3.4). */
-export const WALLET_UNITS: Record<WalletUnitId, WalletProviderId> = { 'CW-1': 'WP-A', 'CW-2': 'WP-A', 'CW-B': 'WP-B' };
+/** The Wallet Provider of each default Wallet Unit (issuer catalogue section 3.4). */
+export const WALLET_UNITS: Record<DefaultWalletUnitId, WalletProviderId> = { 'CW-1': 'WP-A', 'CW-2': 'WP-A', 'CW-B': 'WP-B' };
 
-export const STATUS_LIST_OF: Record<WalletProviderId, WalletProviderStatusListId> = { 'WP-A': 'SL-WP-A', 'WP-B': 'SL-WP-B' };
+/** Issue 26: the Wallet Units of the trust mechanism test cases, of a Wallet Provider the default `TL-WP` does not grant. */
+export const TRUST_TEST_WALLET_UNITS: Record<Exclude<WalletUnitId, DefaultWalletUnitId>, WalletProviderId> = { 'CW-C': 'WP-C', 'CW-W': 'WP-W' };
+
+export const STATUS_LIST_OF: Record<WalletProviderId, WalletProviderStatusListId> = { 'WP-A': 'SL-WP-A', 'WP-B': 'SL-WP-B', 'WP-C': 'SL-WP-C', 'WP-W': 'SL-WP-W' };
 
 /** Status value of a revoked entry (Token Status List: `INVALID`). */
 export const REVOKED = 1;
@@ -97,7 +103,7 @@ export class TestWalletProvider {
     const maintenanceUntil = new Date(now.getTime() + (options.maintenanceDays ?? 400) * DAY_MS);
     const statusLists = {} as Record<WalletProviderId, WalletProviderStatusList>;
     const taken = new Map<WalletProviderId, Set<number>>();
-    for (const provider of ['WP-A', 'WP-B'] as WalletProviderId[]) {
+    for (const provider of Object.keys(STATUS_LIST_OF) as WalletProviderId[]) {
       statusLists[provider] = {
         id: STATUS_LIST_OF[provider],
         provider,
@@ -118,7 +124,7 @@ export class TestWalletProvider {
       return { idx, uri: statusLists[provider].uri };
     };
     const units = {} as Record<WalletUnitId, WalletUnit>;
-    for (const [id, provider] of Object.entries(WALLET_UNITS) as [WalletUnitId, WalletProviderId][]) {
+    for (const [id, provider] of Object.entries({ ...WALLET_UNITS, ...TRUST_TEST_WALLET_UNITS }) as [WalletUnitId, WalletProviderId][]) {
       units[id] = {
         id,
         provider,

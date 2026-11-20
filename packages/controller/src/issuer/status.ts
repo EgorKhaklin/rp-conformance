@@ -10,6 +10,7 @@ import {
   type IssuerExpectationCode,
   type ObserveStatusAction,
   type PresentAction,
+  type TestSubject,
   type Verdict,
 } from '@rp-conformance/core';
 import { defaultQueries, issueRegistrationCertificate } from '@rp-conformance/forge';
@@ -47,9 +48,11 @@ export interface LifecycleState {
   issued: Map<number, { sessionId: string; credentials: IssuedCredential[] }>;
   /** `issuer-event` steps (1-based) with the time the adapter reported the event done (`OBS-ADM`). */
   events: Map<number, { at: Date; status: string }>;
+  /** Issue 26: subjects whose data an `issuer-event` changed, with the subject whose data they now have (`SM_Revocation_008`). */
+  subjects?: Map<string, string>;
 }
 
-export const newLifecycleState = (): LifecycleState => ({ issued: new Map(), events: new Map() });
+export const newLifecycleState = (): LifecycleState => ({ issued: new Map(), events: new Map(), subjects: new Map() });
 
 /** One credential's status in one poll, as the report keeps it (design section 6.3: every version with `iat`, `exp`). */
 export interface PolledStatus {
@@ -144,9 +147,22 @@ export async function runIssuerEvent(
   action: IssuerEventAction,
   stepIndex: number,
   state: LifecycleState,
-  ctx: LifecycleContext & { adapter: { setStatus?: (sessionId: string, status: 'revoked' | 'suspended' | 'valid') => Promise<{ at: string }> } },
+  ctx: LifecycleContext & {
+    adapter: {
+      setStatus?: (sessionId: string, status: 'revoked' | 'suspended' | 'valid') => Promise<{ at: string }>;
+      changeSubject?: (from: TestSubject, to: TestSubject) => Promise<void>;
+    };
+  },
 ): Promise<Evaluation & { event?: { sessionId: string; at: string; status: string } }> {
-  if (action.event !== 'set-status') return { verdict: 'INCONCLUSIVE', reason: 'the issuer event change-subject is not implemented (no adapter offers changeSubject)' };
+  // Issue 26 (PP_WS_SM_Revocation_008): the adapter replaces the subject's data; the event's time counts as `OBS-ADM`.
+  if (action.event === 'change-subject') {
+    if (!ctx.adapter.changeSubject) return { verdict: 'NOT APPLICABLE', reason: 'the adapter offers no changeSubject (ICS-06.change_subject)' };
+    await ctx.adapter.changeSubject(action.from, action.to);
+    const at = new Date();
+    state.events.set(stepIndex, { at, status: `${action.from} changed to ${action.to}` });
+    state.subjects?.set(action.from, action.to);
+    return { verdict: 'PASS', reason: `the adapter reports the data of ${action.from} replaced by that of ${action.to} at ${at.toISOString()}`, event: { sessionId: '', at: at.toISOString(), status: `changed to ${action.to}` } };
+  }
   if (!ctx.adapter.setStatus) return { verdict: 'INCONCLUSIVE', reason: 'the adapter has no setStatus hook (P-HOOK)' };
   const issued = state.issued.get(action.ofStep);
   if (!issued?.credentials.length) return { verdict: 'INCONCLUSIVE', reason: `step ${action.ofStep} issued no credential to set the status of` };
@@ -280,6 +296,18 @@ export function evaluatePublication(observation: StatusObservation, named: strin
  * for nothing.
  */
 export function evaluateRevoked(observation: StatusObservation, windowMsValue: number): Evaluation {
+  return evaluateReached(observation, windowMsValue, INVALID, 'revoked');
+}
+
+/** Status value of a suspended entry (Token Status List section 7.1: `0x02` SUSPENDED). */
+const SUSPENDED = 2;
+
+/**
+ * Issue 26: within `windowMs` after the event the list shows the entry with `value`, and every later version does too.
+ * `REVOKED(t)` is this for `0x01`; `sl-suspended` and `sl-reinstated` (`PP_WS_SM_Revocation_005`) for `0x02` and `0x00`.
+ */
+export function evaluateReached(observation: StatusObservation, windowMsValue: number, value: number, name: string): Evaluation {
+  const INVALID = value;
   if (!observation.event) return { verdict: 'INCONCLUSIVE', reason: 'no issuer-event before the observation to count t from' };
   if (!observation.credentials.length) return { verdict: 'INCONCLUSIVE', reason: 'no credential was observed' };
   const deadline = Date.parse(observation.event.at) + windowMsValue;
@@ -290,21 +318,21 @@ export function evaluateRevoked(observation: StatusObservation, windowMsValue: n
     const first = credential.polls.findIndex((p) => p.value === INVALID);
     if (first < 0) {
       const last = credential.polls.at(-1);
-      problems.push(`${label(credential, many)}never shown revoked in ${credential.polls.length} poll(s) (last: ${last?.value !== undefined ? `0x0${last.value}` : last?.error})`);
+      problems.push(`${label(credential, many)}never shown ${name} in ${credential.polls.length} poll(s) (last: ${last?.value !== undefined ? `0x0${last.value}` : last?.error})`);
       continue;
     }
     const seen = credential.polls[first] as PolledStatus;
     if (Date.parse(seen.at) > deadline) {
-      problems.push(`${label(credential, many)}first shown revoked at ${seen.at}, after the deadline ${new Date(deadline).toISOString()}`);
+      problems.push(`${label(credential, many)}first shown ${name} at ${seen.at}, after the deadline ${new Date(deadline).toISOString()}`);
       continue;
     }
     const reverted = credential.polls.slice(first + 1).find((p) => p.value !== undefined && p.value !== INVALID);
     if (reverted) {
-      problems.push(`${label(credential, many)}shown revoked at ${seen.at}, then 0x0${reverted.value} at ${reverted.at}`);
+      problems.push(`${label(credential, many)}shown ${name} at ${seen.at}, then 0x0${reverted.value} at ${reverted.at}`);
       continue;
     }
     const versions = new Set(credential.polls.slice(first).map((p) => p.iat)).size;
-    passes.push(`${label(credential, many)}revoked at ${seen.at} (${((Date.parse(seen.at) - Date.parse(observation.event.at)) / 1000).toFixed(1)} s after the event), and in all ${credential.polls.length - first} later poll(s), ${versions} version(s)`);
+    passes.push(`${label(credential, many)}${name} at ${seen.at} (${((Date.parse(seen.at) - Date.parse(observation.event.at)) / 1000).toFixed(1)} s after the event), and in all ${credential.polls.length - first} later poll(s), ${versions} version(s)`);
   }
   if (problems.length) return { verdict: 'FAIL', reason: problems.join('; ') };
   return { verdict: 'PASS', reason: passes.join('; ') };
@@ -329,7 +357,21 @@ export function evaluateUnchanged(observation: StatusObservation): Evaluation {
 /** Evaluates the codes of an `observe-status` step; the step's verdict is the worst of them. */
 export function evaluateObservation(expectation: IssuerExpectation, observation: StatusObservation, ics: LifecycleContext['ics']): Evaluation {
   const evaluations = expectation.codes.map((code: IssuerExpectationCode): Evaluation => {
-    if (code === 'CONF') return evaluatePublication(observation, expectation.checks ?? []);
+    if (code === 'CONF') {
+      // Issue 26: `sl-suspended` and `sl-reinstated` judge the entry's value within `T_rev` after the event.
+      const named = expectation.checks ?? [];
+      const values = { 'sl-suspended': [SUSPENDED, 'suspended (0x02)'], 'sl-reinstated': [VALID, 'valid again (0x00)'] } as const;
+      const timed = named.filter((c): c is keyof typeof values => c in values);
+      const rest = named.filter((c) => !(c in values));
+      const results = [
+        ...(rest.length ? [evaluatePublication(observation, rest)] : []),
+        ...timed.map((c) => {
+          const window = windowMs('T_rev', ics);
+          return window === 'exp' ? { verdict: 'INCONCLUSIVE' as Verdict, reason: 'T_rev is no duration' } : evaluateReached(observation, window, values[c][0], values[c][1]);
+        }),
+      ];
+      return { verdict: worst(results.map((r) => r.verdict)), reason: results.map((r) => r.reason).join('; ') };
+    }
     if (code === 'UNCHANGED') return evaluateUnchanged(observation);
     if (code.startsWith('REVOKED(')) {
       const window = windowMs(code.slice('REVOKED('.length, -1), ics);

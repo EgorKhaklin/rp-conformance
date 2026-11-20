@@ -28,7 +28,14 @@ export const GRANT_VARIANTS: Record<GrantVariant, IssuanceGrant> = { PA: 'pre-au
 export type IssuerTestClass = 'PP_WS' | 'PP_RP' | 'PP_Inf' | 'AP_WS' | 'AP_RP' | 'AP_Inf' | 'PP_TB';
 
 /** The default Wallet Units of the issuer catalogue section 3.4. */
-export type WalletUnit = 'CW-1' | 'CW-2' | 'CW-B';
+export type WalletUnit =
+  | 'CW-1'
+  | 'CW-2'
+  | 'CW-B'
+  // Issue 26 (PP_Inf_SM_TrustMechanisms): a Wallet Unit of `WP-C`, listed from a later version of `TL-WP`, and one of
+  // the withdrawn `WP-W`.
+  | 'CW-C'
+  | 'CW-W';
 /** The test subjects of the issuer catalogue section 3.4. */
 export type TestSubject = 'SUBJ-1' | 'SUBJ-2';
 
@@ -135,6 +142,21 @@ export interface IssuerTrustListAction {
   add?: string[];
   /** Named trust-list faults (at most one); empty or left out for a valid version. */
   faults?: FaultId[];
+  // Issue 26 (PP_Inf_SM_TrustMechanisms):
+  /** Entities whose issuance services the version leaves out: their status becomes withdrawn (as `WP-W` on `TL-WP`). */
+  withdraw?: string[];
+  /** Entities whose withdrawn issuance services the version carries again (`WP-W` granted, `_005_UF`). */
+  restoreIssuance?: string[];
+}
+
+/**
+ * Issue 26: inspect what earlier steps captured (`OBS-CRED` of their credentials, the metadata of their issuance, and the
+ * requests the Provider sent to the harness services, `OBS-NET`) with the named checks of a `CONF` expectation.
+ */
+export interface InspectAction {
+  kind: 'inspect';
+  /** The steps (1-based) whose credentials and exchanges are inspected. */
+  ofSteps: number[];
 }
 
 /** Poll `OBS-SL` for the credentials of earlier steps until `t` or until the expectation is settled. */
@@ -161,7 +183,9 @@ export type IssuerStepAction =
   | IssuerTrustListAction
   | ObserveStatusAction
   | PresentAction
-  | NotificationAction;
+  | NotificationAction
+  // Issue 26
+  | InspectAction;
 
 /**
  * Expected result codes of the issuer catalogue section 2.5, checked as the issuer harness design section 6.3

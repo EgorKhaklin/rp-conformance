@@ -43,3 +43,4 @@ Surrogate items that select test cases through their Technology section.
 | N/A | Attestation-Based Client Authentication | Yes/No | Every Provider; Wallet Instance Attestation as client authentication, [IETF draft-attestation-based-client-auth]. |
 | N/A | Token Status List | Yes/No | Follows ICS-05 (`P-REV`); [Token Status List]. |
 | N/A | HTTP | Yes/No | Every Provider that publishes status lists or identifier lists. |
+| N/A | ETSI TS 119 602 LoTE | Yes/No | Every Provider; the Wallet Provider list `TL-WP`, [ETSI TS 119 602]. |

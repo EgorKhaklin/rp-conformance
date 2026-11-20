@@ -1,6 +1,8 @@
 // The named checks of the reference validator (harness design section 7). Every fault names the one check it must fail.
 import type { IssuerArtifactCheck } from './issuer/artifact-checks';
 import type { IssuerAttestationCheck, IssuerRequestCheck } from './issuer/checks';
+// Issue 26: issuer integrity, unlinkability and trust infrastructure checks.
+import type { IssuerInspectionCheck } from './issuer/integrity-checks';
 import type { AuthorizationResponseCheck, GrantCheck } from './issuer/grant-faults';
 import type { SessionCheck } from './issuer/session-faults';
 
@@ -153,7 +155,9 @@ export type CheckId =
   | IssuerOutputCheck
   | GrantCheck
   | AuthorizationResponseCheck
-  | SessionCheck;
+  | SessionCheck
+  // Issue 26
+  | IssuerInspectionCheck;
 
 /** `pass`; `fail`; `skip` when a check could not be evaluated because a check it depends on did not pass, or does not apply. */
 export type CheckStatus = 'pass' | 'fail' | 'skip';

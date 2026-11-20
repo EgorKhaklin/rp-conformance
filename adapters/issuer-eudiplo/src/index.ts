@@ -157,6 +157,9 @@ export class IssuerEudiploAdapter implements IssuerAdapter {
   private capabilities: EudiploCapabilities = { csr: false, statusCheckMode: false, revokeWithWalletUnit: false };
   /** Issue 25: the claims webhook that defers every issuance it is asked for (`P-DEF`), started on first use. */
   private deferralWebhook?: { server: RunningServer; url: string };
+  // Issue 26 (changeSubject): the sessions of each subject's offers, and subjects whose data were replaced.
+  private sessionsOf = new Map<TestSubject, string[]>();
+  private dataOf = new Map<TestSubject, TestSubject>();
 
   constructor(private readonly options: IssuerEudiploAdapterOptions = {}) {
     this.baseUrl = (options.baseUrl ?? process.env.EUDIPLO_URL ?? `http://127.0.0.1:${process.env.EUDIPLO_PORT ?? 3000}`).replace(/\/$/, '');
@@ -442,7 +445,8 @@ export class IssuerEudiploAdapter implements IssuerAdapter {
     const unknown = req.configurations.filter((id) => !this.configurations.has(id));
     if (unknown.length) throw new Error(`the adapter configures no credential configuration ${unknown.join(', ')}`);
     // The subject's claims in the names of each configuration's format, with the ages and dates derived at issuance.
-    const claimsOf = (id: string) => pidClaimsFor(req.subject, PID_CONFIGURATIONS[id].format, PID_CONFIGURATIONS[id].lifetime);
+    const data = this.dataOf.get(req.subject) ?? req.subject;
+    const claimsOf = (id: string) => pidClaimsFor(data, PID_CONFIGURATIONS[id].format, PID_CONFIGURATIONS[id].lifetime);
     const preAuthorized = req.grant === 'pre-authorized_code';
     const txCode = preAuthorized && req.txCode ? String(randomInt(0, 1_000_000)).padStart(6, '0') : undefined;
     const deferralUrl = req.deferred ? await this.deferral() : undefined;
@@ -457,6 +461,7 @@ export class IssuerEudiploAdapter implements IssuerAdapter {
       ...(txCode ? { tx_code: txCode, tx_code_description: 'Transaction code of the conformance test' } : {}),
       reference: `${req.subject}`,
     });
+    this.sessionsOf.set(req.subject, [...(this.sessionsOf.get(req.subject) ?? []), offer.session]);
     const uri = req.byReference ? offer.uri : await this.byValue(offer.uri);
     return { offer: uri, sessionId: offer.session, ...(txCode ? { txCode } : {}) };
   }
@@ -538,6 +543,24 @@ export class IssuerEudiploAdapter implements IssuerAdapter {
     return { at };
   }
 
+  /**
+   * Issue 26 (PP_WS_SM_Revocation_008): the Provider's back office learns that the subject's data changed. EUDIPLO keeps
+   * no subject record (the claims travel with each offer), so the adapter plays that part, as an integrator's identity
+   * system would: it revokes every credential issued for the subject (`POST /api/session/revoke` per session; a session
+   * that issued nothing with a status entry answers 409 and is skipped), and from now on offers for the subject carry
+   * the data of `to`.
+   */
+  async changeSubject(from: TestSubject, to: TestSubject): Promise<void> {
+    for (const sessionId of this.sessionsOf.get(from) ?? []) {
+      try {
+        await this.call('POST', '/api/session/revoke', { sessionId, status: STATUS_VALUE.revoked });
+      } catch (error) {
+        if (!(error instanceof EudiploError) || error.status !== 409) throw error;
+      }
+    }
+    this.dataOf.set(from, to);
+  }
+
   /** Clears EUDIPLO's trust list cache, so the next wallet or key attestation makes it fetch `TL-WP` again. */
   async refreshTrust(): Promise<void> {
     await this.call('DELETE', '/api/cache/trust-list');
@@ -565,6 +588,8 @@ export class IssuerEudiploAdapter implements IssuerAdapter {
     this.keyChains = undefined;
     this.method = undefined;
     this.configurations.clear();
+    this.sessionsOf.clear();
+    this.dataOf.clear();
   }
 }
 
