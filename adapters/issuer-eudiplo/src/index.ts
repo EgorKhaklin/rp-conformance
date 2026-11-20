@@ -13,11 +13,11 @@ import {
   type TestSubject,
 } from '@rp-conformance/core';
 import { icsList, icsNumber } from './ics';
-import { PID_FIELDS, PID_MDOC_FIELDS, PID_SD_JWT_EXTRA_FIELDS, pidClaimsFor } from './subjects';
+import { ATTESTATION_MDOC_FIELDS, ATTESTATION_SD_JWT_FIELDS, attestationClaimsFor, PID_FIELDS, PID_MDOC_FIELDS, PID_SD_JWT_EXTRA_FIELDS, pidClaimsFor } from './subjects';
 
 export { durationSeconds, ICS_PATH, icsList, icsNumber, icsProblems, loadIssuerIcs } from './ics';
 export { REFERENCE_ENV_PATH, REFERENCE_EUDIPLO, type ReferenceEudiplo } from './reference';
-export { PID_FIELDS, PID_MDOC_FIELDS, PID_SUBJECTS, pidClaimsFor } from './subjects';
+export { ATTESTATION_MDOC_FIELDS, ATTESTATION_SD_JWT_FIELDS, attestationClaimsFor, PID_FIELDS, PID_MDOC_FIELDS, PID_SUBJECTS, pidClaimsFor } from './subjects';
 
 /** The ID of the PID credential configuration in SD-JWT VC format, as the Credential Issuer metadata names it. */
 export const PID_SD_JWT_CONFIGURATION = 'pid-sd-jwt-vc';
@@ -48,6 +48,27 @@ const ACCESS_TOKEN_LIFETIME_SECONDS = 60;
 const DEFERRAL_INTERVAL_SECONDS = 1;
 /** Lifetime of the short-lived PID, without status reference (ICS-05.short.validity_period). */
 const PID_SHORT_LIFETIME_SECONDS = 12 * 60 * 60;
+
+/**
+ * Issue 27: the attestation configurations of an Attestation Provider tenant (QEAA, PuB-EAA, non-qualified EAA), FCAF
+ * `default_credential_A`, by the ICS reference that names them; the IDs come from the tenant's ICS (`categories.<c>`).
+ */
+const ATTESTATION_CONFIGURATIONS: { ref: string; format: 'SD' | 'MD'; lifetime: number; short: boolean; deviceBound: boolean; second?: boolean }[] = [
+  { ref: 'ICS-02.SD', format: 'SD', lifetime: 30 * 24 * 60 * 60, short: false, deviceBound: true },
+  { ref: 'ICS-02.second', format: 'SD', lifetime: 30 * 24 * 60 * 60, short: false, deviceBound: true, second: true },
+  { ref: 'ICS-02.MD', format: 'MD', lifetime: 30 * 24 * 60 * 60, short: false, deviceBound: true },
+  { ref: 'ICS-05.short.SD', format: 'SD', lifetime: 12 * 60 * 60, short: true, deviceBound: true },
+  { ref: 'ICS-05.short.MD', format: 'MD', lifetime: 12 * 60 * 60, short: true, deviceBound: true },
+  { ref: 'ICS-04.NDB.SD', format: 'SD', lifetime: 30 * 24 * 60 * 60, short: false, deviceBound: false },
+];
+/** `vct`, doctype and namespace of `default_credential_A` (the forge's `CREDENTIAL_A_VCT`, `CREDENTIAL_A_DOCTYPE`). */
+export const ATTESTATION_VCT = 'urn:rp-conformance:credential_a:1';
+export const ATTESTATION_DOCTYPE = 'test.rp-conformance.credential_a.1';
+/** The relying party the embedded disclosure policy allows (ICS-19), and the one `changeDisclosurePolicy` allows instead. */
+const DISCLOSURE_POLICY_RP = 'https://rp.rp-test';
+const CHANGED_DISCLOSURE_POLICY_RP = 'https://rp-b.rp-test';
+/** The category names of the tenants, for descriptions and the display name (the trade name of the access certificate). */
+const CATEGORY_NAMES = { 'P-Q': 'QEAA Provider', 'P-PB': 'PuB-EAA Provider', 'P-E': 'non-qualified EAA Provider' } as const;
 
 /** The PID configurations the adapter creates: format, lifetime, and whether they carry a status reference. */
 const PID_CONFIGURATIONS: Record<string, { format: 'SD' | 'MD'; lifetime: number; short: boolean }> = {
@@ -160,6 +181,10 @@ export class IssuerEudiploAdapter implements IssuerAdapter {
   // Issue 26 (changeSubject): the sessions of each subject's offers, and subjects whose data were replaced.
   private sessionsOf = new Map<TestSubject, string[]>();
   private dataOf = new Map<TestSubject, TestSubject>();
+  /** Issue 27: the configurations of an Attestation Provider tenant (`default_credential_A`), by ID; empty for a PID Provider. */
+  private attestations = new Map<string, { format: 'SD' | 'MD'; lifetime: number }>();
+  /** Issue 27: the category of the tenant, from the profiles of its ICS. */
+  private category?: keyof typeof CATEGORY_NAMES;
 
   constructor(private readonly options: IssuerEudiploAdapterOptions = {}) {
     this.baseUrl = (options.baseUrl ?? process.env.EUDIPLO_URL ?? `http://127.0.0.1:${process.env.EUDIPLO_PORT ?? 3000}`).replace(/\/$/, '');
@@ -326,6 +351,7 @@ export class IssuerEudiploAdapter implements IssuerAdapter {
       user_authentication: icsList(env.ics, 'ICS-04.user_authentication', ['iso_18045_high']),
     };
     this.configurations.clear();
+    this.attestations.clear();
     const batchSize = icsNumber(env.ics, 'ICS-08.batch_size', 1);
     // Issue 24 (PP_WS_MS_Metadata_009): the reuse policy of ARF Annex II, method A (once_only) preferred over method B
     // (limited_time), consistent with the batch size (ICS-08.credential_reuse_policy), on every configuration.
@@ -366,6 +392,13 @@ export class IssuerEudiploAdapter implements IssuerAdapter {
       this.configurations.add(id);
     };
     const short = env.ics.profiles.includes('P-SHORT');
+    // Issue 27: a tenant whose ICS names an Attestation Provider category issues `default_credential_A` instead.
+    this.category = (Object.keys(CATEGORY_NAMES) as (keyof typeof CATEGORY_NAMES)[]).find((p) => env.ics.profiles.includes(p));
+    if (this.category) {
+      await this.setUpAttestations(env, { attestation, mdocAttestation, keyAttestationsRequired, reuse, short });
+      await this.setUpIssuance(env, batchSize, `EUDIPLO ${CATEGORY_NAMES[this.category]} under conformance test`);
+      return;
+    }
     const droppedFromPid = await sdJwt(PID_SD_JWT_CONFIGURATION, false);
     this.capabilities.revokeWithWalletUnit = !droppedFromPid.includes('revokeWithWalletUnit');
     // Issue 24 (PP_WS_MS_CredentialEndpoint_004_UF): a second configuration that no PID offer names, so a credential
@@ -379,11 +412,65 @@ export class IssuerEudiploAdapter implements IssuerAdapter {
       if (short) await mdoc(PID_MDOC_SHORT_CONFIGURATION, true);
     }
 
+    await this.setUpIssuance(env, batchSize, 'EUDIPLO PID Provider under conformance test');
+  }
+
+  /**
+   * Issue 27: the configurations of `default_credential_A` for an Attestation Provider tenant: device-bound in SD-JWT VC
+   * (`ICS-02.SD`, and the second configuration `ICS-02.second`) and mdoc (`ICS-02.MD`), the short-lived ones
+   * (`ICS-05.short.*`), and one that is not device-bound (`ICS-04.NDB.SD`, ICS-04 `P-NDB`). Revocation chaining
+   * (`revokeWithWalletUnit`) as ICS-07 declares it, the KA levels of ICS-04.
+   */
+  private async setUpAttestations(
+    env: IssuerTestEnvironment,
+    o: { attestation: string; mdocAttestation?: string; keyAttestationsRequired: Record<string, string[]>; reuse: Record<string, unknown>; short: boolean },
+  ): Promise<void> {
+    const name = CATEGORY_NAMES[this.category as keyof typeof CATEGORY_NAMES];
+    const chains = env.ics.profiles.includes('P-CHAIN') && /^(yes|true)$/i.test(String(env.ics.items['ICS-07'] ?? ''));
+    const ndb = env.ics.profiles.includes('P-NDB');
+    for (const c of ATTESTATION_CONFIGURATIONS) {
+      if (c.short && !o.short) continue;
+      if (!c.deviceBound && !ndb) continue;
+      if (c.format === 'MD' && !env.ics.profiles.includes('P-MD')) continue;
+      const id = env.ics.items[c.ref];
+      if (typeof id !== 'string') throw new Error(`the ICS of the ${name} names no configuration under ${c.ref}`);
+      const what = `${c.format === 'SD' ? 'SD-JWT VC' : 'mdoc'}${c.short ? ', short-lived without status reference' : ''}${c.deviceBound ? '' : ', not device-bound'}${c.second ? ', second configuration (never offered with the first)' : ''}`;
+      const display = [{ name: `default_credential_A (${name})`, locale: 'en-US', description: 'FCAF default_credential_A of the conformance test subject' }];
+      const proof = c.deviceBound ? { keyAttestationsRequired: o.keyAttestationsRequired } : {};
+      // ICS-19 (`P-EDP`): an embedded disclosure policy, published as `disclosure_policy` of the configuration.
+      const edp = env.ics.profiles.includes('P-EDP') ? { embeddedDisclosurePolicy: { policy: 'allowList', values: [DISCLOSURE_POLICY_RP] } } : {};
+      if (c.format === 'MD' && !o.mdocAttestation) throw new Error('the ICS declares mdoc (P-MD), but the Test Registrar issued no document signer');
+      await this.postWithoutUnknownKeys('/api/issuer/credentials', {
+        id,
+        description: `FCAF default_credential_A as ${name} (${what}), default_configuration_PP_1`,
+        config:
+          c.format === 'SD'
+            ? { format: 'dc+sd-jwt', display, ...proof, ...o.reuse }
+            : { format: 'mso_mdoc', docType: ATTESTATION_DOCTYPE, display, ...proof, ...o.reuse },
+        ...(c.format === 'SD' ? { vct: ATTESTATION_VCT } : {}),
+        keyBinding: c.deviceBound,
+        statusManagement: !c.short,
+        keyChainId: c.format === 'SD' ? o.attestation : o.mdocAttestation,
+        lifeTime: c.lifetime,
+        fields: c.format === 'SD' ? ATTESTATION_SD_JWT_FIELDS : ATTESTATION_MDOC_FIELDS,
+        ...(c.short || !c.deviceBound ? {} : { revokeWithWalletUnit: chains }),
+        ...edp,
+      });
+      this.configurations.add(id);
+      this.attestations.set(id, { format: c.format, lifetime: c.lifetime });
+    }
+    this.capabilities.revokeWithWalletUnit = chains;
+  }
+
+  /** The issuance configuration of the tenant: wallet attestation, `TL-WP`, DPoP, batch, registration certificate. */
+  private async setUpIssuance(env: IssuerTestEnvironment, batchSize: number, displayName: string): Promise<void> {
     const tlWp = env.trustLists.find((list) => list.id === 'TL-WP');
     if (!tlWp) throw new Error('TL-WP is not published');
     const walletProviderTrustLists = [{ url: tlWp.url, verifierX509Der: derOf(tlWp.schemeOperatorCertificatePem) }];
+    // Issue 27: ICS-18 decides how an Attestation Provider treats an unobtainable WIA or KA status (`reject`: strict).
+    const statusCheckMode = /^accept/i.test(String(env.ics.items['ICS-18'] ?? 'reject')) && this.category ? 'best_effort' : 'strict';
     const issuance = {
-      display: [{ name: 'EUDIPLO PID Provider under conformance test', locale: 'en-US' }],
+      display: [{ name: displayName, locale: 'en-US' }],
       authorizationServers: [{ type: 'built-in', id: BUILT_IN_AS, walletAttestationRequired: true, token: { lifetimeSeconds: ACCESS_TOKEN_LIFETIME_SECONDS } }],
       walletAttestationRequired: true,
       walletProviderTrustLists,
@@ -396,7 +483,7 @@ export class IssuerEudiploAdapter implements IssuerAdapter {
       // A PID Provider rejects a WIA or KA whose status it cannot obtain (catalogue decision 2): `strict`, for WIAs at
       // the authorization server (inherited) and KAs at the credential endpoint. 9.1.0 has no such setting and accepts
       // them (best effort).
-      walletAttestationStatusCheckMode: 'strict',
+      walletAttestationStatusCheckMode: statusCheckMode,
     };
     const dropped = await this.postWithoutUnknownKeys('/api/issuer/config', issuance);
     this.capabilities.statusCheckMode = !dropped.includes('walletAttestationStatusCheckMode');
@@ -446,7 +533,12 @@ export class IssuerEudiploAdapter implements IssuerAdapter {
     if (unknown.length) throw new Error(`the adapter configures no credential configuration ${unknown.join(', ')}`);
     // The subject's claims in the names of each configuration's format, with the ages and dates derived at issuance.
     const data = this.dataOf.get(req.subject) ?? req.subject;
-    const claimsOf = (id: string) => pidClaimsFor(data, PID_CONFIGURATIONS[id].format, PID_CONFIGURATIONS[id].lifetime);
+    const claimsOf = (id: string) => {
+      // Issue 27: `default_credential_A` for an Attestation Provider tenant.
+      const attestation = this.attestations.get(id);
+      if (attestation) return attestationClaimsFor(data, attestation.format);
+      return pidClaimsFor(data, PID_CONFIGURATIONS[id].format, PID_CONFIGURATIONS[id].lifetime);
+    };
     const preAuthorized = req.grant === 'pre-authorized_code';
     const txCode = preAuthorized && req.txCode ? String(randomInt(0, 1_000_000)).padStart(6, '0') : undefined;
     const deferralUrl = req.deferred ? await this.deferral() : undefined;
@@ -481,7 +573,8 @@ export class IssuerEudiploAdapter implements IssuerAdapter {
 
   /** Completes a deferred issuance with the subject's claims (`POST /api/issuer/deferred/{transactionId}/complete`). */
   async completeDeferred(transactionId: string, subject: TestSubject): Promise<void> {
-    await this.call('POST', `/api/issuer/deferred/${encodeURIComponent(transactionId)}/complete`, { claims: pidClaimsFor(subject, 'SD', PID_LIFETIME_SECONDS) });
+    const claims = this.category ? attestationClaimsFor(subject, 'SD') : pidClaimsFor(subject, 'SD', PID_LIFETIME_SECONDS);
+    await this.call('POST', `/api/issuer/deferred/${encodeURIComponent(transactionId)}/complete`, { claims });
   }
 
   /**
@@ -534,13 +627,33 @@ export class IssuerEudiploAdapter implements IssuerAdapter {
    */
   async setStatus(sessionId: string, status: 'revoked' | 'suspended' | 'valid'): Promise<{ at: string }> {
     const value = STATUS_VALUE[status];
-    await this.call('POST', '/api/session/revoke', { sessionId, status: value });
+    await this.revokeWithRetry(sessionId, value);
     const at = new Date().toISOString();
     const entries = await this.credentialStatus(sessionId);
     if (!entries.length) throw new Error(`EUDIPLO reports no credential with a status entry for session ${sessionId}`);
     const wrong = entries.filter((entry) => entry.status !== value);
     if (wrong.length) throw new Error(`EUDIPLO reports status ${wrong.map((e) => e.status).join(', ')} instead of ${value} for session ${sessionId}`);
     return { at };
+  }
+
+  /**
+   * Issue 27: `POST /api/session/revoke`, repeated on HTTP 503. EUDIPLO answers 503 ("Could not generate current tokens
+   * for status list") when other changes of the same status list keep its token regeneration from settling, which the
+   * Attestation Provider tenants' parallel lifecycle test cases provoke. The entry is written before the regeneration
+   * fails, so a credential that already has the new status counts as done; otherwise the call is repeated.
+   */
+  private async revokeWithRetry(sessionId: string, value: number): Promise<void> {
+    for (let attempt = 1; ; attempt++) {
+      try {
+        await this.call('POST', '/api/session/revoke', { sessionId, status: value });
+        return;
+      } catch (error) {
+        if (!(error instanceof EudiploError) || error.status !== 503 || attempt >= 5) throw error;
+        await new Promise((resolve) => setTimeout(resolve, 500 * attempt));
+        const entries = await this.credentialStatus(sessionId).catch(() => []);
+        if (entries.length && entries.every((entry) => entry.status === value)) return;
+      }
+    }
   }
 
   /**
@@ -561,6 +674,23 @@ export class IssuerEudiploAdapter implements IssuerAdapter {
     this.dataOf.set(from, to);
   }
 
+  /**
+   * Issue 27 (`AP_WS_SM_Revocation_102`, ICS-19): changes the embedded disclosure policy of every configuration the
+   * session issued credentials of (`PATCH /api/issuer/credentials/{id}`: another allowed relying party), and resolves
+   * once EUDIPLO stores the new policy.
+   */
+  async changeDisclosurePolicy(sessionId: string): Promise<{ at: string }> {
+    const configurations = [...new Set((await this.credentialStatus(sessionId)).map((entry) => entry.credentialConfigurationId))];
+    if (!configurations.length) throw new Error(`EUDIPLO reports no credential of session ${sessionId}`);
+    const policy = { policy: 'allowList', values: [CHANGED_DISCLOSURE_POLICY_RP] };
+    for (const id of configurations) {
+      await this.call('PATCH', `/api/issuer/credentials/${encodeURIComponent(id)}`, { embeddedDisclosurePolicy: policy });
+      const stored = await this.call<{ embeddedDisclosurePolicy?: { values?: unknown[] } }>('GET', `/api/issuer/credentials/${encodeURIComponent(id)}`);
+      if (!stored.embeddedDisclosurePolicy?.values?.includes(CHANGED_DISCLOSURE_POLICY_RP)) throw new Error(`EUDIPLO did not store the changed disclosure policy of ${id}`);
+    }
+    return { at: new Date().toISOString() };
+  }
+
   /** Clears EUDIPLO's trust list cache, so the next wallet or key attestation makes it fetch `TL-WP` again. */
   async refreshTrust(): Promise<void> {
     await this.call('DELETE', '/api/cache/trust-list');
@@ -574,7 +704,8 @@ export class IssuerEudiploAdapter implements IssuerAdapter {
       ...(this.tenantId ? { tenant: this.tenantId } : {}),
       ...(this.method ? { enrolment: this.method === 'csr' ? 'CSR (GET /api/key-chain/{id}/csr)' : 'keys generated by the Registrar, imported (POST /api/key-chain/import)' } : {}),
       walletAttestationStatusCheckMode: this.capabilities.statusCheckMode ? 'strict' : 'not configurable (best effort)',
-      revokeWithWalletUnit: this.capabilities.revokeWithWalletUnit ? 'on' : 'not configurable',
+      revokeWithWalletUnit: this.capabilities.revokeWithWalletUnit ? 'on' : this.category ? 'off (ICS-07)' : 'not configurable',
+      ...(this.category ? { category: CATEGORY_NAMES[this.category], credential: 'default_credential_A' } : {}),
     };
   }
 
@@ -590,6 +721,8 @@ export class IssuerEudiploAdapter implements IssuerAdapter {
     this.configurations.clear();
     this.sessionsOf.clear();
     this.dataOf.clear();
+    this.attestations.clear();
+    this.category = undefined;
   }
 }
 

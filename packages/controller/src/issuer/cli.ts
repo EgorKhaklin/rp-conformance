@@ -79,7 +79,8 @@ export async function issuerMain(argv: string[], io: Io, definitions = issuerDef
   }
   const entry = ISSUER_ADAPTERS[values.adapter];
   if (!entry) throw new Error(`unknown issuer adapter ${values.adapter} (adapters: ${Object.keys(ISSUER_ADAPTERS).join(', ')})`);
-  const adapter = (await entry.load()).createAdapter();
+  const module = await entry.load();
+  const adapter = module.createAdapter();
   const root = resolve(dirname(fileURLToPath(import.meta.url)), '../../../..');
   const ics = await loadIssuerIcs(values.ics ? resolve(values.ics) : join(root, 'adapters', entry.dir, 'ics.yaml'));
   const maxWait = values['max-wait'];
@@ -88,6 +89,8 @@ export async function issuerMain(argv: string[], io: Io, definitions = issuerDef
   const knownFindings = values['known-findings'] ? await loadIssuerKnownFindings(resolve(values['known-findings'])) : undefined;
   const { report, reportPath } = await runIssuerConformance({
     adapter,
+    // Issue 27: one adapter per Provider instance of another category, so the categories run in parallel.
+    createAdapter: () => module.createAdapter(),
     ics,
     definitions,
     only: values.only?.flatMap((v) => v.split(',')),

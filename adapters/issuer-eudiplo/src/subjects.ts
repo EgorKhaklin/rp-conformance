@@ -1,4 +1,4 @@
-import { ageOf, PID_TEST_SUBJECTS, pidClaimsOf, type TestSubject } from '@rp-conformance/core';
+import { ageOf, ATTESTATION_TEST_SUBJECTS, PID_TEST_SUBJECTS, pidClaimsOf, type TestSubject } from '@rp-conformance/core';
 
 /**
  * The attribute values the adapter seeds for each test subject (issuer catalogue section 3.4, ICS-17). EUDIPLO takes the
@@ -124,4 +124,26 @@ export function pidClaimsFor(subject: TestSubject, format: 'SD' | 'MD', lifetime
     age_in_years: age,
     age_birth_year: birthYear,
   };
+}
+
+/** Issue 27: the namespace of `default_credential_A` in mdoc format (the forge's `CREDENTIAL_A_NAMESPACE`). */
+export const ATTESTATION_NAMESPACE = 'test.rp-conformance.credential_a.1';
+
+/** Issue 27: the claim definitions of `default_credential_A` in SD-JWT VC format, each selectively disclosable. */
+export const ATTESTATION_SD_JWT_FIELDS = [
+  { path: ['attribute_A'], type: 'number', mandatory: true, disclosable: true },
+  { path: ['attribute_B'], type: 'string', mandatory: true, disclosable: true },
+  { path: ['attribute_C'], type: 'string', mandatory: true, disclosable: true },
+];
+
+/** Issue 27: the same in mdoc format, namespace `test.rp-conformance.credential_a.1` (dates as strings, as for the PID). */
+export const ATTESTATION_MDOC_FIELDS = [
+  { namespace: ATTESTATION_NAMESPACE, path: ['attribute_A'], type: 'number', mandatory: true },
+  { namespace: ATTESTATION_NAMESPACE, path: ['attribute_B'], type: 'string', mandatory: true },
+  { namespace: ATTESTATION_NAMESPACE, path: ['attribute_C'], type: 'string', mandatory: true },
+];
+
+/** Issue 27: the claims of `default_credential_A` the adapter seeds for a subject (`ATTESTATION_TEST_SUBJECTS`). */
+export function attestationClaimsFor(subject: TestSubject, _format: 'SD' | 'MD'): Record<string, unknown> {
+  return { ...ATTESTATION_TEST_SUBJECTS[subject] };
 }

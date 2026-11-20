@@ -87,3 +87,66 @@ describe('issuer definitions: grants', () => {
     }
   });
 });
+
+// Issue 27: the Attestation Provider (AP_*): category variants of the PP_* test cases and the objectives from 100.
+describe('issuer definitions: Attestation Provider', () => {
+  const ap = issuerDefinitions.filter((d) => d.id.startsWith('AP_'));
+  const pp = issuerDefinitions.filter((d) => d.id.startsWith('PP_'));
+  const ids = (list: typeof issuerDefinitions) => new Set(list.map((d) => d.id));
+
+  it('derives Q, PB and E of every PP_* test case not marked PID only, and none of the PID only ones', async () => {
+    const { isPidOnly } = await import('../src/index');
+    for (const definition of pp) {
+      const apId = definition.id.replace(/^PP_/, 'AP_');
+      for (const category of ['Q', 'PB', 'E']) {
+        const found = ap.some((d) => d.id === apId && variantOf(d) === [variantOf(definition), category].filter((v) => v !== 'default').join('+'));
+        expect(found, `${apId} ${category}`).toBe(!isPidOnly(definition.id));
+      }
+    }
+    expect([...ids(ap)].some((id) => id.startsWith('AP_WS_DM_Pid'))).toBe(false);
+  });
+
+  it('gates the derived _UF test cases on AP_WS_IA_MainInteraction_001, and takes POLICY (ICS-18) where a PID Provider rejects', () => {
+    for (const definition of ap.filter((d) => d.control)) expect(definition.control).toBe('AP_WS_IA_MainInteraction_001');
+    const policy = ap.find((d) => d.id === 'AP_WS_SM_KeyAttestation_009_UF' && variantOf(d) === 'SD+PA+Q');
+    const issuances = policy?.steps.filter((s) => s.run?.kind === 'issuance') ?? [];
+    expect(issuances.length).toBeGreaterThan(0);
+    for (const step of issuances) expect(step.expect).toMatchObject({ codes: ['POLICY'], policy: 'ICS-18' });
+    const values = ap.find((d) => d.id === 'AP_WS_SM_Revocation_008' && variantOf(d) === 'SD+PA+E');
+    expect(values?.steps.flatMap((s) => s.expect.checks ?? [])).toContain('attestation-values');
+    // The texts written for the test case (not the ICS questions of the profile applicability) name no PID Provider.
+    const texts = ap.flatMap((d) => [d.objective, ...d.preconditions, ...(d.comments ?? []), ...d.steps.flatMap((st) => [st.text, st.expect.text, ...(st.expect.checks ?? [])])]);
+    expect(texts.filter((t) => /PID Provider|`PP-T`|pid-values/.test(t))).toEqual([]);
+  });
+
+  it('defines the 15 objectives from 100, in the categories their Var column allows', () => {
+    const objectives = ap.filter((d) => /_1\d\d(_UF)?$/.test(d.id));
+    expect([...ids(objectives)].sort()).toEqual(
+      [
+        ...['100', '101', '102', '103'].map((n) => `AP_WS_MS_Metadata_${n}`),
+        ...['100', '101_UF', '102', '103'].map((n) => `AP_WS_SM_KeyAttestation_${n}`),
+        ...['100', '101', '102', '103'].map((n) => `AP_WS_SM_Revocation_${n}`),
+        ...['100', '101', '102'].map((n) => `AP_WS_DM_Rulebook_${n}`),
+      ].sort(),
+    );
+    const categories = (id: string) => [...new Set(objectives.filter((d) => d.id === id).map((d) => variantOf(d).split('+').at(-1)))].sort();
+    expect(categories('AP_WS_MS_Metadata_103')).toEqual(['PB', 'Q']);
+    expect(categories('AP_WS_SM_Revocation_103')).toEqual(['E']);
+    expect(categories('AP_WS_DM_Rulebook_102')).toEqual(['Q']);
+    expect(categories('AP_WS_DM_Rulebook_100')).toEqual(['E', 'PB', 'Q']);
+  });
+
+  it('names only configurations the reference ICS declares for the category', () => {
+    const categories = (eudiploIcs as { categories?: Record<string, { profiles: string[]; items?: Record<string, unknown> }> }).categories ?? {};
+    for (const definition of ap.filter(isExecutable)) {
+      const category = variantOf(definition).split('+').at(-1) as string;
+      const ics = categories[category];
+      expect(ics, category).toBeDefined();
+      if (!definition.profile.every((c) => ics.profiles.includes(c.equals))) continue;
+      for (const step of definition.steps) {
+        if (step.run?.kind !== 'issuance') continue;
+        for (const configuration of step.run.configurations) expect({ ...eudiploIcs.items, ...ics.items }[configuration], `${definition.id} ${configuration}`).toEqual(expect.any(String));
+      }
+    }
+  });
+});

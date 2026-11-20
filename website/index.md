@@ -20,8 +20,10 @@ It also adds the tests a PID Provider must pass when it issues PIDs with OpenID4
 | [PID Provider (SUT)](fcaf/suts/pid_provider/index.md) | Overview, test classes, variants, the decisions applied |
 | [(pp_ws) Wallet Solution](fcaf/suts/pid_provider/wallet_solution/pp_ws.md) | Test cases on what the PID Provider receives from and issues to a Wallet Unit: metadata, offer, credential endpoint, client and key attestation, proofs, validity, revocation, the PID data model |
 | [(pp_rp) Relying Party](fcaf/suts/pid_provider/relying_party/pp_rp.md) | Test cases on the status lists a PID Provider publishes for Relying Parties |
+| [Attestation Provider (SUT)](fcaf/suts/attestation_provider/index.md) | Overview, test classes, the category variants `Q`, `PB` and `E`, the decisions applied |
+| [(ap_ws) Wallet Solution](fcaf/suts/attestation_provider/wallet_solution/ap_ws.md) | Test cases on what a QEAA, PuB-EAA or non-qualified EAA Provider receives from and issues to a Wallet Unit, including configurations that are not device-bound, revocation chaining by policy and the rulebook of the attestation |
 | [Defaults: PID Provider testing](fcaf/defaults.md#pid-provider-testing) | Test roles, trust configuration, Wallet Units and subjects, `default_configuration_PP_1`, expected result codes |
-| [ICS (PID Provider)](fcaf/ics-issuer.md) | The Provider ICS items and the profiles they select |
+| [ICS (PID and Attestation Provider)](fcaf/ics-issuer.md) | The Provider ICS items and the profiles they select |
 | [Issuer suite](issuer/index.md) | Status of the issuer suite, its catalogue and harness design, and EUDIPLO as reference issuer with its ICS and known findings |
 
 Everything else is the FCAF itself; of its pages only the defaults, the references, the navigation and the SUT overview are extended.

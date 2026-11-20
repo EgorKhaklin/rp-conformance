@@ -90,3 +90,41 @@ describe('issuer ICS', () => {
     expect(usesTxCode({ ...ics, items: { 'ICS-03.tx_code': 'without' } })).toBe(false);
   });
 });
+
+// Issue 27: the ICS of the Provider instance of each category.
+describe('category ICS', () => {
+  it('takes the top level for its category, and a categories entry over the top level items for another', async () => {
+    const { categoryIcs, providerCategories } = await import('../src/issuer/ics');
+    const ics: IssuerIcs = {
+      profiles: ['P-PID', 'P-SD', 'P-PA'],
+      items: { 'ICS-02.SD': 'pid-sd', 'ICS-07': 'Yes', 'ICS-14.T_skew': 'PT5S' },
+      categories: { Q: { profiles: ['P-Q', 'P-SD', 'P-PA', 'P-NDB'], items: { 'ICS-02.SD': 'qeaa-sd', 'ICS-07': 'No' } } },
+    };
+    expect(providerCategories(ics)).toEqual(['PID', 'Q']);
+    expect(categoryIcs(ics, 'PID')?.items['ICS-02.SD']).toBe('pid-sd');
+    expect(categoryIcs(ics, 'Q')).toEqual({ profiles: ['P-Q', 'P-SD', 'P-PA', 'P-NDB'], items: { 'ICS-02.SD': 'qeaa-sd', 'ICS-07': 'No', 'ICS-14.T_skew': 'PT5S' } });
+    expect(categoryIcs(ics, 'E')).toBeUndefined();
+    expect(resolveConfigurations(['ICS-02.SD'], categoryIcs(ics, 'Q') as IssuerIcs)).toEqual(['qeaa-sd']);
+  });
+});
+
+// Issue 27: POLICY (ICS-18) for an unobtainable WIA or KA status, and POLICY (ICS-07) for revocation chaining.
+describe('POLICY of an Attestation Provider', () => {
+  const expect18 = { codes: ['POLICY' as const], policy: 'ICS-18' as const, text: '' };
+  const expect07 = { codes: ['POLICY' as const], policy: 'ICS-07' as const, text: '' };
+
+  it('gives REJ for reject, ISS for accept, and REJ for a PID Provider whatever it declares', async () => {
+    const { unobtainableStatusPolicy } = await import('../src/issuer/trust');
+    expect(unobtainableStatusPolicy(expect18, { profiles: ['P-Q'], items: { 'ICS-18': 'reject' } }).expect.codes).toEqual(['REJ']);
+    expect(unobtainableStatusPolicy(expect18, { profiles: ['P-E'], items: { 'ICS-18': 'accept, with a warning' } }).expect.codes).toEqual(['ISS']);
+    expect(unobtainableStatusPolicy(expect18, { profiles: ['P-PID'], items: { 'ICS-18': 'accept' } }).expect.codes).toEqual(['REJ']);
+    expect(() => unobtainableStatusPolicy(expect18, { profiles: ['P-PB'], items: {} })).toThrow(/declared policy/);
+  });
+
+  it('gives REVOKED(T_chain) for a Provider that chains and UNCHANGED for one that does not', async () => {
+    const { chainingPolicy } = await import('../src/issuer/trust');
+    expect(chainingPolicy(expect07, { profiles: ['P-Q', 'P-CHAIN'], items: { 'ICS-07': 'Yes', 'ICS-07.T_chain': 'PT7M' } })?.expect.codes).toEqual(['REVOKED(T_chain)']);
+    expect(chainingPolicy(expect07, { profiles: ['P-E'], items: { 'ICS-07': 'No' } })?.expect.codes).toEqual(['UNCHANGED']);
+    expect(chainingPolicy({ codes: ['UNCHANGED'], text: '' }, { profiles: [], items: {} })).toBeUndefined();
+  });
+});

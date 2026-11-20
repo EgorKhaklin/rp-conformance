@@ -1,7 +1,7 @@
 // The Provider's ICS (issuer catalogue section 4) as the controller reads it: profiles for the applicability of a test
 // case and its variant, declared values for the steps.
 import { readFile } from 'node:fs/promises';
-import { ISSUER_ICS_ITEMS, type IssuerIcs, type IssuerProfile, type IssuerTestCaseDefinition, VARIANT_PROFILES } from '@rp-conformance/core';
+import { CATEGORY_PROFILES, ISSUER_ICS_ITEMS, type IssuerIcs, type IssuerProfile, type IssuerTestCaseDefinition, PROVIDER_CATEGORIES, type ProviderCategory, VARIANT_PROFILES } from '@rp-conformance/core';
 import { parse } from 'yaml';
 
 const PROFILES = new Set<string>(Object.values(ISSUER_ICS_ITEMS).flatMap((item) => [...item.profiles]));
@@ -17,7 +17,41 @@ export async function loadIssuerIcs(path: string): Promise<IssuerIcs> {
   }
   for (const profile of parsed.profiles) if (!PROFILES.has(String(profile))) throw new Error(`${path}: unknown profile ${String(profile)}`);
   for (const key of Object.keys(parsed.items)) if (!(key.split('.')[0] in ISSUER_ICS_ITEMS)) throw new Error(`${path}: unknown ICS item ${key}`);
-  return { profiles: parsed.profiles as IssuerProfile[], items: parsed.items as IssuerIcs['items'] };
+  // Issue 27: the Attestation Provider instances of the same implementation, one per category.
+  const categories = (parsed as { categories?: unknown }).categories;
+  if (categories !== undefined) {
+    if (!categories || typeof categories !== 'object') throw new Error(`${path}: categories is not a map`);
+    for (const [category, entry] of Object.entries(categories as Record<string, { profiles?: unknown; items?: unknown }>)) {
+      if (!['Q', 'PB', 'E'].includes(category)) throw new Error(`${path}: unknown category ${category} (Q, PB, E)`);
+      if (!entry || !Array.isArray(entry.profiles)) throw new Error(`${path}: categories.${category} has no profiles`);
+      for (const profile of entry.profiles) if (!PROFILES.has(String(profile))) throw new Error(`${path}: categories.${category}: unknown profile ${String(profile)}`);
+      if (!entry.profiles.includes(CATEGORY_PROFILES[category as ProviderCategory])) throw new Error(`${path}: categories.${category} lacks the profile ${CATEGORY_PROFILES[category as ProviderCategory]}`);
+      for (const key of Object.keys((entry.items ?? {}) as object)) if (!(key.split('.')[0] in ISSUER_ICS_ITEMS)) throw new Error(`${path}: categories.${category}: unknown ICS item ${key}`);
+    }
+  }
+  return {
+    profiles: parsed.profiles as IssuerProfile[],
+    items: parsed.items as IssuerIcs['items'],
+    ...(categories ? { categories: categories as IssuerIcs['categories'] } : {}),
+  };
+}
+
+/**
+ * Issue 27: the ICS of the Provider instance of a category. The top level is the instance whose profiles name its
+ * category (usually the PID Provider); `categories.<category>` an instance of another category, with its own profiles
+ * and the items that differ from the top level. Undefined when the ICS declares no instance of the category: its test
+ * cases are NOT APPLICABLE.
+ */
+export function categoryIcs(ics: IssuerIcs, category: ProviderCategory): IssuerIcs | undefined {
+  const entry = category === 'PID' ? undefined : ics.categories?.[category];
+  if (entry) return { profiles: [...entry.profiles], items: { ...ics.items, ...(entry.items ?? {}) } };
+  if (!ics.profiles.includes(CATEGORY_PROFILES[category])) return undefined;
+  return { profiles: [...ics.profiles], items: { ...ics.items } };
+}
+
+/** Issue 27: the categories the ICS declares a Provider instance for, in the order PID, Q, PB, E. */
+export function providerCategories(ics: IssuerIcs): ProviderCategory[] {
+  return PROVIDER_CATEGORIES.filter((category) => categoryIcs(ics, category) !== undefined);
 }
 
 /** The profile applicability conditions and variant codes the ICS does not meet; empty when the test case applies. */

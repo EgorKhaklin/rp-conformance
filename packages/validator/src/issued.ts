@@ -5,7 +5,9 @@
 // Conformance Wallet proved possession of and that the Wallet Unit's key attestation attests. `trusted-authorities`
 // checks a query, of which there is none.
 import { createHash } from 'node:crypto';
-import { type CheckId, type CheckResult, type PidSubject, STATUS_LIST_CHECKS } from '@rp-conformance/core';
+import { type AttestationSubject, type CheckId, type CheckResult, type PidSubject, STATUS_LIST_CHECKS } from '@rp-conformance/core';
+// Issue 27: the rulebook of `default_credential_A` and the device binding of an attestation.
+import { checkAttestationAttributes, checkAttestationDisclosure, checkAttestationType, checkAttestationValues, checkQualifiedService, checkRevocationMethod } from './attestation-rulebook';
 import { base64url, type CborMap, decodeCbor, verifyEs256 } from '@rp-conformance/forge';
 import { CheckRecorder, type ValidationMode, type ValidationResult } from './checks';
 import { describeKey, processDisclosures } from './disclosures';
@@ -75,6 +77,11 @@ export interface IssuedSdJwtVcValidationOptions {
   requireStatus: boolean;
   /** Maximum decompressed size of a status list, bytes. */
   maxStatusListBytes: number;
+  /**
+   * Issue 27: the configuration is device-bound (default). For a configuration without cryptographic binding (ICS-04
+   * `P-NDB`), `holder-binding` passes when the credential is bound to no key and fails when it is.
+   */
+  deviceBound?: boolean;
   fetchStatusList: (uri: string) => Promise<FetchedStatusList>;
   /** Default `all`: every check whose prerequisites passed is evaluated, so the report shows each of them. */
   mode?: ValidationMode;
@@ -91,6 +98,8 @@ export interface IssuedOutputOptions {
   checks: CheckId[];
   /** `pid-values`: the test subject's data the adapter seeded. */
   subject?: PidSubject;
+  /** Issue 27, `attestation-values`: the test subject's `default_credential_A` data the adapter seeded. */
+  attestationSubject?: AttestationSubject;
   /** `validity-declared`: the validity period the ICS declares for the configuration, seconds. */
   declaredValiditySeconds?: number;
   /** `validity-declared`: the tolerance, the timestamp precision the ICS declares (ICS-16), seconds. */
@@ -150,6 +159,7 @@ export async function validateIssuedSdJwtVc(credential: string, options: IssuedS
   let claims: Record<string, unknown> | undefined;
   let reference: { idx: number; uri: string } | undefined;
   let statusListFetched = false;
+  let matched: { service: { type: string; status?: string }; list: string } | undefined;
 
   const result = await recorder.collect(async () => {
     await recorder.run('format', [], () => {
@@ -172,6 +182,7 @@ export async function validateIssuedSdJwtVc(credential: string, options: IssuedS
       }
       if (match.ok) {
         issuer = { name: match.entity.name, statusAnchors: options.trustRule.statusAnchors(match.entity, match.service) };
+        matched = { service: match.service, list: match.list.id };
         return `${match.entity.name} under ${match.anchor.subject.commonName} (${match.list.id})`;
       }
     });
@@ -196,7 +207,7 @@ export async function validateIssuedSdJwtVc(credential: string, options: IssuedS
       if (typeof payload.iat === 'number' && payload.iat > nowSeconds + skew) return `iat ${payload.iat} lies in the future (informative)`;
     });
 
-    await recorder.run('holder-binding', ['format'], () => checkHolderBinding(payload, options.proofKeys, options.keyAttestations));
+    await recorder.run('holder-binding', ['format'], () => (options.deviceBound === false ? checkNotBound(payload.cnf !== undefined, 'cnf') : checkHolderBinding(payload, options.proofKeys, options.keyAttestations)));
 
     await recorder.run('status-reference', ['format'], () => {
       const status = payload.status as { status_list?: Record<string, unknown> } | undefined;
@@ -238,11 +249,32 @@ export async function validateIssuedSdJwtVc(credential: string, options: IssuedS
     if (wants(output, 'pid-dates')) await recorder.run('pid-dates', ['disclosures'], () => checkPidSdJwtDates(disclosed(), skew));
     if (wants(output, 'pid-extension')) await recorder.run('pid-extension', ['disclosures'], () => checkPidSdJwtExtension(disclosed(), output?.documentedClaims));
     if (wants(output, 'pid-portrait')) await recorder.run('pid-portrait', ['disclosures'], () => checkPidSdJwtPortraitOptOut(disclosed()));
+    // Issue 27: the rulebook of `default_credential_A`, the revocation method and the qualified service.
+    if (wants(output, 'attestation-type')) await recorder.run('attestation-type', ['format'], () => checkAttestationType('dc+sd-jwt', payload.vct));
+    if (wants(output, 'attestation-attributes')) await recorder.run('attestation-attributes', ['disclosures'], () => checkAttestationAttributes(disclosed(), now));
+    if (wants(output, 'attestation-values')) await recorder.run('attestation-values', ['disclosures'], () => checkAttestationValues(disclosed(), requireAttestationSubject(output)));
+    if (wants(output, 'attestation-disclosure')) await recorder.run('attestation-disclosure', ['disclosures'], () => checkAttestationDisclosure(payload, parts.slice(1, -1)));
+    if (wants(output, 'revocation-method')) {
+      await recorder.run('revocation-method', ['format'], () => {
+        const start = typeof payload.nbf === 'number' ? payload.nbf : payload.iat;
+        const period = typeof payload.exp === 'number' && typeof start === 'number' ? payload.exp - start : undefined;
+        return checkRevocationMethod(isObject(payload.status) && isObject((payload.status as Record<string, unknown>).status_list), period);
+      });
+    }
+    if (wants(output, 'qualified-service')) await recorder.run('qualified-service', ['issuer-trust'], () => checkQualifiedService(matched?.service, matched?.list));
   });
   return { ...result, claims: result.failures.includes('disclosures') ? undefined : claims, issuer: issuer?.name, statusListFetched };
 }
 
 const requireSubject = (output: IssuedOutputOptions | undefined): PidSubject => output?.subject ?? fail('the test case names no subject to compare with');
+const requireAttestationSubject = (output: IssuedOutputOptions | undefined): AttestationSubject => output?.attestationSubject ?? fail('the test case names no subject to compare with');
+const isObject = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value);
+
+/** Issue 27: `holder-binding` of a configuration that is not device-bound (ICS-04 `P-NDB`): the credential names no key. */
+function checkNotBound(bound: boolean, where: string): string {
+  if (bound) fail(`the configuration is not device-bound, but the credential carries ${where}`);
+  return `not device-bound: no ${where}, as the configuration declares no cryptographic binding`;
+}
 
 /** The validity period of an SD-JWT VC, `exp` minus `nbf` (or `iat`), seconds. */
 const sdJwtPeriod = (payload: Record<string, unknown>) => {
@@ -350,6 +382,7 @@ export async function validateIssuedMdoc(credential: string, options: IssuedMdoc
   let elements: IssuerSignedElement[] = [];
   let reference: { idx: number; uri: string } | undefined;
   let statusListFetched = false;
+  let matched: { service: { type: string; status?: string }; list: string } | undefined;
   const mso = () => (parsed as ReturnType<typeof readIssuerSigned>).mso;
 
   const result = await recorder.collect(async () => {
@@ -366,6 +399,7 @@ export async function validateIssuedMdoc(credential: string, options: IssuedMdoc
         fail(`the chain ends in an anchor of ${match.entity.name} (${match.list.id}), not of the enrolled ${options.issuerEntity}`);
       }
       issuer = { name: match.entity.name, statusAnchors: options.trustRule.statusAnchors(match.entity, match.service) };
+      matched = { service: match.service, list: match.list.id };
       return `${match.entity.name} under ${match.anchor.subject.commonName} (${match.list.id})`;
     });
 
@@ -422,6 +456,17 @@ export async function validateIssuedMdoc(credential: string, options: IssuedMdoc
       });
     }
     if (wants(output, 'pid-portrait')) await recorder.run('pid-portrait', ['disclosures'], () => checkPidMdocPortraitOptOut(elements));
+    // Issue 27: the rulebook of `default_credential_A`, the revocation method and the qualified service.
+    if (wants(output, 'attestation-type')) await recorder.run('attestation-type', ['disclosures'], () => checkAttestationType('mso_mdoc', mso().get('docType'), elements));
+    if (wants(output, 'attestation-attributes')) await recorder.run('attestation-attributes', ['disclosures'], () => checkAttestationAttributes(elements, now));
+    if (wants(output, 'attestation-values')) await recorder.run('attestation-values', ['disclosures'], () => checkAttestationValues(elements, requireAttestationSubject(output)));
+    if (wants(output, 'revocation-method')) {
+      await recorder.run('revocation-method', ['format'], () => {
+        const { validFrom, validUntil } = validityOf(mso());
+        return checkRevocationMethod(readMsoStatus(mso(), false).statusList !== undefined, (validUntil.getTime() - validFrom.getTime()) / 1000);
+      });
+    }
+    if (wants(output, 'qualified-service')) await recorder.run('qualified-service', ['issuer-trust'], () => checkQualifiedService(matched?.service, matched?.list));
   });
   const disclosed = !result.failures.includes('disclosures') && claims !== undefined;
   return {

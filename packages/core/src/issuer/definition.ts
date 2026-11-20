@@ -82,6 +82,12 @@ export interface IssuanceAction {
   retryWithFreshNonce?: boolean;
   /** The User opts out of the portrait (PID_03); the step applies only where the ICS declares the opt-out (ICS-17). */
   portraitOptOut?: boolean;
+  /**
+   * Issue 27: `never` sends the credential request without key proof and KA, `always` with them although the
+   * configuration offers no proof type (not device-bound, `AP_WS_SM_KeyAttestation_102`). By default the Conformance
+   * Wallet sends a proof where the configuration lists proof types.
+   */
+  proof?: 'always' | 'never';
 }
 
 /** An artifact of an earlier step that a `token-reuse` step sends again. */
@@ -132,7 +138,10 @@ export interface WalletEventAction {
 /** An adapter hook for a back-office event: `setStatus` for what an earlier step issued, or `changeSubject`. */
 export type IssuerEventAction =
   | { kind: 'issuer-event'; event: 'set-status'; status: 'revoked' | 'suspended' | 'valid'; ofStep: number }
-  | { kind: 'issuer-event'; event: 'change-subject'; from: TestSubject; to: TestSubject };
+  | { kind: 'issuer-event'; event: 'change-subject'; from: TestSubject; to: TestSubject }
+  // Issue 27 (AP_WS_SM_Revocation_102): the Provider changes the embedded disclosure policy of the configuration the
+  // credential of an earlier step was issued under (EDP_11).
+  | { kind: 'issuer-event'; event: 'change-disclosure-policy'; ofStep: number };
 
 /** Publish a version of `TL-WP`, as the RP harness's trust-list step does for `TL-PID`. */
 export interface IssuerTrustListAction {

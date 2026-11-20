@@ -7,8 +7,14 @@ import { randomBytes } from 'node:crypto';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { join, relative } from 'node:path';
 import {
+  ATTESTATION_TEST_SUBJECTS,
+  CATEGORY_ENTITIES,
+  CATEGORY_PROFILES,
+  categoryOf,
   type CheckResult,
   controlsOf,
+  PROVIDER_CATEGORIES,
+  type ProviderCategory,
   durationMs,
   grantFaultInfo,
   PID_TEST_SUBJECTS,
@@ -40,8 +46,8 @@ import {
 import { isOfferCapture, issueWithFault, runMetadata, runOfferCapture } from './artifacts';
 import { harnessInfo } from '../info';
 import { evaluateIssuance, type IssuanceObservation } from './evaluate';
-import { type IssuerHarness, PID_TRUST_RULE, startIssuerHarness } from './harness';
-import { issuerApplicability, issuerIcsValue, resolveConfigurations, usesTxCode } from './ics';
+import { type IssuerHarness, startIssuerHarness } from './harness';
+import { categoryIcs, issuerApplicability, issuerIcsValue, resolveConfigurations, usesTxCode } from './ics';
 import { describeIssuerFinding, type IssuerKnownFinding, issuerKnownFindingOf } from './known-findings';
 import { writeIssuerJUnit, writeIssuerSummary } from './report';
 // Lifecycle steps (issue 22): issuer-event, observe-status, present.
@@ -61,7 +67,7 @@ import { handlesSessionStep, noteSessionStep, runSessionStep, sessionApplicabili
 // Issue 26: trust-list and inspect steps, batch issuance, change of subject data.
 import { batchBinding, bindBatchKeys } from './batch';
 import { type InspectState, runInspection } from './inspect';
-import { policyExpectation, restoreTrustList, runTrustListStep, type TrustListState } from './trust';
+import { chainingPolicy, policyExpectation, restoreTrustList, runTrustListStep, type TrustListState } from './trust';
 
 /** The validator's clock tolerance on the issuer side: the catalogue's cap of `T_skew` (section 3.5). */
 export const ISSUER_SKEW_SECONDS = 300;
@@ -161,6 +167,11 @@ export interface IssuerRunReport {
       /** How the Test Registrar enrolled the Provider (issuer harness design section 5.3). */
       enrolment?: { entity: string; method: 'csr' | 'generated'; credentialSigners: number; statusListSigner: boolean };
       walletProviderStatusLists: { id: string; uri: string }[];
+      /**
+       * Issue 27: the Provider instance of each category the run executed (the first one is also described above), with
+       * its namespace, enrolment and what the adapter reports.
+       */
+      categories?: { category: ProviderCategory; namespace: string; entity: string; enrolment?: IssuerRunReport['run']['environment']['enrolment']; provider?: Record<string, string>; trustLists: { id: string; url: string }[] }[];
     };
     summary: Partial<Record<Verdict, number>>;
     /** Why the run could not execute its test cases, if it could not. */
@@ -180,6 +191,12 @@ export interface IssuerRunOptions {
   harnessHost: string;
   knownFindings?: IssuerKnownFinding[];
   log?: (line: string) => void;
+  /**
+   * Issue 27: a fresh adapter for the Provider instance of another category, which runs in parallel with the first one
+   * (one adapter per instance, for example one EUDIPLO tenant each). Without it the categories run one after another
+   * with `adapter`.
+   */
+  createAdapter?: () => IssuerAdapter;
   /**
    * The longest a step may wait for an artifact to expire (a lifetime plus one hour, catalogue section 3.5), seconds;
    * default 0. A step that would wait longer is NOT APPLICABLE in the run, and the test cases with such steps run last.
@@ -214,11 +231,7 @@ export async function runIssuerConformance(options: IssuerRunOptions): Promise<{
   const log = options.log ?? (() => {});
   const runId = `i${new Date().toISOString().replace(/[-:]/g, '').slice(0, 15)}-${randomBytes(3).toString('hex')}`;
   const runDir = join(options.reportDir, runId);
-  const namespace = runId;
-  // Issue 20: a grant fault that waits past a lifetime (`--max-wait`) puts its test case with the waiting ones.
-  const grantWaits = (d: IssuerTestCaseDefinition) => d.steps.some((step) => step.run?.kind === 'issuance' && step.run.faults.some((f) => isGrantFault(f) && grantFaultInfo(f).waitsFor));
   const selected = selectIssuerTestCases(options.definitions, options.only);
-  const harness = await startIssuerHarness({ runId, namespace, harnessHost: options.harnessHost, ics: options.ics });
   const report: IssuerRunReport = {
     run: {
       id: runId,
@@ -227,43 +240,87 @@ export async function runIssuerConformance(options: IssuerRunOptions): Promise<{
       adapter: options.adapter.name,
       ics: options.ics,
       harness: harnessInfo(),
-      environment: {
-        namespace,
-        statusProvider: harness.status.baseUrl,
-        trustInfrastructure: harness.trust.baseUrl,
-        trustLists: [],
-        walletProviderStatusLists: Object.values(harness.twp.statusLists).map(({ id, uri }) => ({ id, uri })),
-      },
+      environment: { namespace: runId, statusProvider: '', trustInfrastructure: '', trustLists: [], walletProviderStatusLists: [] },
       summary: {},
     },
     results: [],
   };
+  // Issue 27: one Provider instance per category (catalogue section 2.1: the `AP_*` test cases run with the category
+  // variant `Q`, `PB` or `E`), each with its own harness services, enrolment and adapter set-up. A category the ICS
+  // declares no instance for is NOT APPLICABLE; the others run in parallel when the CLI can create adapters.
+  const groups = PROVIDER_CATEGORIES.map((category) => ({ category, definitions: selected.filter((d) => categoryOf(d) === category), ics: categoryIcs(options.ics, category) })).filter((g) => g.definitions.length);
+  for (const group of groups.filter((g) => !g.ics)) {
+    const reason = `the ICS declares no ${CATEGORY_ENTITIES[group.category].name} (ICS-01 ${CATEGORY_PROFILES[group.category]})`;
+    for (const definition of group.definitions) report.results.push({ testCase: definition.id, variant: variantOf(definition), verdict: 'NOT APPLICABLE', reason, control: null, steps: [] });
+  }
+  const running = groups.filter((g): g is typeof g & { ics: IssuerIcs } => g.ics !== undefined);
+  const runGroup = (group: (typeof running)[number], index: number, adapter: IssuerAdapter) =>
+    runCategory({ ...options, adapter, ics: group.ics }, { category: group.category, definitions: group.definitions, namespace: index === 0 ? runId : `${runId}-${group.category.toLowerCase()}`, first: index === 0, runId, runDir, report, log });
+  if (options.createAdapter) {
+    await Promise.all(running.map((group, index) => runGroup(group, index, index === 0 ? options.adapter : (options.createAdapter as () => IssuerAdapter)())));
+  } else {
+    for (const [index, group] of running.entries()) await runGroup(group, index, options.adapter);
+  }
+  return writeIssuerReport(report, runDir);
+}
+
+/**
+ * The test cases of one category against the Provider instance of that category: its harness services, the Test
+ * Wallet Provider, its enrolment by the Test Registrar as the category's entity, the adapter's set-up; then the steps.
+ */
+async function runCategory(
+  options: IssuerRunOptions,
+  group: { category: ProviderCategory; definitions: IssuerTestCaseDefinition[]; namespace: string; first: boolean; runId: string; runDir: string; report: IssuerRunReport; log: (line: string) => void },
+): Promise<void> {
+  const { category, definitions: selected, namespace, report, runDir, log } = group;
+  // Issue 20: a grant fault that waits past a lifetime (`--max-wait`) puts its test case with the waiting ones.
+  const grantWaits = (d: IssuerTestCaseDefinition) => d.steps.some((step) => step.run?.kind === 'issuance' && step.run.faults.some((f) => isGrantFault(f) && grantFaultInfo(f).waitsFor));
+  const harness = await startIssuerHarness({ runId: group.runId, namespace, harnessHost: options.harnessHost, ics: options.ics, category });
+  const entity = CATEGORY_ENTITIES[category].entity;
+  const described: NonNullable<IssuerRunReport['run']['environment']['categories']>[number] = { category, namespace, entity, trustLists: [] };
+  (report.run.environment.categories ??= []).push(described);
+  if (group.first) {
+    Object.assign(report.run.environment, {
+      namespace,
+      statusProvider: harness.status.baseUrl,
+      trustInfrastructure: harness.trust.baseUrl,
+      walletProviderStatusLists: Object.values(harness.twp.statusLists).map(({ id, uri }) => ({ id, uri })),
+    });
+  }
+  const label = category === 'PID' ? '' : ` [${category}]`;
   try {
-    log(`issuer run ${runId}: harness services at ${harness.status.baseUrl} (status) and ${harness.trust.baseUrl} (trust)`);
+    log(`issuer run ${group.runId}${label}: harness services at ${harness.status.baseUrl} (status) and ${harness.trust.baseUrl} (trust), Provider enrolled as ${entity}`);
     try {
       const env = await harness.enrol(options.adapter);
-      report.run.environment.trustLists = env.trustLists.map(({ id, url }) => ({ id, url }));
+      described.trustLists = env.trustLists.map(({ id, url }) => ({ id, url }));
       const enrolment = harness.enrolment;
       if (enrolment) {
-        report.run.environment.enrolment = {
+        described.enrolment = {
           entity: enrolment.entity,
           method: enrolment.method,
           credentialSigners: enrolment.credentialSigners.length,
           statusListSigner: Boolean(enrolment.statusListSigner),
         };
       }
+      if (group.first) {
+        report.run.environment.trustLists = described.trustLists;
+        if (described.enrolment) report.run.environment.enrolment = described.enrolment;
+      }
       await options.adapter.setUp(env, namespace);
     } catch (error) {
       // Without an enrolled and configured Provider no test case can produce a verdict.
-      report.run.error = `enrolment or adapter set-up failed: ${(error as Error).message}`;
+      const message = `${category === 'PID' ? '' : `${CATEGORY_ENTITIES[category].name}: `}enrolment or adapter set-up failed: ${(error as Error).message}`;
+      report.run.error = report.run.error ? `${report.run.error}; ${message}` : message;
       for (const definition of selected) {
-        report.results.push({ testCase: definition.id, variant: variantOf(definition), verdict: 'INCONCLUSIVE', reason: report.run.error, control: null, steps: [] });
+        report.results.push({ testCase: definition.id, variant: variantOf(definition), verdict: 'INCONCLUSIVE', reason: message, control: null, steps: [] });
       }
-      log(report.run.error);
-      return await writeIssuerReport(report, runDir);
+      log(message);
+      return;
     }
-    report.run.provider = await options.adapter.describe?.().catch(() => undefined);
-    log(`adapter ${options.adapter.name} set up${report.run.provider ? ` (${Object.entries(report.run.provider).map(([k, v]) => `${k} ${v}`).join(', ')})` : ''}`);
+    const provider = await options.adapter.describe?.().catch(() => undefined);
+    if (provider) described.provider = provider;
+    if (group.first && provider) report.run.provider = provider;
+    log(`adapter ${options.adapter.name}${label} set up${provider ? ` (${Object.entries(provider).map(([k, v]) => `${k} ${v}`).join(', ')})` : ''}`);
     const execute = async (definition: IssuerTestCaseDefinition) => {
       const started = Date.now();
       const record = await runIssuerTestCase(definition, { ...options, harness, runDir, report });
@@ -286,7 +343,6 @@ export async function runIssuerConformance(options: IssuerRunOptions): Promise<{
     await options.adapter.tearDown?.().catch(() => {});
     await harness.stop();
   }
-  return writeIssuerReport(report, runDir);
 }
 
 async function writeIssuerReport(report: IssuerRunReport, runDir: string): Promise<{ report: IssuerRunReport; reportPath: string }> {
@@ -394,7 +450,7 @@ async function runIssuerStep(
     // Issue 26: issuances of test cases that run in parallel go one at a time; only their waits overlap.
     else if (step.run?.kind === 'issuance') {
       const action = step.run;
-      await oneAtATime(() => runIssuance(step, action, record, save, ctx, state));
+      await oneAtATime(ctx.harness, () => runIssuance(step, action, record, save, ctx, state));
     }
     else if (step.run?.kind === 'token-reuse') await runTokenReuse(step, step.run, record, save, ctx, state);
     else if (step.run?.kind === 'wallet-event' && step.expect.codes.every((code) => code === 'INFO')) {
@@ -455,6 +511,17 @@ async function runIssuance(
     return;
   }
   if (isOfferCapture(step.expect)) return runOfferCapture(step.expect, action, record, save, ctx, state);
+  // Issue 27 (AP_WS_SM_KeyAttestation_101_UF): a KA level the Provider accepts (ICS-04) is not below what it requires.
+  const level = action.faults.map((f) => /^ka\.(key-storage|user-authentication)-(moderate|basic)$/.exec(f)).find(Boolean);
+  if (level) {
+    const item = level[1] === 'key-storage' ? 'ICS-04.key_storage' : 'ICS-04.user_authentication';
+    const accepted = (issuerIcsValue(ctx.ics, item) ?? 'iso_18045_high').split(',').map((v) => v.trim());
+    if (accepted.includes(`iso_18045_${level[2]}`)) {
+      record.verdict = 'NOT APPLICABLE';
+      record.reason = `the Provider accepts iso_18045_${level[2]} (${item}: ${accepted.join(', ')}), so it is not below what the configuration requires`;
+      return;
+    }
+  }
   const missing = unsupported(action, ctx.adapter);
   if (missing) {
     record.reason = missing;
@@ -462,7 +529,7 @@ async function runIssuance(
   }
   const unit = action.walletUnit ?? 'CW-1';
   const subject = action.subject ?? 'SUBJ-1';
-  // Issue 26: POLICY (ICS-15) becomes the expectation the declaration gives.
+  // Issue 26: POLICY (ICS-15) becomes the expectation the declaration gives; issue 27: also POLICY (ICS-18).
   const policy = policyExpectation(step.expect, state, ctx.ics);
   if (policy) step = { ...step, expect: policy.expect };
   record.walletUnit = unit;
@@ -515,7 +582,7 @@ async function runIssuance(
       return;
     }
   } else {
-    evidence = await client.issue({ offer: offer.offer, ...(offer.txCode !== undefined ? { txCode: offer.txCode } : {}), credentialConfigurationIds: configurations, ...(action.credentialIdentifier ? { credentialIdentifier: true } : {}), ...(await grantOptions(action, subject, txCode, ctx)) });
+    evidence = await client.issue({ offer: offer.offer, ...(offer.txCode !== undefined ? { txCode: offer.txCode } : {}), credentialConfigurationIds: configurations, ...(action.credentialIdentifier ? { credentialIdentifier: true } : {}), ...(action.proof ? { proof: action.proof } : {}), ...(await grantOptions(action, subject, txCode, ctx)) });
   }
   // `REJ:invalid_nonce, then ISS`: the same request again, without the fault, with a fresh `c_nonce`.
   const firstAttempt = { exchanges: evidence.exchanges.length, credentials: evidence.credentials.length };
@@ -544,7 +611,8 @@ async function runIssuance(
   if (evidence.error) record.error = evidence.error;
   // Issue 26: after `changeSubject` the subject's data are those of the subject it was changed to.
   const output = outputOptions(step, action, state.subjects?.get(subject) ?? subject, ctx);
-  record.credentials = await validateCredentials(evidence, ctx, output);
+  // Issue 27: a configuration the ICS declares not device-bound (`ICS-04.NDB.*`) issues credentials bound to no key.
+  record.credentials = await validateCredentials(evidence, ctx, output, action.configurations.some((c) => c.startsWith('ICS-04.NDB.')));
   state.captured?.set(record.step, { evidence, checks: record.credentials.map((c) => c.checks), receivedAt: new Date() });
   if (output.checks.includes('pid-formats')) {
     const sdJwt = record.credentials.find((c) => c.format === 'dc+sd-jwt');
@@ -591,6 +659,8 @@ function outputOptions(step: IssuerStepDefinition, action: IssuanceAction, subje
   return {
     checks: (step.expect.checks ?? []) as IssuedOutputOptions['checks'],
     subject: PID_TEST_SUBJECTS[subject as keyof typeof PID_TEST_SUBJECTS],
+    // Issue 27: an Attestation Provider issues `default_credential_A` with the subject's attestation data.
+    attestationSubject: ATTESTATION_TEST_SUBJECTS[subject as keyof typeof ATTESTATION_TEST_SUBJECTS],
     ...(declared !== undefined ? { declaredValiditySeconds: declared } : {}),
     ...(precision !== undefined ? { precisionSeconds: precision } : {}),
     fetchTypeMetadata: async (url) => {
@@ -620,7 +690,10 @@ async function runLifecycleStep(
     const observation = await observeStatus(action, record.step, state, lifecycle);
     record.statusObservation = observation;
     await save('status-observation.json', `${JSON.stringify(observation, null, 2)}\n`);
-    Object.assign(record, evaluateObservation(step.expect, observation, ctx.ics));
+    // Issue 27: POLICY (ICS-07) becomes REVOKED(T_chain) when the Provider declares it chains, UNCHANGED otherwise.
+    const policy = chainingPolicy(step.expect, ctx.ics);
+    const evaluation = evaluateObservation(policy?.expect ?? step.expect, observation, ctx.ics);
+    Object.assign(record, policy ? { ...evaluation, reason: `${policy.reason}: ${evaluation.reason}` } : evaluation);
     return;
   }
   const { result, ...presentation } = await present(action, state, lifecycle);
@@ -748,13 +821,13 @@ function conformanceOf(evidence: IssuanceEvidence): Pick<IssuanceObservation, 'c
 }
 
 /** `OBS-CRED`: every credential the step received through the reference validator, with the suite's trust configuration. */
-async function validateCredentials(evidence: IssuanceEvidence, ctx: Context, output?: IssuedOutputOptions): Promise<IssuedCredentialRecord[]> {
+async function validateCredentials(evidence: IssuanceEvidence, ctx: Context, output?: IssuedOutputOptions, notDeviceBound = false): Promise<IssuedCredentialRecord[]> {
   const trust = ctx.harness.trustStore;
   if (!trust) throw new Error('the reference validator has no trust configuration (no enrolment)');
   const records: IssuedCredentialRecord[] = [];
   for (const issued of evidence.credentials) {
     const configuration = evidence.metadata?.result.credentialIssuer.credential_configurations_supported[issued.credentialConfigurationId] as
-      | { vct?: string; doctype?: string }
+      | { vct?: string; doctype?: string; cryptographic_binding_methods_supported?: unknown[] }
       | undefined;
     const base = {
       configuration: issued.credentialConfigurationId,
@@ -765,13 +838,16 @@ async function validateCredentials(evidence: IssuanceEvidence, ctx: Context, out
     };
     const common = {
       trust,
-      trustRule: PID_TRUST_RULE,
-      issuerEntity: ctx.harness.enrolment?.entity ?? 'PP-T',
+      trustRule: ctx.harness.trustRule,
+      issuerEntity: ctx.harness.issuerName,
       proofKeys: [issued.proofKey.publicJwk],
       keyAttestations: [issued.keyAttestation],
       skewSeconds: ISSUER_SKEW_SECONDS,
       requireStatus: true,
       maxStatusListBytes: MAX_STATUS_LIST_BYTES,
+      // Issue 27: a configuration the ICS declares not device-bound, or one without cryptographic binding in its
+      // metadata, issues credentials bound to no key.
+      ...(notDeviceBound || (configuration && !configuration.cryptographic_binding_methods_supported?.length) ? { deviceBound: false } : {}),
       ...(output ? { output } : {}),
     };
     if (issued.format === 'mso_mdoc') {
@@ -853,9 +929,10 @@ const trustContext = (ctx: Context) => ({ harness: ctx.harness, adapter: ctx.ada
  * the reference image refuses some of them (`credential_request_denied` "Could not allocate status entry after maximum
  * retries", seen with a dozen issuances in the same second).
  */
-let issuing: Promise<unknown> = Promise.resolve();
-function oneAtATime<T>(task: () => Promise<T>): Promise<T> {
-  const run = issuing.then(task, task);
-  issuing = run.catch(() => undefined);
+// Issue 27: one queue per Provider instance (harness); the instances of the categories issue in parallel.
+const issuing = new WeakMap<object, Promise<unknown>>();
+function oneAtATime<T>(key: object, task: () => Promise<T>): Promise<T> {
+  const run = (issuing.get(key) ?? Promise.resolve()).then(task, task);
+  issuing.set(key, run.catch(() => undefined));
   return run;
 }

@@ -31,7 +31,6 @@ import {
 import { ConformanceWallet } from '@rp-conformance/wallet';
 import { type Evaluation, worst } from '../evaluate';
 import type { IssuerHarness } from './harness';
-import { PID_TRUST_RULE } from './harness';
 import { issuerIcsValue } from './ics';
 
 /** Upper bound of a decompressed status list the harness reads (as the runner's `OBS-CRED`). */
@@ -138,8 +137,8 @@ async function fetchVersion(harness: IssuerHarness, uri: string, format: StatusL
 /** The issuer and the revocation anchors of a credential, from its signer chain and the suite's trust configuration. */
 async function issuerOf(harness: IssuerHarness, credential: IssuedCredential): Promise<MatchedIssuer | undefined> {
   if (!harness.trustStore) return undefined;
-  const match = await harness.trustStore.match(PID_TRUST_RULE, signerChainOfIssued(credential.format, credential.credential), new Date());
-  return match.ok ? { name: match.entity.name, statusAnchors: PID_TRUST_RULE.statusAnchors(match.entity, match.service) } : undefined;
+  const match = await harness.trustStore.match(harness.trustRule, signerChainOfIssued(credential.format, credential.credential), new Date());
+  return match.ok ? { name: match.entity.name, statusAnchors: harness.trustRule.statusAnchors(match.entity, match.service) } : undefined;
 }
 
 /** `issuer-event`: the adapter's `setStatus` for every credential an earlier issuance step received. */
@@ -151,9 +150,19 @@ export async function runIssuerEvent(
     adapter: {
       setStatus?: (sessionId: string, status: 'revoked' | 'suspended' | 'valid') => Promise<{ at: string }>;
       changeSubject?: (from: TestSubject, to: TestSubject) => Promise<void>;
+      changeDisclosurePolicy?: (sessionId: string) => Promise<{ at: string }>;
     };
   },
 ): Promise<Evaluation & { event?: { sessionId: string; at: string; status: string } }> {
+  // Issue 27 (AP_WS_SM_Revocation_102): the Provider changes the embedded disclosure policy (EDP_11).
+  if (action.event === 'change-disclosure-policy') {
+    if (!ctx.adapter.changeDisclosurePolicy) return { verdict: 'NOT APPLICABLE', reason: 'the adapter offers no changeDisclosurePolicy (ICS-19, P-EDP)' };
+    const issued = state.issued.get(action.ofStep);
+    if (!issued?.credentials.length) return { verdict: 'INCONCLUSIVE', reason: `step ${action.ofStep} issued no credential` };
+    const { at } = await ctx.adapter.changeDisclosurePolicy(issued.sessionId);
+    state.events.set(stepIndex, { at: new Date(at), status: 'disclosure policy changed' });
+    return { verdict: 'PASS', reason: `the adapter reports the embedded disclosure policy changed at ${at}`, event: { sessionId: issued.sessionId, at, status: 'disclosure policy changed' } };
+  }
   // Issue 26 (PP_WS_SM_Revocation_008): the adapter replaces the subject's data; the event's time counts as `OBS-ADM`.
   if (action.event === 'change-subject') {
     if (!ctx.adapter.changeSubject) return { verdict: 'NOT APPLICABLE', reason: 'the adapter offers no changeSubject (ICS-06.change_subject)' };
@@ -408,12 +417,17 @@ export async function present(action: PresentAction, state: LifecycleState, ctx:
   const pki = harness.pki;
   const access = pki.relyingPartyAccess;
   const queries = defaultQueries(pki);
+  // Issue 27: an Attestation Provider's `default_credential_A`, asked for with the query of its category.
+  const query = ({ PID: 'default_query_pid', Q: 'default_query_qeaa', PB: 'default_query_pubeaa', E: 'default_query_eaa' } as const)[harness.category];
   // The harness reaches its own services on the loopback interface, whatever name the Provider uses for them.
   const local = (url: string) => url.replace(`://${ctx.harnessHost}:`, '://127.0.0.1:');
+  const lotl = harness.relyingPartyTrust?.listOfTrustedLists;
   const rp = await new ReferenceRelyingParty({
     port: 0,
     host: '127.0.0.1',
     trustLists: harness.env.trustLists.map((list) => ({ ...list, url: local(list.url) })),
+    ...(lotl ? { listOfTrustedLists: { ...lotl, url: local(lotl.url), pointers: lotl.pointers.map((p) => ({ ...p, url: local(p.url) })) } } : {}),
+    ...(harness.relyingPartyTrust?.rulebooks ? { rulebooks: harness.relyingPartyTrust.rulebooks } : {}),
     accessCertificate: {
       certificatePem: access.certificate.pem,
       certificate: Buffer.from(access.certificate.der).toString('base64'),
@@ -421,7 +435,7 @@ export async function present(action: PresentAction, state: LifecycleState, ctx:
       privateJwk: access.key.privateJwk,
       privateKeyPem: access.key.privateKeyPem,
     },
-    registrationCertificate: await issueRegistrationCertificate(pki, [queries.default_query_pid]),
+    registrationCertificate: await issueRegistrationCertificate(pki, [queries[query]]),
     queries,
     skewSeconds: SKEW_SECONDS,
     kbMaxAgeSeconds: 300,
@@ -434,7 +448,7 @@ export async function present(action: PresentAction, state: LifecycleState, ctx:
     const started = await fetch(`${rp.url}/api/presentations`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ query: 'default_query_pid', flow: 'redirect' }),
+      body: JSON.stringify({ query, flow: 'redirect' }),
     });
     if (started.status !== 201) throw new Error(`the reference Relying Party did not start a presentation: HTTP ${started.status} ${await started.text()}`);
     const { transactionId, uri } = (await started.json()) as { transactionId: string; uri: string };

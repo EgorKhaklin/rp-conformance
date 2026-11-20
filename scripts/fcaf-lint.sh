@@ -35,13 +35,14 @@ cd "$work/submitted"
 lint() { python3 "$work/site/tools/fcaf_lint.py" --root docs/fcaf --format "${FCAF_LINT_FORMAT:-text}" "$@"; }
 # The paths contain no spaces; bash 3 (macOS) has no mapfile.
 rp=($(find docs/fcaf/suts/relying_party -name 'RP_*.md' | sort))
-issuer=($(find docs/fcaf/suts/pid_provider -name 'PP_*.md' | sort))
+# Issue 27: the Attestation Provider test cases (AP_*) with the PID Provider ones.
+issuer=($( (find docs/fcaf/suts/pid_provider -name 'PP_*.md'; find docs/fcaf/suts/attestation_provider -name 'AP_*.md' 2>/dev/null) | sort))
 echo "linting ${#rp[@]} Relying Party test cases"
 status=0
 lint --enforce-all "${rp[@]}" || status=1
 # Every check the lint has, except those the issuer definitions do not satisfy yet.
 warn=${ISSUER_LINT_WARN-FC100}
 enforce=$(grep -o '"FC[0-9]*"' "$work/site/tools/fcaf_lint.py" | tr -d '"' | sort -u | grep -vxE "${warn//,/|}" | paste -sd, -)
-echo "linting ${#issuer[@]} PID Provider test cases${warn:+ (warnings only: $warn)}"
+echo "linting ${#issuer[@]} PID Provider and Attestation Provider test cases${warn:+ (warnings only: $warn)}"
 lint --enforce "$enforce" "${issuer[@]}" || status=1
 exit $status

@@ -132,7 +132,24 @@ export const ISSUER_OUTPUT_CHECKS = [
   'pid-extension',
   'pid-formats',
   'pid-portrait',
+  // Issue 27 (AP_WS_DM_Rulebook, AP_WS_SM_Revocation_103): the rulebook of FCAF `default_credential_A`.
+  'attestation-type',
+  'attestation-attributes',
+  'attestation-values',
+  'attestation-disclosure',
+  'revocation-method',
+  'qualified-service',
 ] as const;
+
+/** Issue 27: the output checks of an attestation (`default_credential_A`), not of a PID. */
+export const ATTESTATION_OUTPUT_CHECKS: readonly (typeof ISSUER_OUTPUT_CHECKS)[number][] = [
+  'attestation-type',
+  'attestation-attributes',
+  'attestation-values',
+  'attestation-disclosure',
+  'revocation-method',
+  'qualified-service',
+];
 
 export type CredentialCheck = (typeof CREDENTIAL_CHECKS)[number];
 export type StatusListCheck = (typeof STATUS_LIST_CHECKS)[number];

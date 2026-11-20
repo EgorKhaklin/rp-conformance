@@ -149,4 +149,10 @@ export interface IssuerIcs {
   profiles: IssuerProfile[];
   /** Keyed by ICS item ID, or `<item>.<name>` for one of several values of an item, for example `ICS-14.T_proof: PT5M`. */
   items: Record<string, string | number | boolean | string[]>;
+  /**
+   * Issue 27: the same implementation also acting as an Attestation Provider of another category (one Provider instance
+   * per category, for example one EUDIPLO tenant each). Each entry is the ICS of that Provider: its own profiles, and the
+   * items that differ from the ones above. A run executes the test cases of each category against its own instance.
+   */
+  categories?: Partial<Record<'Q' | 'PB' | 'E', { profiles: IssuerProfile[]; items?: IssuerIcs['items'] }>>;
 }

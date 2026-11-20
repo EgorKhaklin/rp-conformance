@@ -24,8 +24,15 @@ export async function loadIssuerIcs(path = ICS_PATH): Promise<IssuerIcs> {
   for (const key of Object.keys(parsed.items)) {
     if (!(key.split('.')[0] in ISSUER_ICS_ITEMS)) throw new Error(`${path}: unknown ICS item ${key}`);
   }
-  const ics = { profiles: parsed.profiles as IssuerProfile[], items: parsed.items as IssuerIcs['items'] };
-  const problems = icsProblems(ics);
+  // Issue 27: the Attestation Provider instances, one per category, with their own profiles and the items that differ.
+  const categories = (parsed as { categories?: IssuerIcs['categories'] }).categories;
+  const ics: IssuerIcs = { profiles: parsed.profiles as IssuerProfile[], items: parsed.items as IssuerIcs['items'], ...(categories ? { categories } : {}) };
+  const problems = [
+    ...icsProblems(ics),
+    ...Object.entries(categories ?? {}).flatMap(([category, entry]) =>
+      icsProblems({ profiles: entry?.profiles ?? [], items: { ...ics.items, ...(entry?.items ?? {}) } }).map((p) => `categories.${category}: ${p}`),
+    ),
+  ];
   if (problems.length) throw new Error(`${path}: ${problems.join('; ')}`);
   return ics;
 }
