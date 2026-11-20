@@ -125,8 +125,10 @@ const sdJwtConfiguration = (m: Json) => (m.credential_configurations_supported a
 describe('issuer metadata checks', () => {
   it('accepts the metadata of an enrolled Provider: every check passes', async () => {
     const result = await validateIssuerMetadata(await observe(), options());
-    expect(result.checks.filter((c) => c.status !== 'pass')).toEqual([]);
-    expect(result.checks).toHaveLength(13);
+    // Issue 27: the checks of configurations that are not device-bound and of embedded disclosure policies do not
+    // apply to a Provider without either.
+    expect(result.checks.filter((c) => c.status !== 'pass').map((c) => `${c.check} ${c.status}`)).toEqual(['metadata-no-key-binding skip', 'metadata-disclosure-policy skip']);
+    expect(result.checks).toHaveLength(17);
   });
 
   const faults: [string, Variation][] = [
@@ -214,3 +216,42 @@ describe('credential offer checks', () => {
     expect((await validateCredentialOffer(observation)).failures).toEqual([check]);
   });
 });
+
+// Issue 27: the checks of an Attestation Provider's configurations (AP_WS_MS_Metadata_100 to _103), on the PID
+// Provider's metadata with one configuration added or changed; only the named check is looked at.
+describe('Attestation Provider metadata checks', () => {
+  // As a QEAA Provider: `metadata-key-attestation` then requires no level, and `metadata-key-attestation-levels` does.
+  const statusOf = async (check: string, metadata: (m: Json) => void) =>
+    (await validateIssuerMetadata(await observe({ metadata, signedPayload: metadata }), { ...options(), category: 'qeaa' as const })).checks.find((c) => c.check === check);
+  const addNdb = (extra: Json = {}) => (m: Json) => {
+    const { cryptographic_binding_methods_supported: _b, proof_types_supported: _p, ...rest } = sdJwtConfiguration(m);
+    (m.credential_configurations_supported as Record<string, Json>)['ndb'] = { ...rest, ...extra };
+  };
+
+  it('metadata-no-key-binding passes for a configuration without binding and proof types, and fails with a proof type', async () => {
+    expect((await statusOf('metadata-no-key-binding', addNdb()))?.status).toBe('pass');
+    const withProof = await statusOf('metadata-no-key-binding', addNdb({ proof_types_supported: { jwt: { proof_signing_alg_values_supported: ['ES256'], key_attestations_required: {} } } }));
+    expect(withProof?.status).toBe('fail');
+    expect(withProof?.detail).toMatch(/requires a key attestation/);
+  });
+
+  it('metadata-key-attestation-levels fails for a device-bound configuration without key_storage', async () => {
+    expect((await statusOf('metadata-key-attestation-levels', () => {}))?.status).toBe('pass');
+    const result = await statusOf('metadata-key-attestation-levels', (m) => {
+      const jwt = ((sdJwtConfiguration(m).proof_types_supported as Json).jwt as Json).key_attestations_required as Json;
+      delete jwt.key_storage;
+    });
+    expect(result?.status).toBe('fail');
+  });
+
+  it('metadata-disclosure-policy passes for a policy by value and fails for one only by reference', async () => {
+    expect((await statusOf('metadata-disclosure-policy', (m) => Object.assign(sdJwtConfiguration(m), { credential_metadata: { policy: { policy: 'allowList' } } })))?.status).toBe('pass');
+    expect((await statusOf('metadata-disclosure-policy', (m) => Object.assign(sdJwtConfiguration(m), { policy_uri: 'https://pp-t.rp-test/policy' })))?.status).toBe('fail');
+  });
+
+  it('metadata-attestation-formats fails for a configuration in another format', async () => {
+    expect((await statusOf('metadata-attestation-formats', () => {}))?.status).toBe('pass');
+    expect((await statusOf('metadata-attestation-formats', (m) => Object.assign(sdJwtConfiguration(m), { format: 'jwt_vc_json' })))?.status).toBe('fail');
+  });
+});
+

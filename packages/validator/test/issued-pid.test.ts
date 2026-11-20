@@ -1,7 +1,7 @@
 // Output-side self-validation of the issuer suite (issuer harness design section 7): a PID the forge issues valid per the
 // PID Rulebook, in SD-JWT VC and in mdoc, passes every credential check and every output check (`SM_Validity`,
 // `DM_*`); a forge-built PID with one defect fails exactly the check of that rule.
-import { ISSUER_OUTPUT_CHECKS, PID_TEST_SUBJECTS, pidClaimsOf } from '@rp-conformance/core';
+import { ATTESTATION_OUTPUT_CHECKS, ISSUER_OUTPUT_CHECKS, PID_TEST_SUBJECTS, pidClaimsOf } from '@rp-conformance/core';
 import {
   base64url,
   buildSealedLote,
@@ -66,7 +66,8 @@ const day = (date: Date) => date.toISOString().slice(0, 10);
 const age = (now: Date) => now.getUTCFullYear() - 1964 - (now.getUTCMonth() < 7 || (now.getUTCMonth() === 7 && now.getUTCDate() < 12) ? 1 : 0);
 
 /** Every output check except `pid-portrait`, which applies after a portrait opt-out only, and `pid-formats`, a step check. */
-const OUTPUT_CHECKS = ISSUER_OUTPUT_CHECKS.filter((c) => c !== 'pid-portrait' && c !== 'pid-formats');
+// Issue 27: the checks of an attestation (`default_credential_A`) have their own tests (issued-attestation.test.ts).
+const OUTPUT_CHECKS = ISSUER_OUTPUT_CHECKS.filter((c) => c !== 'pid-portrait' && c !== 'pid-formats' && !ATTESTATION_OUTPUT_CHECKS.includes(c));
 const SD_OUTPUT = OUTPUT_CHECKS.filter((c) => c !== 'pid-unique');
 const MD_OUTPUT = OUTPUT_CHECKS.filter((c) => c !== 'type-metadata' && c !== 'pid-extension');
 

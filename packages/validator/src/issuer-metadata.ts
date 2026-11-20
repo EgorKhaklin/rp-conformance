@@ -404,6 +404,62 @@ export async function validateIssuerMetadata(observation: MetadataObservation, o
       }
       return `no server retrieval endpoint advertised${probe ? ` (probe ${probe.url}: HTTP ${probe.status})` : ''}`;
     });
+
+    // Issue 27: the configurations of an Attestation Provider (AP_WS_MS_Metadata_100 to _103).
+    const bound = (c: Json) => Array.isArray(c.cryptographic_binding_methods_supported) && c.cryptographic_binding_methods_supported.length > 0;
+    const proofTypes = (c: Json) => Object.entries(isObject(c.proof_types_supported) ? c.proof_types_supported : {});
+
+    await recorder.run('metadata-no-key-binding', ['metadata-location'], () => {
+      const unbound = Object.entries(configurations()).filter(([, c]) => !bound(c));
+      if (!unbound.length) return new NotApplicable('every configuration is device-bound (cryptographic_binding_methods_supported)');
+      const problems = unbound.flatMap(([id, c]) =>
+        proofTypes(c).map(([type, proof]) => `${id} offers proof type ${type}${isObject(proof) && isObject(proof.key_attestations_required) ? ' that requires a key attestation' : ''}`),
+      );
+      if (problems.length) fail(`a configuration that is not device-bound still asks for a key proof: ${problems.join('; ')}`);
+      return `${unbound.map(([id]) => id).join(', ')}: no cryptographic binding, no proof type, no key attestation`;
+    });
+
+    // After `metadata-key-attestation`, which it refines with the levels for every category.
+    await recorder.run('metadata-key-attestation-levels', ['metadata-key-attestation'], () => {
+      const devices = Object.entries(configurations()).filter(([, c]) => bound(c));
+      if (!devices.length) return new NotApplicable('no device-bound configuration');
+      const problems: string[] = [];
+      for (const [id, c] of devices) {
+        const types = proofTypes(c);
+        if (!types.length) problems.push(`${id} has no proof_types_supported`);
+        for (const [type, proof] of types) {
+          const required = isObject(proof) ? proof.key_attestations_required : undefined;
+          if (!isObject(required)) {
+            problems.push(`${id} proof type ${type} states no key_attestations_required`);
+            continue;
+          }
+          for (const level of ['key_storage', 'user_authentication']) {
+            const values = required[level];
+            if (!Array.isArray(values) || values.length === 0 || values.some((v) => typeof v !== 'string')) problems.push(`${id} ${type} key_attestations_required.${level} is not a non-empty list of levels`);
+          }
+        }
+      }
+      if (problems.length) fail(problems.join('; '));
+      return `${devices.length} device-bound configuration(s) state key_storage and user_authentication`;
+    });
+
+    await recorder.run('metadata-disclosure-policy', ['metadata-location'], () => {
+      // ETSI TS 119 472-3 and EDP_09: the embedded disclosure policy by value in the configuration's metadata. The
+      // suite looks for it under `disclosure_policy` (as EUDIPLO publishes it), `policy` or `credential_metadata.policy`
+      // of a configuration (no profile names the member yet); a policy only by reference (`policy_uri`) fails.
+      const holder = (c: Json) => (isObject(c.credential_metadata) ? c.credential_metadata : c);
+      const byValue = Object.entries(configurations()).filter(([, c]) => isObject(c.disclosure_policy) || isObject(holder(c).policy) || isObject(c.policy));
+      const byReference = Object.entries(configurations()).filter(([, c]) => typeof holder(c).policy_uri === 'string' || typeof c.policy_uri === 'string');
+      if (byReference.length) fail(`embedded disclosure policy only by reference in ${byReference.map(([id]) => id).join(', ')}`);
+      if (!byValue.length) return new NotApplicable('no configuration carries an embedded disclosure policy');
+      return `${byValue.map(([id]) => id).join(', ')} carry an embedded disclosure policy by value`;
+    });
+
+    await recorder.run('metadata-attestation-formats', ['metadata-location'], () => {
+      const other = Object.entries(configurations()).filter(([, c]) => c.format !== 'dc+sd-jwt' && c.format !== 'mso_mdoc');
+      if (other.length) fail(`configuration(s) in another format: ${other.map(([id, c]) => `${id} (${String(c.format)})`).join(', ')}`);
+      return `${Object.keys(configurations()).length} configuration(s), each dc+sd-jwt or mso_mdoc`;
+    });
   });
 }
 

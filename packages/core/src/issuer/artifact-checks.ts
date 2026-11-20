@@ -18,6 +18,11 @@ export const METADATA_CHECKS = [
   'metadata-authorization-server',
   'metadata-display',
   'metadata-no-server-retrieval',
+  // Issue 27 (AP_WS_MS_Metadata_100 to _103): the configurations of an Attestation Provider.
+  'metadata-no-key-binding',
+  'metadata-key-attestation-levels',
+  'metadata-disclosure-policy',
+  'metadata-attestation-formats',
 ] as const;
 
 /** Checks of a captured credential offer (issuer catalogue `PP_WS_MS_Offer`). */

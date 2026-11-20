@@ -111,6 +111,11 @@ export interface IssuerAdapter {
   completeDeferred?(transactionId: string, subject: TestSubject): Promise<void>;
   /** Replace SUBJ-1's data with SUBJ-2's (SM_Revocation_008). */
   changeSubject?(from: TestSubject, to: TestSubject): Promise<void>;
+  /**
+   * Issue 27 (`AP_WS_SM_Revocation_102`, `P-EDP`): change the embedded disclosure policy of the configuration the
+   * session's credentials were issued under; resolves when the SUT reports it done (`OBS-ADM`).
+   */
+  changeDisclosurePolicy?(sessionId: string): Promise<{ at: string }>;
   /** Make the SUT fetch TL-WP now instead of waiting T_refresh. */
   refreshTrust?(namespace: string): Promise<void>;
   /** Optional: what the report records about the Provider under test after `setUp`, for example its version. */

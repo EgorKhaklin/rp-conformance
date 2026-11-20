@@ -219,6 +219,12 @@ export interface IssueOptions {
   maxWaitSeconds?: number;
   /** How the client waits; default a timer. */
   sleep?: (ms: number) => Promise<void>;
+  /**
+   * Issue 27: whether the credential request carries a key proof with its KA. `auto` (default): where the configuration
+   * lists `proof_types_supported` (OpenID4VCI 1.0 section 8.2); `always`: also where it lists none; `never`: none, as for
+   * a configuration the Provider declares not device-bound (`AP_WS_SM_KeyAttestation_102`).
+   */
+  proof?: 'auto' | 'always' | 'never';
 }
 
 /** The adapter's `authenticateSubject`: the authorization request URL in, the redirect to the wallet out. */
@@ -308,7 +314,7 @@ export class IssuanceClient {
       const configurationIds = options.credentialConfigurationIds?.length ? options.credentialConfigurationIds : [configurationId];
       for (const id of configurationIds) {
         const cNonce = await this.requestNonce(metadata.result, evidence);
-        await this.requestCredential(metadata.result, token, id, cNonce, evidence, { byIdentifier: options.credentialIdentifier ?? false });
+        await this.requestCredential(metadata.result, token, id, cNonce, evidence, { byIdentifier: options.credentialIdentifier ?? false, ...(options.proof ? { proof: options.proof } : {}) });
       }
     } catch (error) {
       evidence.error = (error as Error).message;
@@ -640,7 +646,7 @@ export class IssuanceClient {
     credentialConfigurationId: string,
     cNonce: string,
     evidence: IssuanceEvidence,
-    options: { byIdentifier?: boolean } = {},
+    options: { byIdentifier?: boolean; proof?: 'auto' | 'always' | 'never' } = {},
   ): Promise<IssuedCredential[]> {
     const configuration = metadata.credentialIssuer.credential_configurations_supported[credentialConfigurationId];
     // By `credential_identifier` (OpenID4VCI 1.0 section 8.2): the first one the token response issued for the configuration.
@@ -667,7 +673,8 @@ export class IssuanceClient {
         dpop: await this.dpop('credential', 'POST', endpoint, token.accessToken),
         credentialConfigurationId,
         ...(credentialIdentifier !== undefined ? { credentialIdentifier } : {}),
-        proofs: [proof],
+        // Issue 27: no proof for a configuration without proof types (not device-bound), unless asked for.
+        ...(options.proof === 'always' || (options.proof !== 'never' && configuration.proof_types_supported) ? { proofs: [proof] } : {}),
       });
     const response = await this.sendWithDpopRetry('credential', build, evidence);
     const body = jsonOf(response);

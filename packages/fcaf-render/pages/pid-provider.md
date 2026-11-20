@@ -10,7 +10,7 @@ The Provider is tested as a black box in the controlled environment described in
 - **PidProvider_RelyingParty (PP_RP)**: the status lists and identifier lists the Provider publishes for Relying Parties.
 - **PidProvider_Infrastructure (PP_Inf)**: use of the Wallet Provider list of trusted entities, and the consistency of the Provider's signers with the anchors published for it.
 
-Attestation Providers (`AP_*`) follow the same objectives with the category variants `Q`, `PB` and `E` and are not written yet.
+Attestation Providers (`AP_*`) follow the same objectives with the category variants `Q`, `PB` and `E`: see [Attestation Provider (SUT)](../attestation_provider/index.md).
 
 ## Variants
 

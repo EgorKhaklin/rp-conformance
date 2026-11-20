@@ -1,0 +1,3 @@
+# Attestation Provider - Wallet Solution interface
+
+The `(ap_ws)` test class covers the interface between the Attestation Provider and Wallet Units: every objective of `(pp_ws)` that is not specific to the PID, run in the category variant of the Provider, and the objectives specific to Attestation Providers, numbered from 100: the metadata of configurations that are and are not device-bound, the key attestation levels a configuration requires, attestations issued without a key attestation, revocation chaining as the Provider declares it, the revocation method of a non-qualified EAA, and `default_credential_A` checked against its rulebook.

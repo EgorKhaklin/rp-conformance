@@ -17,3 +17,5 @@ export * from './published-status';
 export * from './pid-rulebook';
 export * from './issuer-integrity';
 export * from './issuer-grant';
+// Issue 27
+export * from './attestation-rulebook';

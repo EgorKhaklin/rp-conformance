@@ -119,8 +119,8 @@ export interface CredentialRequestInput {
   credentialConfigurationId: string;
   /** Request by this `credential_identifier` of the token response instead of `credential_configuration_id` (issue 20). */
   credentialIdentifier?: string;
-  /** Key proofs of proof type `jwt`. */
-  proofs: string[];
+  /** Key proofs of proof type `jwt`; left out for a configuration without proof types (issue 27). */
+  proofs?: string[];
 }
 
 /** Credential request by `credential_configuration_id` with `proofs.jwt` (OpenID4VCI 1.0 section 8.2), JSON. */
@@ -136,7 +136,7 @@ export function credentialRequest(input: CredentialRequestInput): HttpRequestMes
     },
     body: JSON.stringify({
       ...(input.credentialIdentifier !== undefined ? { credential_identifier: input.credentialIdentifier } : { credential_configuration_id: input.credentialConfigurationId }),
-      proofs: { jwt: input.proofs },
+      ...(input.proofs ? { proofs: { jwt: input.proofs } } : {}),
     }),
   };
 }

@@ -308,7 +308,7 @@ The output side is validated without the SUT. Credentials and status lists that 
 | I1 | The catalogue's first baseline (§9 step 4): authorization code flow, mdoc, `SM_ClientAttestation`, `SM_KeyAttestation`, `SM_ProofOfPossession`, `SM_Validity`, `SM_Revocation_001`–`_003`, `DM_PidSdJwt`, `DM_PidMdoc`, `PP_RP_SM_Revocation`; rendering to `fcaf-overlay-issuer/` | About 70 objectives before variants, each validated against EUDIPLO or marked not validated with the reason |
 | I2 | Nightly step against EUDIPLO `main`, known findings for the issuer suite | Same, against EUDIPLO `main` |
 | I3 | Rest of `PP_WS` (`MS_*`, `TokenBinding`, `Batch`, `Reissuance`, `Deferred`, `Notification`, `IssuerIntegrity`, `Unlinkability`, `SH_*`), revocation chaining, `PP_Inf` | Remaining PID Provider objectives |
-| I4 | `AP_*`: category variants `Q`, `PB`, `E` of every objective not marked PID only, and the objectives from 100 | Attestation Provider objectives |
+| I4 | `AP_*`: category variants `Q`, `PB`, `E` of every objective not marked PID only, and the objectives from 100 | Attestation Provider objectives. Done (issue 27): the variants are derived from the `PP_*` definitions (`packages/issuer-definitions/src/attestation_provider/`), the objectives from 100 are written; the runner runs each category against its own Provider instance (its own harness services, enrolment as `QP-T`, `PB-T` or `EP-T`, adapter set-up; for EUDIPLO a tenant each) in parallel with the PID Provider, from the `categories` of the ICS |
 
 ## 11. Relation to the catalogue
 
