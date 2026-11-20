@@ -13,3 +13,5 @@ export * from './rp/wording';
 export * from './issuer/adapter';
 export * from './issuer/definition';
 export * from './issuer/ics';
+export * from './issuer/checks';
+export * from './issuer/faults';
