@@ -1,11 +1,13 @@
 import { randomInt } from 'node:crypto';
-import type {
-  CreatedOffer,
-  CreateOfferRequest,
-  EnrolledCertificate,
-  EnrolmentRequest,
-  IssuerAdapter,
-  IssuerTestEnvironment,
+import {
+  AuthorizationEndpointError,
+  type CreatedOffer,
+  type CreateOfferRequest,
+  type EnrolledCertificate,
+  type EnrolmentRequest,
+  type IssuerAdapter,
+  type IssuerTestEnvironment,
+  type TestSubject,
 } from '@rp-conformance/core';
 import { icsList, icsNumber } from './ics';
 import { PID_FIELDS, PID_SUBJECTS } from './subjects';
@@ -17,6 +19,12 @@ export { PID_FIELDS, PID_SUBJECTS } from './subjects';
 export const PID_SD_JWT_CONFIGURATION = 'pid-sd-jwt-vc';
 /** `vct` of the PID in SD-JWT VC format (PID Rulebook). */
 export const PID_VCT = 'urn:eudi:pid:1';
+/**
+ * A second configuration in SD-JWT VC of another credential type (`ICS-02.second`), so that a pre-authorized code of an
+ * offer for it can be tried against the PID's configuration (`PP_WS_IA_PreAuthorized_004_UF`).
+ */
+export const SECOND_SD_JWT_CONFIGURATION = 'test-attestation-sd-jwt-vc';
+export const SECOND_VCT = 'urn:rp-conformance:test-attestation:1';
 /** The built-in authorization server of the tenant: the only one that redeems pre-authorized codes. */
 const BUILT_IN_AS = 'issuer-built-in';
 
@@ -94,7 +102,10 @@ const tenantIdOf = (namespace: string) => namespace.toLowerCase().replace(/[^a-z
  *   list settings, the PID configuration in SD-JWT VC and the issuance configuration: wallet attestation required, the
  *   harness's `TL-WP` as the only wallet provider list, key attestations with the ICS levels, DPoP.
  * - `createOffer` seeds the subject with the offer (`credentialClaims` `inline`), pre-authorized code with or without
- *   `tx_code`. EUDIPLO offers by reference only; for an offer by value the adapter resolves the reference itself.
+ *   `tx_code`, or authorization code. EUDIPLO offers by reference only; for an offer by value the adapter resolves the
+ *   reference itself.
+ * - `authenticateSubject` opens the authorization request at the built-in authorization server, which has no login, and
+ *   returns its redirect to the wallet.
  * - `setStatus` calls `POST /api/session/revoke` and confirms with `GET /api/session/{id}/credential-status`.
  * - `refreshTrust` clears EUDIPLO's trust list cache.
  */
@@ -282,6 +293,22 @@ export class IssuerEudiploAdapter implements IssuerAdapter {
       lifeTime: PID_LIFETIME_SECONDS,
       fields: PID_FIELDS,
     });
+    // ICS-02.second: the same key binding, status and key attestation requirements, two claims of the subject.
+    await this.call('POST', '/api/issuer/credentials', {
+      id: SECOND_SD_JWT_CONFIGURATION,
+      description: 'Test attestation in SD-JWT VC format, a second credential type of the Provider (ICS-02.second)',
+      config: {
+        format: 'dc+sd-jwt',
+        display: [{ name: 'Test attestation', locale: 'en-US', description: 'Second credential type of the conformance test' }],
+        keyAttestationsRequired,
+      },
+      vct: SECOND_VCT,
+      keyBinding: true,
+      statusManagement: true,
+      keyChainId: attestation,
+      lifeTime: PID_LIFETIME_SECONDS,
+      fields: PID_FIELDS.filter((field) => SECOND_CLAIMS.includes(field.path[0] as string)),
+    });
 
     const tlWp = env.trustLists.find((list) => list.id === 'TL-WP');
     if (!tlWp) throw new Error('TL-WP is not published');
@@ -338,29 +365,41 @@ export class IssuerEudiploAdapter implements IssuerAdapter {
   }
 
   /**
-   * A credential offer for the subject, pre-authorized code grant, with the subject's claims inline. EUDIPLO always
-   * answers with an offer by reference (`credential_offer_uri`, resolvable once); for `byReference: false` the adapter
-   * resolves it and hands out the offer by value (`credential_offer`).
+   * A credential offer for the subject, with the subject's claims inline: pre-authorized code grant (with or without
+   * `tx_code`), or authorization code grant with `issuer_state`, both at the built-in authorization server. EUDIPLO
+   * always answers with an offer by reference (`credential_offer_uri`, resolvable once); for `byReference: false` the
+   * adapter resolves it and hands out the offer by value (`credential_offer`).
    */
   async createOffer(req: CreateOfferRequest): Promise<CreatedOffer> {
-    if (req.grant !== 'pre-authorized_code') {
-      throw new Error('the ICS declares no authorization code grant (P-AC): EUDIPLO built-in authorization server has no login to script');
-    }
-    const claims = PID_SUBJECTS[req.subject];
-    const unknown = req.configurations.filter((id) => id !== PID_SD_JWT_CONFIGURATION);
+    const unknown = req.configurations.filter((id) => id !== PID_SD_JWT_CONFIGURATION && id !== SECOND_SD_JWT_CONFIGURATION);
     if (unknown.length) throw new Error(`the adapter configures no credential configuration ${unknown.join(', ')}`);
-    const txCode = req.txCode ? String(randomInt(0, 1_000_000)).padStart(6, '0') : undefined;
+    const preAuthorized = req.grant === 'pre-authorized_code';
+    const txCode = preAuthorized && req.txCode ? String(randomInt(0, 1_000_000)).padStart(6, '0') : undefined;
     const offer = await this.call<{ uri: string; session: string }>('POST', '/api/issuer/offer', {
       response_type: 'uri',
-      flow: 'pre_authorized_code',
+      flow: preAuthorized ? 'pre_authorized_code' : 'authorization_code',
       authorization_server: BUILT_IN_AS,
       credentialConfigurationIds: req.configurations,
-      credentialClaims: Object.fromEntries(req.configurations.map((id) => [id, { type: 'inline', claims }])),
+      credentialClaims: Object.fromEntries(req.configurations.map((id) => [id, { type: 'inline', claims: claimsOf(req.subject, id) }])),
       ...(txCode ? { tx_code: txCode, tx_code_description: 'Transaction code of the conformance test' } : {}),
       reference: `${req.subject}`,
     });
     const uri = req.byReference ? offer.uri : await this.byValue(offer.uri);
     return { offer: uri, sessionId: offer.session, ...(txCode ? { txCode } : {}) };
+  }
+
+  /**
+   * The subject's authentication at the built-in authorization server (ICS-03.subject_authentication): it has no login
+   * or consent step, the subject is the one whose claims the offer carries (bound by `issuer_state`), so the hook only
+   * opens the authorization request and returns where EUDIPLO redirects to: the wallet's `redirect_uri` with `code`,
+   * `state` and `iss`, or with `error`. An answer that is not a redirect (EUDIPLO answers a request without a pushed
+   * `request_uri` with HTTP 409) is thrown as `AuthorizationEndpointError`.
+   */
+  async authenticateSubject(authorizationRequestUrl: string, _subject: TestSubject): Promise<string> {
+    const response = await fetch(authorizationRequestUrl, { redirect: 'manual' });
+    const location = response.headers.get('location');
+    if (response.status >= 300 && response.status < 400 && location) return new URL(location, authorizationRequestUrl).toString();
+    throw new AuthorizationEndpointError(response.status, await response.text(), Object.fromEntries(response.headers.entries()));
   }
 
   /** Resolves an offer by reference and returns it by value, with the same scheme. */
@@ -424,6 +463,15 @@ export class IssuerEudiploAdapter implements IssuerAdapter {
     this.keyChains = undefined;
     this.method = undefined;
   }
+}
+
+/** The claims of the second configuration (ICS-02.second), taken from the subject's PID values. */
+const SECOND_CLAIMS = ['family_name', 'given_name'];
+
+/** The subject's claims for a configuration. */
+function claimsOf(subject: TestSubject, configuration: string): Record<string, unknown> {
+  const pid = PID_SUBJECTS[subject];
+  return configuration === SECOND_SD_JWT_CONFIGURATION ? Object.fromEntries(SECOND_CLAIMS.map((name) => [name, pid[name]])) : pid;
 }
 
 const derOf = (pem: string) => pem.replace(/-----(BEGIN|END) CERTIFICATE-----/g, '').replace(/\s+/g, '');

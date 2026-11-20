@@ -54,6 +54,21 @@ export interface CreatedOffer {
 }
 
 /**
+ * Thrown by `authenticateSubject` when the authorization endpoint answers without redirecting to the client: an error
+ * page (RFC 6749 section 4.1.2.1) or any other answer that is not a redirect. The issuance client records it as the
+ * answer of the authorization endpoint.
+ */
+export class AuthorizationEndpointError extends Error {
+  constructor(
+    readonly status: number,
+    readonly body: string,
+    readonly headers: Record<string, string> = {},
+  ) {
+    super(`the authorization endpoint answered HTTP ${status} without a redirect to the client`);
+  }
+}
+
+/**
  * The only Provider specific code of the issuer harness (issuer harness design section 5.4). Optional hooks map to ICS
  * items: no `authenticateSubject` means `P-AC` cannot run, no `setStatus` means `P-HOOK` is No, and no `changeSubject`
  * makes `SM_Revocation_008` NOT APPLICABLE.
@@ -70,7 +85,11 @@ export interface IssuerAdapter {
    */
   enrol(namespace?: string): Promise<EnrolmentRequest | undefined>;
   createOffer(req: CreateOfferRequest): Promise<CreatedOffer>;
-  /** Complete the subject's authentication for an authorization request and return the redirect with `code`. */
+  /**
+   * Complete the subject's authentication for an authorization request (the URL the wallet would open) and return the
+   * URL the Authorization Server redirects to: the wallet's `redirect_uri` with `code`, `state` and `iss`, or with
+   * `error`. Throws `AuthorizationEndpointError` when the endpoint does not redirect to the client.
+   */
   authenticateSubject?(authorizationRequestUrl: string, subject: TestSubject): Promise<string>;
   /** Revoke, suspend or unsuspend what the session issued; resolves when the SUT reports it done (`OBS-ADM`). */
   setStatus?(sessionId: string, status: 'revoked' | 'suspended' | 'valid'): Promise<{ at: string }>;

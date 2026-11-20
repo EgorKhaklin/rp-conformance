@@ -11,9 +11,9 @@
 import { buildSealedLote, createTestPki, enrolSut, toEnrolledCertificate, type TestPki } from '@rp-conformance/forge';
 import { TrustInfrastructure } from '@rp-conformance/trust-infrastructure';
 import { publishTlWp, WALLET_PROVIDER_IDS } from '@rp-conformance/wallet-provider';
-import type { IssuerTestEnvironment, PublishedTrustList } from '@rp-conformance/core';
+import { AuthorizationEndpointError, type IssuerTestEnvironment, type PublishedTrustList } from '@rp-conformance/core';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { EudiploError, IssuerEudiploAdapter, loadIssuerIcs, PID_SD_JWT_CONFIGURATION, PID_SUBJECTS, PID_VCT } from '../src/index';
+import { EudiploError, IssuerEudiploAdapter, loadIssuerIcs, PID_SD_JWT_CONFIGURATION, PID_SUBJECTS, PID_VCT, SECOND_SD_JWT_CONFIGURATION, SECOND_VCT } from '../src/index';
 
 const harnessHost = process.env.HARNESS_HOST ?? 'host.docker.internal';
 const namespace = `i16-${Date.now().toString(36)}`;
@@ -173,6 +173,27 @@ describe('EUDIPLO issuer adapter', () => {
     expect(error).toBeInstanceOf(EudiploError);
     expect((error as EudiploError).status).toBe(409);
     console.info('setStatus without an issued credential:', (error as EudiploError).message);
+  });
+
+  // Issue 20: authorization code offers, the second configuration, and authenticateSubject at the built-in server.
+  it('creates authorization code offers with issuer_state, and offers for the second configuration (ICS-02.second)', async () => {
+    const created = await adapter.createOffer({ subject: 'SUBJ-1', configurations: [PID_SD_JWT_CONFIGURATION], grant: 'authorization_code', byReference: false });
+    const offer = await resolveOffer(created.offer);
+    expect(offer.grants?.authorization_code?.issuer_state).toEqual(expect.any(String));
+    expect(offer.grants?.['urn:ietf:params:oauth:grant-type:pre-authorized_code']).toBeUndefined();
+    expect(created.txCode).toBeUndefined();
+    const second = await resolveOffer((await adapter.createOffer({ subject: 'SUBJ-1', configurations: [SECOND_SD_JWT_CONFIGURATION], grant: 'pre-authorized_code', byReference: false, txCode: true })).offer);
+    expect(second.credential_configuration_ids).toEqual([SECOND_SD_JWT_CONFIGURATION]);
+    const metadata = await (await fetch(`${adapter.baseUrl}/.well-known/openid-credential-issuer/issuers/${adapter.tenant}`)).json();
+    expect(metadata.credential_configurations_supported?.[SECOND_SD_JWT_CONFIGURATION]).toMatchObject({ format: 'dc+sd-jwt', vct: SECOND_VCT });
+  });
+
+  it('answers an authorization request without a pushed request_uri with an error page, which authenticateSubject throws', async () => {
+    const as = await (await fetch(`${adapter.baseUrl}/.well-known/oauth-authorization-server/issuers/${adapter.tenant}`)).json();
+    expect(as.pushed_authorization_request_endpoint).toEqual(expect.any(String));
+    const error = await adapter.authenticateSubject(`${as.authorization_endpoint}?response_type=code&client_id=c&redirect_uri=https%3A%2F%2Fw.invalid%2Fcb`, 'SUBJ-1').catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(AuthorizationEndpointError);
+    expect((error as AuthorizationEndpointError).status).toBe(409);
   });
 
   it('keeps status lists of 2 bits, 10 000 entries and the shortest lifetime, re-signed on every change', async () => {

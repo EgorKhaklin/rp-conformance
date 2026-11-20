@@ -36,3 +36,32 @@ describe('issuer definitions', () => {
     }
   });
 });
+
+// Issue 20: IA_PreAuthorized and IA_AuthorizationCode.
+describe('issuer definitions: grants', () => {
+  const area = (prefix: string) => issuerDefinitions.filter((d) => d.id.startsWith(prefix));
+
+  it('has the 4 test cases of IA_PreAuthorized in SD+PA and the 7 of IA_AuthorizationCode in SD+AC, all executable', () => {
+    expect(area('PP_WS_IA_PreAuthorized_').map((d) => `${d.id} ${variantOf(d)}`)).toEqual(
+      ['001_UF', '002_UF', '003_UF', '004_UF'].map((n) => `PP_WS_IA_PreAuthorized_${n} SD+PA`),
+    );
+    expect(area('PP_WS_IA_AuthorizationCode_').map((d) => `${d.id} ${variantOf(d)}`)).toEqual(
+      ['001_UF', '002_UF', '003_UF', '004_UF', '005_UF', '006_UF', '007'].map((n) => `PP_WS_IA_AuthorizationCode_${n} SD+AC`),
+    );
+    for (const definition of [...area('PP_WS_IA_PreAuthorized_'), ...area('PP_WS_IA_AuthorizationCode_')]) {
+      expect(isExecutable(definition), definition.id).toBe(true);
+      expect(definition.control).toBe('PP_WS_IA_MainInteraction_001');
+    }
+  });
+
+  it('has the positive control in SD+AC, and every grant fault the definitions name is of the variant’s grant', async () => {
+    expect(executableIssuerDefinitions.some((d) => d.id === 'PP_WS_IA_MainInteraction_001' && variantOf(d) === 'SD+AC')).toBe(true);
+    const { GRANT_FAULTS, isGrantFault } = await import('@rp-conformance/core');
+    for (const definition of issuerDefinitions) {
+      for (const step of definition.steps) {
+        if (step.run?.kind !== 'issuance') continue;
+        for (const fault of step.run.faults.filter(isGrantFault)) expect(GRANT_FAULTS[fault].grant, `${definition.id} ${fault}`).toBe(step.run.grant);
+      }
+    }
+  });
+});

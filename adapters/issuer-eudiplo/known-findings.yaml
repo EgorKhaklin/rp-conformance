@@ -11,4 +11,21 @@
 #
 # Remove an entry once EUDIPLO fixes it; the run names a known finding whose test case passed. The one executable test
 # case, PP_WS_IA_MainInteraction_001 [SD+PA], passes, so the list is empty. The README lists the FAILs expected against 9.1.0.
-[]
+
+# Issue 20: authorization code and pre-authorized code.
+- testCase: PP_WS_IA_AuthorizationCode_006_UF
+  variants: [SD+AC]
+  finding: >-
+    An unknown scope is not rejected. Step 2 pushes an authorization request with scope=unknown-scope (no
+    authorization_details) and the offer's issuer_state: PAR answers 201 with a request_uri, the authorization endpoint
+    redirects with a code, the token response carries authorization_details for pid-sd-jwt-vc that the wallet never
+    requested, and the credential endpoint issues the PID (HTTP 200). EUDIPLO validates no scope at PAR
+    (assertValidPushedAuthorizationRequest) and grants the offer's configurations when the request names none it knows
+    (authorizationDetailsForToken falls back to the offer, domain/token-grant-rules.ts at ae0792a). RFC 6749 section 3.3
+    lets an Authorization Server ignore part of a scope, but then the token response must carry the granted scope; the
+    catalogue requires the rejection (OpenID4VCI 1.0 section 5.1.2). Step 1 (unknown credential_configuration_id in
+    authorization_details) passes: the token covers only the unknown configuration and the credential request for the
+    PID is rejected with invalid_credential_request.
+  reference: >-
+    not reported upstream; evidence in the reference run's artifacts
+    PP_WS_IA_AuthorizationCode_006_UF/SD+AC/step-2/issuance.json

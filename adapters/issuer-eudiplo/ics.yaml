@@ -7,6 +7,7 @@ profiles:
   - P-PID   # ICS-01
   - P-SD    # ICS-02
   - P-PA    # ICS-03
+  - P-AC    # ICS-03: built-in authorization server, PAR + PKCE S256; authenticateSubject follows its redirect (no login, ICS-03.subject_authentication)
   - P-DB    # ICS-04
   - P-REV   # ICS-05
   - P-SUSP  # ICS-05
@@ -21,9 +22,12 @@ items:
   ICS-01: PID Provider                       # entity PP-T on TL-PID; PID Rulebook
   ICS-02: SD-JWT VC                          # live: pid-sd-jwt-vc, format dc+sd-jwt, vct urn:eudi:pid:1. EUDIPLO issues mso_mdoc too; the adapter configures no mdoc PID (PID_02 not met, README)
   ICS-02.SD: pid-sd-jwt-vc                   # the configuration that issues the PID in SD-JWT VC, as definitions name it (ICS-02.<format variant>)
-  ICS-03: pre-authorized code              # live: flow pre_authorized_code at the built-in authorization server, with and without tx_code. No P-AC: no authenticateSubject (README)
+  ICS-02.second: test-attestation-sd-jwt-vc  # a second configuration of another type (vct urn:rp-conformance:test-attestation:1), for PP_WS_IA_PreAuthorized_004_UF
+  ICS-03: pre-authorized code, authorization code  # live: flows pre_authorized_code (with and without tx_code) and authorization_code (issuer_state) at the built-in authorization server
   ICS-03.tx_code: with and without           # live: tx_code of 6 digits, input_mode numeric; txCodeMaxAttempts default 5
-  ICS-03.subject_authentication: none        # the built-in authorization server issues codes without a login step (docs issuance/authorization-servers.md)
+  ICS-03.subject_authentication: none        # the built-in authorization server issues codes without a login step (docs issuance/authorization-servers.md): authenticateSubject opens the authorization request and returns EUDIPLO's redirect; the subject is the one of the offer (issuer_state)
+  ICS-03.par_request_uri_lifetime: PT60S     # source: PAR_REQUEST_URI_LIFETIME_SECONDS 60 (pushed-authorization-request.ts), expires_in of the PAR response
+  ICS-03.authorization_code_lifetime: PT60S  # source: AUTHORIZATION_CODE_LIFETIME_SECONDS 60
   ICS-04: device-bound                       # live: keyBinding true, cryptographic_binding_methods_supported jwk
   ICS-04.key_storage: [iso_18045_high]       # live: keyAttestationsRequired, published as key_attestations_required
   ICS-04.user_authentication: [iso_18045_high]
