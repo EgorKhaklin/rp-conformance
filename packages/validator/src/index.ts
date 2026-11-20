@@ -10,3 +10,4 @@ export * from './request';
 export * from './issued';
 export * from './issuer-request';
 export * from './claims';
+export * from './issuer-metadata';
