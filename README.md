@@ -95,7 +95,7 @@ pnpm rp-conformance issuer --list
 ```
 
 ```bash
-EUDIPLO_IMAGE=ghcr.io/eudiplo/eudiplo@sha256:1a1f53b77b69cfeaf573f6950de6a70947b909181654a6de252f8207e1b138a7 docker compose -f adapters/eudiplo/docker-compose.yml up -d --wait
+docker compose --env-file adapters/issuer-eudiplo/reference.env -f adapters/eudiplo/docker-compose.yml up -d --wait
 ```
 
 ```bash
@@ -104,7 +104,7 @@ pnpm rp-conformance issuer run --adapter eudiplo --ics adapters/issuer-eudiplo/i
 
 Per run the controller starts the Test Trust Infrastructure (`TL-WP`, `TL-PID`, `TL-AC`, `TL-RC`) and the Test Status Provider (`SL-WP-A`, `SL-WP-B`), creates the Test Wallet Provider with its Wallet Units, enrols the Provider through the Test Registrar (from its CSRs where the adapter returns them, otherwise with keys the Registrar generates) and sets the adapter up once. Each step of action `issuance` creates an offer through the adapter and runs the pre-authorized code flow with the issuance client of `packages/issuer-wallet` (WIA and PoP, DPoP, nonce, a proof that carries the KA). Every credential the Provider issues goes through the reference validator with the suite's trust configuration (`OBS-CRED`): format, `issuer-trust` to the enrolled `PP-T` on `TL-PID`, `issuer-signature`, `disclosures`, `validity`, `holder-binding` (bound to a proof key the KA attests, in place of `key-binding`) and `status-reference`, then the status list checks. `ISS` passes when every credential passes every check, `REJ` when the request at which the flow ended got a 4xx with an OAuth error object and nothing was issued; no answer may be a 5xx. The definitions are in `packages/issuer-definitions`, one per test case and variant; a step names its credential configuration by reference to the ICS (`ICS-02.SD`), which the adapter's `ics.yaml` maps to the Provider's configuration ID.
 
-The report goes to `reports/<run>/` as for the RP suite (`report.json` with every request and response and the check results, `summary.md`, `junit.xml`, the credentials). `EUDIPLO_PORT` and `HARNESS_HOST` work as above. The CI job `Issuer reference run` runs the same command against the pinned image on every pull request that touches the issuer suite and uploads the report.
+The report goes to `reports/<run>/` as for the RP suite (`report.json` with every request and response and the check results, `summary.md`, `junit.xml`, the credentials). `EUDIPLO_PORT` and `HARNESS_HOST` work as above. The CI job `Issuer reference run` runs the same command against the pinned image (`adapters/issuer-eudiplo/reference.env`, the one place that names it; see [adapters/issuer-eudiplo/README.md](adapters/issuer-eudiplo/README.md)) on every pull request that touches the issuer suite and uploads the report.
 
 ## Rendering the baseline
 

@@ -33,9 +33,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     env:
-      # The reference issuer (decision of 2026-11-20): EUDIPLO main at 9.1.0-main.ae0792a, pinned by digest, since 9.1.0
-      # lacks CSR enrolment, the strict wallet attestation status mode and revocation chaining.
-      EUDIPLO_IMAGE: ghcr.io/eudiplo/eudiplo@sha256:1a1f53b77b69cfeaf573f6950de6a70947b909181654a6de252f8207e1b138a7
+      # The reference issuer (decision of 2026-11-20) is pinned in adapters/issuer-eudiplo/reference.env, the one place
+      # that names it (EUDIPLO_IMAGE, EUDIPLO_EXPECT_VERSION); the first step loads it.
       # Docker Library image from Amazon ECR Public, which has no anonymous pull limit like Docker Hub.
       POSTGRES_IMAGE: public.ecr.aws/docker/library/postgres:16
       COMPOSE_FILE: adapters/eudiplo/docker-compose.yml
@@ -47,6 +46,8 @@ jobs:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      - name: Reference image (adapters/issuer-eudiplo/reference.env)
+        run: grep -E '^[A-Z_]+=' adapters/issuer-eudiplo/reference.env >> "$GITHUB_ENV"
       - name: Start EUDIPLO with PostgreSQL
         run: docker compose up -d --wait
       - name: Image under test
@@ -54,6 +55,7 @@ jobs:
           revision=$(docker image inspect "$EUDIPLO_IMAGE" --format '{{index .Config.Labels "org.opencontainers.image.revision"}}')
           version=$(docker image inspect "$EUDIPLO_IMAGE" --format '{{index .Config.Labels "org.opencontainers.image.version"}}')
           echo "EUDIPLO \`$EUDIPLO_IMAGE\`: version \`$version\`, revision \`$revision\`" | tee -a "$GITHUB_STEP_SUMMARY"
+          test "$revision" = "$EUDIPLO_REVISION" || { echo "::error::image revision $revision is not the pinned $EUDIPLO_REVISION"; exit 1; }
       - name: Issuer suite against EUDIPLO
         run: >-
           pnpm rp-conformance issuer run --adapter eudiplo
