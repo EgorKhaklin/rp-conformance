@@ -42,7 +42,7 @@ items:
   ICS-07.T_chain: PT7M                       # 30 s WALLET_UNIT_STATUS_CHECK_INTERVAL (adapters/eudiplo/docker-compose.yml, live in the container) + reuse of SL-WP-A for its ttl 300 s (harness default; EUDIPLO reuses a list for its ttl, at most 1 h) + T_rev 60 s = 390 s, rounded up
   ICS-08: "Yes"                              # batchSize below
   ICS-08.batch_size: 2                       # live: issuance configuration batchSize 2, published as batch_credential_issuance.batch_size (a maximum: one proof still gives one credential)
-  ICS-08.credential_reuse_policy: none       # config.credentialReusePolicy not set
+  ICS-08.credential_reuse_policy: once_only, limited_time  # config.credentialReusePolicy arf_annex_ii: method A with batch_size 2, then method B (issue 24)
   ICS-09: "Yes"                              # source: built-in token.refreshTokenEnabled default true (token-grant-rules.ts), refresh tokens bound to the DPoP key
   ICS-10: "Yes"                              # live: offers with deferred: true take their claims from the adapter's webhook, which answers {deferred: true}; EUDIPLO answers 202 with transaction_id and interval, the adapter completes it (POST /api/issuer/deferred/{id}/complete). Inline claims never defer
   ICS-11: "Yes"                              # live: notificationEndpointEnabled true, notification_endpoint in the metadata
@@ -54,7 +54,7 @@ items:
   ICS-14.T_skew: PT5S                        # source: CRYPTO_TOLERANCE default 5 s
   ICS-14.pre_authorized_code: PT24H          # offerLifetimeSeconds not set: the code lives as long as the session, SESSION_TTL default 86400 s
   ICS-14.c_nonce: PT10M                      # source: nonce.service.ts expiresAt now + 10 min
-  ICS-14.access_token: PT5M                  # source: ACCESS_TOKEN_LIFETIME_SECONDS 300 (token-grant-rules.ts)
+  ICS-14.access_token: PT1M                  # live: the adapter sets token.lifetimeSeconds 60 (EUDIPLO's minimum) on the built-in authorization server; expires_in 60 in the token response
   ICS-15.T_refresh: PT5M                     # source: trust-store.service.ts cacheTtlMs 5 min; refreshTrust clears the cache (DELETE /api/cache/trust-list, live)
   ICS-15.next_update_grace: PT0S             # source: a list whose NextUpdate has passed is discarded at once, also as wallet provider list, and so is one with a lower LoTESequenceNumber than one accepted before (docs trust/trust-lists.md, EUDIPLO/eudiplo#1441, #1457)
   ICS-16.min_entries: 10000                  # live: status list capacity 10000 (STATUS_CAPACITY default, set explicitly)

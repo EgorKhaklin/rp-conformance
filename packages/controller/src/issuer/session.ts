@@ -19,7 +19,7 @@ import {
   ICS_BATCH_SIZE,
   type Verdict,
 } from '@rp-conformance/core';
-import { base64url } from '@rp-conformance/forge';
+import { applyStatusListFault, base64url, buildStatusListTokenJwt } from '@rp-conformance/forge';
 import {
   applyIssuerFault,
   applySessionFault,
@@ -32,7 +32,7 @@ import {
   walletUnitOf,
 } from '@rp-conformance/issuer-wallet';
 import { jwkThumbprint, validateIssuedSdJwtVc } from '@rp-conformance/validator';
-import type { WalletUnitId } from '@rp-conformance/wallet-provider';
+import { REVOKED, signerFor, type StatusReference, type WalletUnitId } from '@rp-conformance/wallet-provider';
 import { type Evaluation, worst } from '../evaluate';
 import { evaluateIssuance } from './evaluate';
 import { type IssuerHarness, PID_TRUST_RULE } from './harness';
@@ -87,6 +87,25 @@ interface StepState {
 /** Per test case (keyed by the runner's state object): the state of each step that ran here. */
 const caseStates = new WeakMap<object, Map<number, StepState>>();
 
+/**
+ * Per test case: the status references a `wallet-event` step moved, per Wallet Unit. A `wallet-event` never changes the
+ * shared `SL-WP-A`: it serves the changed version under a URL of this test case, and the WIAs and KAs of the later steps
+ * of the test case reference it (as issue 19's `wallet-event` does), so no other test case sees the change.
+ */
+const movedStatus = new WeakMap<object, Map<string, { wia: StatusReference; ka: StatusReference; uri: string }>>();
+
+/** The Wallet Unit as the client sees it, with the status references a `wallet-event` of the test case moved. */
+function bindingOf(ctx: SessionContext, caseState: object, unit: WalletUnitId) {
+  const twp = ctx.harness.twp;
+  const moved = movedStatus.get(caseState)?.get(unit);
+  const base = walletUnitOf(twp, unit);
+  return {
+    binding: moved ? { ...base, wia: () => twp.wia(unit, { status: moved.wia }), keyAttestation: () => twp.keyAttestation(unit, { status: moved.ka }) } : base,
+    keyAttestation: (count: number) => twp.keyAttestation(unit, { batchSize: count, ...(moved ? { status: moved.ka } : {}) }),
+    movedUri: moved?.uri,
+  };
+}
+
 /** Per test case: the record of every step so far, whoever ran it. */
 const caseRecords = new WeakMap<object, IssuerStepRecord[]>();
 
@@ -112,33 +131,27 @@ function unmetDependency(step: IssuerStepDefinition, records: IssuerStepRecord[]
 
 const SESSION_ARTIFACTS = new Set(['refresh-token', 'dpop-proof', 'transaction-id']);
 
-/** A step of issue 25: it needs the session client, state of an earlier step, or an expectation the runner lacks. */
-function isSessionStep(step: IssuerStepDefinition): boolean {
-  const run = step.run;
-  if (!run) return false;
-  if (run.kind === 'notification') return true;
-  // A status list served with a fault (`PP_WS_SH_Encoding_005_UF`): the issuance after it must wait for its verdict.
-  if (run.kind === 'wallet-event' && run.event === 'status-list') return true;
-  if (run.kind === 'token-reuse') return SESSION_ARTIFACTS.has(run.artifact);
-  if (run.kind !== 'issuance') return false;
-  if (run.faults.some((f) => isSessionFault(f))) return true;
-  if (run.batchSize === ICS_BATCH_SIZE || (run.batchSize ?? 1) > 1 || run.encryption || run.deferred) return true;
-  return step.expect.codes.some((c) => c === 'CONF' || c === 'NOFETCH' || c === 'UNCHANGED' || (c.startsWith('REJ:') && c.includes('|')));
-}
+/**
+ * The areas of issue 25 whose definitions this module runs. Chosen by test case ID rather than by step shape, so the
+ * `CONF`, `UNCHANGED` or `wallet-event` steps of other areas stay with the runner and their own evaluators.
+ */
+const SESSION_AREAS = /^(?:PP|AP)_WS_(?:SM_TokenBinding|IA_Batch|IA_Reissuance|IA_Deferred|IA_Notification|SH_Encoding|SH_Encryption)_\d{3}/;
 
-/** A definition with a step of issue 25. */
-export const isSessionDefinition = (definition: IssuerTestCaseDefinition) => definition.steps.some(isSessionStep);
+/** A definition of issue 25. */
+export const isSessionDefinition = (definition: IssuerTestCaseDefinition) => SESSION_AREAS.test(definition.id);
 
 /**
  * The steps of a session definition this module runs: every issuance step (so later steps find its session), the
  * notification steps, the repeated requests of a session, and `setStatus` of the adapter for a credential of an
- * earlier step (it needs that step's session). Other actions (`wallet-event`, `trust-list`) stay with the runner.
+ * earlier step (it needs that step's session), and the `wallet-event` steps, whose changed list only the later steps
+ * of the same test case reference. Other actions (`trust-list`) stay with the runner.
  */
 export const handlesSessionStep = (definition: IssuerTestCaseDefinition, step: IssuerStepDefinition) =>
   isSessionDefinition(definition) &&
   (step.run?.kind === 'issuance' ||
     step.run?.kind === 'notification' ||
     (step.run?.kind === 'issuer-event' && step.run.event === 'set-status') ||
+    step.run?.kind === 'wallet-event' ||
     (step.run?.kind === 'token-reuse' && SESSION_ARTIFACTS.has(step.run.artifact)));
 
 /** The longest a step may wait in this run (seconds): `ISSUER_MAX_WAIT_SECONDS`, default 600. */
@@ -198,7 +211,8 @@ export async function runSessionStep(
       return;
     }
     const twp = ctx.harness.twp;
-    let binding = walletUnitOf(twp, unit);
+    const bound = bindingOf(ctx, caseState, unit);
+    let binding = bound.binding;
     let hooks: SessionHooks = {};
     let credential: Parameters<SessionClient['credential']>[2] = {};
     let noDpopRetry = false;
@@ -208,6 +222,7 @@ export async function runSessionStep(
       credential = applied.credential;
       noDpopRetry = applied.noDpopRetry ?? false;
     } else if (fault) {
+      if (bound.movedUri) throw new Error(`a step after a wallet-event applies no fault of the points wia, ka or proof, not ${fault}`);
       const applied = await applyIssuerFault(fault as never, { twp, unit });
       binding = applied.unit;
       hooks = applied.hooks;
@@ -226,7 +241,7 @@ export async function runSessionStep(
       ...(run.deferred ? { deferred: true } : {}),
     });
     record.offer = { sessionId: offer.sessionId, offer: offer.offer, byReference: run.offerByReference ?? false, txCode: offer.txCode !== undefined, configurations };
-    const client = await Client.create(binding, (count) => twp.keyAttestation(unit, { batchSize: count }), { allowInsecureUrls: true, hooks, noDpopRetry });
+    const client = await Client.create(binding, bound.keyAttestation, { allowInsecureUrls: true, hooks, noDpopRetry });
     const evidence = Client.newEvidence(unit);
     let session: SessionState | undefined;
     try {
@@ -234,16 +249,19 @@ export async function runSessionStep(
       await client.token(session, evidence, offer.txCode);
       const info = fault && isSessionFault(fault) ? sessionFaultInfo(fault) : undefined;
       if (info?.waitsAfterExpiry !== undefined) {
-        // `access-token.expired`: the Provider's token lifetime cannot be shortened from outside, so the step waits.
+        // `access-token.expired`: the Provider enforces the token lifetime, so the step waits it out (expires_in, plus the
+        // declared T_skew, capped at the catalogue's 5 minutes, plus the fault's margin).
         const expiresIn = Number(session.tokenResponse?.expires_in ?? issuerIcsSeconds(ctx.ics, 'ICS-14.access_token'));
-        const seconds = expiresIn + info.waitsAfterExpiry;
+        const skew = Math.min(issuerIcsSeconds(ctx.ics, 'ICS-14.T_skew') || ISSUER_SKEW_SECONDS, ISSUER_SKEW_SECONDS);
+        const seconds = expiresIn + skew + info.waitsAfterExpiry;
         if (!Number.isFinite(seconds) || seconds > maxWaitSeconds()) {
-          record.reason = `the step would wait ${seconds} s (expires_in ${expiresIn} s plus one hour) before the credential request, more than this run allows (ISSUER_MAX_WAIT_SECONDS ${maxWaitSeconds()} s)`;
+          record.reason = `the step would wait ${seconds} s (expires_in ${expiresIn} s, T_skew ${skew} s, ${info.waitsAfterExpiry} s) before the credential request, more than this run allows (ISSUER_MAX_WAIT_SECONDS ${maxWaitSeconds()} s)`;
           record.verdict = 'INCONCLUSIVE';
           record.exchanges = evidence.exchanges;
           return;
         }
         await wait(seconds * 1000);
+        record.reason = `waited ${seconds} s after the token response (expires_in ${expiresIn} s, T_skew ${skew} s, margin ${info.waitsAfterExpiry} s)`;
       }
       if (!run.stopAfterToken) {
         const completed = new Set<string>();
@@ -297,7 +315,8 @@ export async function runSessionStep(
       }
       hooks = { request: (s, r: HttpRequestMessage) => (s === 'credential' ? { ...r, headers: { ...withoutHeader(r.headers, 'dpop'), DPoP: proof } } : r) };
     }
-    const client = await prior.client.with({ hooks });
+    const moved = bindingOf(ctx, caseState, prior.evidence.walletUnit as WalletUnitId);
+    const client = await prior.client.with({ hooks, unit: moved.binding, keyAttestation: moved.keyAttestation });
     try {
       if (run.kind === 'notification') {
         const response = await client.notify(session, evidence, run.event);
@@ -316,6 +335,36 @@ export async function runSessionStep(
       evidence.error = (error as Error).message;
     }
     current = { client, session, evidence, credentials: [] };
+  } else if (run.kind === 'wallet-event') {
+    // The Test Wallet Provider revokes the unit's Wallet Instance or WSCD, or serves its list with a Status List Token
+    // fault, as a version of the provider's list under a URL of this test case.
+    const unit = (run.walletUnit ?? 'CW-1') as WalletUnitId;
+    const twp = ctx.harness.twp;
+    const info = twp.units[unit];
+    const entity = twp.entityOf(info.provider);
+    const signer = signerFor(entity, 'status');
+    const uri = ctx.harness.status.allocate(ctx.harness.namespace);
+    const statuses = [...twp.statusLists[info.provider].statuses];
+    if (run.event === 'revoke-instance') statuses[info.wiaStatus.idx] = REVOKED;
+    if (run.event === 'revoke-wscd') statuses[info.kaStatus.idx] = REVOKED;
+    const now = new Date();
+    const token = await buildStatusListTokenJwt({ signer, issuer: entity.issuerUri, uri, statuses, now });
+    const [fault] = run.statusList?.faults ?? [];
+    const served = run.event === 'status-list' && fault
+      ? await applyStatusListFault(fault, token, { pki: twp.pki, issuer: info.provider, signer, credentialSigner: signer, uri, now, skewSeconds: ISSUER_SKEW_SECONDS })
+      : { body: token, contentType: 'application/statuslist+jwt' };
+    ctx.harness.status.register(uri, served.body, { contentType: served.contentType });
+    const units = movedStatus.get(caseState) ?? new Map();
+    units.set(unit, { wia: { idx: info.wiaStatus.idx, uri }, ka: { idx: info.kaStatus.idx, uri }, uri });
+    movedStatus.set(caseState, units);
+    record.walletUnit = unit;
+    record.fault = fault ?? null;
+    record.verdict = 'PASS';
+    record.reason =
+      run.event === 'status-list'
+        ? `the Test Status Provider serves ${run.statusList?.id ?? 'the list'} of ${unit} at ${uri}${fault ? ` with the fault ${fault}` : ''}; the later WIAs and KAs of ${unit} reference it`
+        : `the Test Status Provider serves a version of ${run.statusList?.id ?? `the list of ${info.provider}`} at ${uri} with the ${run.event === 'revoke-instance' ? 'Wallet Instance' : 'WSCD'} entry of ${unit} revoked; the later WIAs and KAs of ${unit} reference it`;
+    return;
   } else if (run.kind === 'issuer-event' && run.event === 'set-status') {
     // Adapter `setStatus` for the credential of an earlier step of this test case (`OBS-ADM`).
     const sessionId = states.get(run.ofStep)?.sessionId;
@@ -363,6 +412,11 @@ export async function runSessionStep(
   }
   record.verdict = worst(evaluations.map((e) => e.verdict)) as Verdict;
   record.reason = evaluations.map((e) => e.reason).join('; ');
+  const movedUri = movedStatus.get(caseState)?.get(record.walletUnit ?? '')?.uri;
+  if (movedUri) {
+    const fetched = ctx.harness.status.requestsFor(movedUri, started).length;
+    record.reason += `; the Provider requested the status list the wallet-event step serves ${fetched} time(s) during the step`;
+  }
 }
 
 const withoutHeader = (headers: Record<string, string>, name: string) => Object.fromEntries(Object.entries(headers).filter(([k]) => k.toLowerCase() !== name));

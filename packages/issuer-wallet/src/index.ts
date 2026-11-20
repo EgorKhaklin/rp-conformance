@@ -6,3 +6,4 @@ export * from './faults';
 export * from './jwe';
 export * from './session';
 export * from './session-faults';
+export * from './credential-request-faults';

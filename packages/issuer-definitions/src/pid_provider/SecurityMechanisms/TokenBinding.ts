@@ -128,7 +128,7 @@ const tokenBinding007 = (format: FormatVariant, grant: GrantVariant) =>
     preconditions: ufPreconditions(),
     steps: [faultStep(format, grant, 'access-token.expired', rej('invalid_token'))],
     comments: [
-      'The step waits `expires_in` plus one hour (catalogue section 3.5), since the access token lifetime of the Provider cannot be shortened from outside. A run executes it only when `ISSUER_MAX_WAIT_SECONDS` allows that wait; otherwise the result is INCONCLUSIVE.',
+      'The step waits out the access token lifetime: `expires_in`, plus the `T_skew` the Provider declares (ICS-14, at most 5 minutes), plus one minute. The catalogue\'s "plus one hour" (section 3.5) moves time values the suite writes; a lifetime the Provider enforces can only be waited for, and one minute past the declared tolerance is past any tolerance the Provider declares. A run executes the step only when `ISSUER_MAX_WAIT_SECONDS` (default 600) allows the wait; otherwise the result is INCONCLUSIVE.',
     ],
   });
 

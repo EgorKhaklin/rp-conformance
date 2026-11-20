@@ -62,7 +62,12 @@ export interface SessionFaultInfo {
   testCases: string[];
   /** The fault applies only where the Provider sends `DPoP-Nonce` (ICS-13.dpop_nonce). */
   requiresDpopNonce?: true;
-  /** The client waits this long after the token response before it sends the faulty request: `expires_in` plus the given seconds. */
+  /**
+   * The client waits after the token response before it sends the faulty request: `expires_in`, plus the `T_skew` the
+   * Provider declares (ICS-14), plus these seconds. A lifetime the Provider enforces cannot be moved by the suite the way
+   * a time value it writes can (catalogue section 3.5, "declared value plus one hour"), so the step waits it out; past
+   * the declared tolerance by a minute, the token has expired under any tolerance the Provider declares.
+   */
   waitsAfterExpiry?: number;
   /** The fault needs the session of an earlier step of the test case (another Wallet Unit's access token). */
   needsOtherSession?: true;
@@ -111,9 +116,9 @@ export const SESSION_FAULTS = {
     point: 'credential-request',
     request: 'credential',
     target: 'access-token-validity',
-    text: 'its credential request is sent one hour after the `expires_in` of the access token has passed',
+    text: 'its credential request is sent once the `expires_in` of the access token, plus the `T_skew` the Provider declares, plus one minute has passed',
     testCases: [`${TB}_007_UF`],
-    waitsAfterExpiry: 3600,
+    waitsAfterExpiry: 60,
   },
 
   // Batch issuance: the proofs of one credential request (OpenID4VCI 1.0 section 8.2).

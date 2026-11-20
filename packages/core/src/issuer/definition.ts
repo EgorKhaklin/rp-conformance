@@ -4,6 +4,7 @@
 import type { CredentialFormat, ExpectationOf, StepDefinitionOf, TestCaseDefinitionOf } from '../definition';
 import type { FaultId } from '../faults';
 import type { IssuerFaultId } from './faults';
+import type { CredentialRequestFaultId } from './credential-request-faults';
 import type { IssuerIcsCondition, IssuerPolicyItem, IssuerProfile } from './ics';
 import type { SessionFaultId } from './session-faults';
 
@@ -53,7 +54,7 @@ export interface IssuanceAction {
   /** Number of proofs; default 1. */
   batchSize?: number;
   /** Named faults (at most one); empty for a valid issuance. */
-  faults: (FaultId | IssuerFaultId | SessionFaultId)[];
+  faults: (FaultId | IssuerFaultId | SessionFaultId | CredentialRequestFaultId)[];
   /** Stop after the token response, without a credential request. */
   stopAfterToken?: boolean;
   /** Expect and follow a deferred credential response. */

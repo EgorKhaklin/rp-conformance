@@ -14,6 +14,7 @@ import {
   type IssuerIcs,
   type IssuerStepDefinition,
   type IssuerTestCaseDefinition,
+  isCredentialRequestFault,
   isExecutable,
   type Verdict,
   variantOf,
@@ -21,6 +22,7 @@ import {
 import { type HttpExchange, IssuanceClient, type IssuanceEvidence, oauthErrorOf, walletUnitOf } from '@rp-conformance/issuer-wallet';
 import { validateIssuedSdJwtVc } from '@rp-conformance/validator';
 import { worst } from '../evaluate';
+import { isOfferCapture, issueWithFault, runMetadata, runOfferCapture } from './artifacts';
 import { harnessInfo } from '../info';
 import { evaluateIssuance, type IssuanceObservation } from './evaluate';
 import { type IssuerHarness, PID_TRUST_RULE, startIssuerHarness } from './harness';
@@ -71,6 +73,10 @@ export interface IssuerStepRecord {
   /** Whether the Provider issued an access token, and its type. */
   token?: { tokenType: string };
   credentials: IssuedCredentialRecord[];
+  /** The named checks over the captured metadata or offer (`CONF`). */
+  checks?: CheckResult[];
+  /** The reference validator's credential request checks over the faulty request (point `credential-request`). */
+  requestChecks?: CheckResult[];
   /** Why the flow stopped before a credential arrived. */
   error?: string;
   artifacts: string[];
@@ -245,6 +251,8 @@ interface Context extends IssuerRunOptions {
 /** State shared by the steps of one test case: one issuance client (one DPoP key) per Wallet Unit (design section 5.1). */
 interface TestCaseState {
   clients: Map<string, IssuanceClient>;
+  /** Offers by value captured in the test case (`PP_WS_MS_Offer_002`). */
+  offersByValue: Record<string, unknown>[];
 }
 
 async function runIssuerTestCase(definition: IssuerTestCaseDefinition, ctx: Context): Promise<IssuerTestCaseRecord> {
@@ -259,7 +267,7 @@ async function runIssuerTestCase(definition: IssuerTestCaseDefinition, ctx: Cont
   const unmet = [...issuerApplicability(definition, ctx.ics), ...sessionApplicability(definition, ctx.ics)];
   if (unmet.length) return end('NOT APPLICABLE', `profile not met: ${unmet.join('; ')}`);
   if (control && control.verdict !== 'PASS') return end('INCONCLUSIVE', `positive control ${outcomes.map((o) => o.id).join(' or ')} did not pass in ${variant}`);
-  const state: TestCaseState = { clients: new Map() };
+  const state: TestCaseState = { clients: new Map(), offersByValue: [] };
   const steps: IssuerStepRecord[] = [];
   for (const [index, step] of definition.steps.entries()) steps.push(noteSessionStep(state, await runIssuerStep(definition, variant, index + 1, step, ctx, state)));
   return { ...base, verdict: worst(steps.map((s) => s.verdict)), control, steps };
@@ -296,6 +304,7 @@ async function runIssuerStep(
   try {
     // Issue 25: DPoP, batch, re-issuance, deferred, notification and robustness steps run on the session client.
     if (handlesSessionStep(definition, step)) await runSessionStep(step, index, record, save, ctx, state);
+    else if (step.run?.kind === 'metadata') await runMetadata(step.expect, record, save, ctx);
     else if (step.run?.kind === 'issuance') await runIssuance(step, step.run, record, save, ctx, state);
     else record.reason = step.run ? `the step action ${step.run.kind} is not implemented yet` : 'the step is text only';
   } catch (error) {
@@ -308,7 +317,8 @@ async function runIssuerStep(
 /** What the issuance client and the issuance action support so far; anything else leaves the step INCONCLUSIVE. */
 function unsupported(action: IssuanceAction): string | undefined {
   if (action.grant !== 'pre-authorized_code') return 'the issuance client implements the pre-authorized code flow only';
-  if (action.faults.length) return `issuer faults are not implemented yet (${action.faults.join(', ')})`;
+  const notImplemented = action.faults.filter((fault) => !isCredentialRequestFault(fault));
+  if (notImplemented.length) return `issuer faults are not implemented yet (${notImplemented.join(', ')})`;
   const options: string[] = (['stopAfterToken', 'deferred', 'encryption', 'credentialIdentifier'] as const).filter((option) => action[option]);
   if ((action.batchSize ?? 1) > 1) options.push('batchSize');
   return options.length ? `the issuance option(s) ${options.join(', ')} are not implemented yet` : undefined;
@@ -323,6 +333,7 @@ async function runIssuance(
   ctx: Context,
   state: TestCaseState,
 ): Promise<void> {
+  if (isOfferCapture(step.expect)) return runOfferCapture(step.expect, action, record, save, ctx, state);
   const missing = unsupported(action);
   if (missing) {
     record.reason = missing;
@@ -343,7 +354,20 @@ async function runIssuance(
     client = await IssuanceClient.create(walletUnitOf(ctx.harness.twp, unit), { allowInsecureUrls: true });
     state.clients.set(unit, client);
   }
-  const evidence = await client.issue({ offer: offer.offer, ...(offer.txCode !== undefined ? { txCode: offer.txCode } : {}), credentialConfigurationId: configurations[0] });
+  const requestFault = action.faults.find(isCredentialRequestFault);
+  let evidence: IssuanceEvidence;
+  if (requestFault) {
+    const faulty = await issueWithFault(requestFault, offer, configurations[0] as string, unit, ctx);
+    evidence = faulty.evidence;
+    if (faulty.requestChecks) record.requestChecks = faulty.requestChecks;
+    if (faulty.notApplicable) {
+      record.exchanges = evidence.exchanges;
+      record.reason = `the fault ${requestFault} cannot be applied: ${faulty.notApplicable}`;
+      return;
+    }
+  } else {
+    evidence = await client.issue({ offer: offer.offer, ...(offer.txCode !== undefined ? { txCode: offer.txCode } : {}), credentialConfigurationId: configurations[0] });
+  }
   record.exchanges = evidence.exchanges;
   if (evidence.token) record.token = { tokenType: evidence.token.tokenType };
   if (evidence.error) record.error = evidence.error;

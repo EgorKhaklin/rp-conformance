@@ -121,8 +121,9 @@ export class SessionClient {
   }
 
   /** A client of the same Wallet Unit and DPoP key with other hooks (the fault of a later step). */
-  with(options: Pick<SessionClientOptions, 'hooks' | 'noDpopRetry'>): Promise<SessionClient> {
-    return SessionClient.create(this.unit, this.keyAttestation, { ...this.options, ...options, dpopKey: this.dpopKey });
+  with(options: Pick<SessionClientOptions, 'hooks' | 'noDpopRetry'> & { unit?: WalletUnitBinding; keyAttestation?: KeyAttestationSource }): Promise<SessionClient> {
+    const { unit, keyAttestation, ...rest } = options;
+    return SessionClient.create(unit ?? this.unit, keyAttestation ?? this.keyAttestation, { ...this.options, ...rest, dpopKey: this.dpopKey });
   }
 
   static newEvidence(walletUnit: string): SessionEvidence {

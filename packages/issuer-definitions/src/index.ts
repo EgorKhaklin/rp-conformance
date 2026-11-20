@@ -8,6 +8,10 @@ import { definitions as reissuance } from './pid_provider/Interaction/Reissuance
 import { definitions as tokenBinding } from './pid_provider/SecurityMechanisms/TokenBinding';
 import { definitions as encoding } from './pid_provider/Shared/Encoding';
 import { definitions as encryption } from './pid_provider/Shared/Encryption';
+// Issue 24: message structure
+import { definitions as credentialEndpoint } from './pid_provider/MessageStructure/CredentialEndpoint';
+import { definitions as metadata } from './pid_provider/MessageStructure/Metadata';
+import { definitions as offer } from './pid_provider/MessageStructure/Offer';
 
 export * from './wording';
 
@@ -25,6 +29,10 @@ export const issuerDefinitions: IssuerTestCaseDefinition[] = [
   ...notification,
   ...encoding,
   ...encryption,
+  // Issue 24: message structure
+  ...metadata,
+  ...offer,
+  ...credentialEndpoint,
 ];
 
 /** The issuer definitions the harness can execute. */
