@@ -9,6 +9,7 @@ export * from './x509-path';
 export * from './request';
 export * from './issued';
 export * from './issuer-request';
+export * from './issuer-session';
 export * from './claims';
 export * from './issuer-metadata';
 export * from './vp-token';

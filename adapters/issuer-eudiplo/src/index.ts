@@ -7,6 +7,9 @@ import {
   type EnrolmentRequest,
   type IssuerAdapter,
   type IssuerTestEnvironment,
+  type RunningServer,
+  sendJson,
+  startServer,
   type TestSubject,
 } from '@rp-conformance/core';
 import { icsList, icsNumber } from './ics';
@@ -36,6 +39,13 @@ const BUILT_IN_AS = 'issuer-built-in';
 export const STATUS_LIST_TTL_SECONDS = 60;
 /** Lifetime of the PID; more than 24 hours, so it carries a status reference (ICS-05.validity_period). */
 const PID_LIFETIME_SECONDS = 30 * 24 * 60 * 60;
+/**
+ * Access token lifetime of the built-in authorization server: EUDIPLO's minimum (60 s; default 300 s), so
+ * `PP_WS_SM_TokenBinding_007_UF` waits for an expired token within the run's wait limit (ICS-14.access_token).
+ */
+const ACCESS_TOKEN_LIFETIME_SECONDS = 60;
+/** `interval` the deferral webhook asks EUDIPLO to hand to the wallet, seconds. */
+const DEFERRAL_INTERVAL_SECONDS = 1;
 /** Lifetime of the short-lived PID, without status reference (ICS-05.short.validity_period). */
 const PID_SHORT_LIFETIME_SECONDS = 12 * 60 * 60;
 
@@ -145,6 +155,8 @@ export class IssuerEudiploAdapter implements IssuerAdapter {
   /** The configurations `setUp` created. */
   private configurations = new Set<string>();
   private capabilities: EudiploCapabilities = { csr: false, statusCheckMode: false, revokeWithWalletUnit: false };
+  /** Issue 25: the claims webhook that defers every issuance it is asked for (`P-DEF`), started on first use. */
+  private deferralWebhook?: { server: RunningServer; url: string };
 
   constructor(private readonly options: IssuerEudiploAdapterOptions = {}) {
     this.baseUrl = (options.baseUrl ?? process.env.EUDIPLO_URL ?? `http://127.0.0.1:${process.env.EUDIPLO_PORT ?? 3000}`).replace(/\/$/, '');
@@ -369,7 +381,7 @@ export class IssuerEudiploAdapter implements IssuerAdapter {
     const walletProviderTrustLists = [{ url: tlWp.url, verifierX509Der: derOf(tlWp.schemeOperatorCertificatePem) }];
     const issuance = {
       display: [{ name: 'EUDIPLO PID Provider under conformance test', locale: 'en-US' }],
-      authorizationServers: [{ type: 'built-in', id: BUILT_IN_AS, walletAttestationRequired: true }],
+      authorizationServers: [{ type: 'built-in', id: BUILT_IN_AS, walletAttestationRequired: true, token: { lifetimeSeconds: ACCESS_TOKEN_LIFETIME_SECONDS } }],
       walletAttestationRequired: true,
       walletProviderTrustLists,
       batchSize,
@@ -433,17 +445,38 @@ export class IssuerEudiploAdapter implements IssuerAdapter {
     const claimsOf = (id: string) => pidClaimsFor(req.subject, PID_CONFIGURATIONS[id].format, PID_CONFIGURATIONS[id].lifetime);
     const preAuthorized = req.grant === 'pre-authorized_code';
     const txCode = preAuthorized && req.txCode ? String(randomInt(0, 1_000_000)).padStart(6, '0') : undefined;
+    const deferralUrl = req.deferred ? await this.deferral() : undefined;
     const offer = await this.call<{ uri: string; session: string }>('POST', '/api/issuer/offer', {
       response_type: 'uri',
       flow: preAuthorized ? 'pre_authorized_code' : 'authorization_code',
       authorization_server: BUILT_IN_AS,
       credentialConfigurationIds: req.configurations,
-      credentialClaims: Object.fromEntries(req.configurations.map((id) => [id, { type: 'inline', claims: claimsOf(id) }])),
+      credentialClaims: Object.fromEntries(
+        req.configurations.map((id) => [id, deferralUrl ? { type: 'webhook', webhook: { url: deferralUrl, auth: { type: 'none' } } } : { type: 'inline', claims: claimsOf(id) }]),
+      ),
       ...(txCode ? { tx_code: txCode, tx_code_description: 'Transaction code of the conformance test' } : {}),
       reference: `${req.subject}`,
     });
     const uri = req.byReference ? offer.uri : await this.byValue(offer.uri);
     return { offer: uri, sessionId: offer.session, ...(txCode ? { txCode } : {}) };
+  }
+
+  /**
+   * Issue 25 (`P-DEF`): the claims webhook of a deferred offer. EUDIPLO defers an issuance only when the claims come
+   * from a webhook or attribute provider that answers `{ "deferred": true }` (inline claims never defer); this one
+   * answers so for every request, on the host under `harnessHost`, which EUDIPLO reaches from its container.
+   */
+  private async deferral(): Promise<string> {
+    if (!this.deferralWebhook) {
+      const server = await startServer({ host: '0.0.0.0', port: 0 }, (_req, res) => sendJson(res, 200, { deferred: true, interval: DEFERRAL_INTERVAL_SECONDS }));
+      this.deferralWebhook = { server, url: `http://${this.harnessHost}:${server.port}/claims` };
+    }
+    return this.deferralWebhook.url;
+  }
+
+  /** Completes a deferred issuance with the subject's claims (`POST /api/issuer/deferred/{transactionId}/complete`). */
+  async completeDeferred(transactionId: string, subject: TestSubject): Promise<void> {
+    await this.call('POST', `/api/issuer/deferred/${encodeURIComponent(transactionId)}/complete`, { claims: pidClaimsFor(subject, 'SD', PID_LIFETIME_SECONDS) });
   }
 
   /**
@@ -524,6 +557,8 @@ export class IssuerEudiploAdapter implements IssuerAdapter {
 
   /** Deletes the tenant with its configurations, key chains and sessions. */
   async tearDown(): Promise<void> {
+    await this.deferralWebhook?.server.close();
+    this.deferralWebhook = undefined;
     if (this.tenantId && this.rootToken) await this.call('DELETE', `/api/tenant/${this.tenantId}`, undefined, this.rootToken);
     this.tenantId = undefined;
     this.token = undefined;

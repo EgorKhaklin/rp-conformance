@@ -34,6 +34,8 @@ One tenant per namespace, as the RP adapter does (`adapters/eudiplo`):
 | `setUp(env, namespace)` | Tenant with the roles `issuance:manage` and `issuance:offer` (one left from an earlier run is replaced). Key chains: the Registrar's certificates for the CSR key chains (`PUT /api/key-chain/{id}` `activeCertificate`), or else the Registrar's keys imported with their chains (`POST /api/key-chain/import`): credential signer under `PP-T`, status list signer under the revocation anchor of `PP-T`, access certificate from `AC-A`. Status list settings (`PUT /api/status-list-config`): 2 bits, 10 000 entries, `ttl` 60 s, `immediateUpdate`. The PID configuration `pid-sd-jwt-vc` (`dc+sd-jwt`, `vct` `urn:eudi:pid:1`, `keyBinding`, `statusManagement`, `keyAttestationsRequired` with the ICS levels, `revokeWithWalletUnit`, 30 days, and on every configuration the ARF Annex II reuse policy `credentialReusePolicy`: method A `once_only` with the batch size, then method B `limited_time`); with `P-MD` the PID in mdoc `pid-mso-mdoc` (`mso_mdoc`, docType and namespace `eu.europa.ec.eudi.pid.1`, signed by the document signer the Registrar issued); with `P-SHORT` the short-lived `pid-sd-jwt-vc-short` and `pid-mso-mdoc-short` (12 hours, no status reference). A second, identical configuration `pid-sd-jwt-vc-2` that no PID offer names, so `PP_WS_MS_CredentialEndpoint_004_UF` can request a configuration the access token was not issued for; `PP_WS_IA_PreAuthorized_004_UF` offers it on its own (`ICS-02.second`). The issuance configuration: built-in authorization server, `walletAttestationRequired`, `walletProviderTrustLists` = the harness's `TL-WP` pinned to its scheme operator certificate, `walletAttestationStatusCheckMode` `strict` (wallet attestations at the authorization server, key attestations at the credential endpoint), `batchSize` from the ICS, DPoP, notification endpoint, and the Registrar's registration certificate in `issuer_info`. |
 | `createOffer` | `POST /api/issuer/offer` at the built-in authorization server, pre-authorized code or authorization code with `issuer_state` (issue 20), the subject's claims inline (`credentialClaims`) in the names of each configuration's format, with the age attributes and the issuance and expiry dates derived at issuance (`pidClaimsFor`), optionally a 6-digit `tx_code` (`txCode: true`). EUDIPLO offers by reference only; for `byReference: false` the adapter resolves the reference (once, it is single-use) and hands out `credential_offer` by value. |
 | `authenticateSubject` | Opens the authorization request (`GET {authorization_endpoint}?client_id&request_uri`, no redirect following) and returns EUDIPLO's redirect to the wallet: `code`, `state`, `iss`, or `error`. Any other answer (EUDIPLO answers a request without a pushed `request_uri` with HTTP 409) is thrown as `AuthorizationEndpointError`. See below. |
+| `createOffer` with `deferred: true` | Instead of inline claims, `credentialClaims` names a claims webhook the adapter serves on the host (`http://{harnessHost}:{port}/claims`, started on first use, stopped in `tearDown`). It answers every request with `{ "deferred": true, "interval": 1 }`, so EUDIPLO answers the credential request with HTTP 202, `transaction_id` and `interval` (inline claims never defer). |
+| `completeDeferred` | `POST /api/issuer/deferred/{transactionId}/complete` with the subject's claims; the next poll of the deferred credential endpoint returns the PID. |
 | `setStatus` | `POST /api/session/revoke` (`0` valid, `1` revoked, `2` suspended), then `GET /api/session/{id}/credential-status` must show the new status for every credential of the session. |
 | `refreshTrust` | `DELETE /api/cache/trust-list` |
 | `describe` | URL, version and revision (`GET /api/version`), tenant, enrolment method, the status check mode and revocation chaining as configured |
@@ -163,10 +165,28 @@ Not configured by the adapter although EUDIPLO supports it; each can be added wh
 | Feature | ICS | Test cases not validated until then |
 | --- | --- | --- |
 | PID in mdoc (`mso_mdoc`, `eu.europa.ec.eudi.pid.1`); a PID Provider must issue both formats (PID_02) | `ICS-02` SD-JWT VC only | `PP_WS_DM_PidMdoc_*`, `PP_WS_MS_Metadata_006`, `PP_WS_IA_MainInteraction_003` and every `MD` variant |
-| Deferred issuance (an attribute provider or webhook that defers) | `P-DEF` No | `PP_WS_IA_Deferred_*` |
 | Embedded disclosure policy | `P-EDP` No | `AP_WS_MS_Metadata_102`, `AP_WS_SM_Revocation_102` (Attestation Providers) |
 | Short-lived configuration without status | `P-SHORT` No | `PP_WS_SM_Validity_002` |
 | Portrait and its opt-out | `ICS-17.portrait_opt_out` No | `PP_WS_DM_Portrait_001` |
+
+## DPoP, batch, re-issuance, deferred, notification and robustness (issue 25)
+
+The test cases of `PP_WS_SM_TokenBinding`, `PP_WS_IA_Batch`, `_Reissuance`, `_Deferred`, `_Notification`,
+`PP_WS_SH_Encoding` and `_Encryption` run against the pinned image; eleven of them fail on behaviour of EUDIPLO that
+[`known-findings.yaml`](known-findings.yaml) records with its evidence: `batch_size` not enforced, a refresh token
+accepted with another DPoP key and after revocation, HTTP 500 for a malformed `transaction_id`, HTTP 201 instead of 204
+at the notification endpoint, error bodies without an OAuth error object (unknown notification event, 413), deeply
+nested JSON and `jku`/`x5u` headers accepted, and no status check of WIA or KA at all: EUDIPLO reads
+`status.status_list`, while TS3 carries the reference in `client_status` and `key_storage_status`.
+
+`PP_WS_IA_Reissuance_005_UF` and `PP_WS_SH_Encoding_005_UF` fail on the same missing status check: the revoked Wallet
+Instance and the decompression bomb are served by issue 19's `wallet-event` step in a version of `SL-WP-A` under a URL of
+the test case, which EUDIPLO never requests. `PP_WS_SM_TokenBinding_007_UF` waits out the access token: the adapter sets the built-in authorization
+server's `token.lifetimeSeconds` to EUDIPLO's minimum of 60 s (ICS-14.access_token PT1M), and the step waits
+`expires_in` plus the declared `T_skew` plus one minute (126 s).
+
+`PP_WS_IA_Batch_006` runs in the authorization code flow (issue 20) and passes: one authorization gives the batch.
+Not applicable against EUDIPLO: `PP_WS_SM_TokenBinding_006_UF` (no DPoP server nonce).
 
 ## Authorization code flow with a scripted login (option, not used)
 

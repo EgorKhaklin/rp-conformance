@@ -192,7 +192,7 @@ const VALID = 'the valid issuance (no fault): every valid artifact of every Wall
 const STATUS_LIST =
   'a Status List Token fault of the RP harness served as `SL-WP-A` (design section 5.2): the checks are the existing status list checks, applied by the `status-list` point';
 const REVOCATION = 'a `wallet-event` step, not a fault: the Test Wallet Provider revokes the entry in `SL-WP-A`; `wia-status` / `ka-status` fail on it (shown in the self-validation)';
-const BATCH = 'a batch fault of the point `proof` (issue 25)';
+const BATCH = 'the batch faults `batch.over-size`, `batch.one-bad-proof` and `batch.same-key-twice` of `SESSION_FAULTS` (./session-faults.ts)';
 const OUTPUT = 'a `CONF` check of the issued credential (`holder-binding` of `OBS-CRED`, issue 17), not of the request';
 
 export const ISSUER_REQUEST_STIMULI: IssuerStimulus[] = [

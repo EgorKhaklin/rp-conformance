@@ -57,6 +57,7 @@ import {
   type StatusObservation,
   waits,
 } from './status';
+import { handlesSessionStep, noteSessionStep, runSessionStep, sessionApplicability } from './session';
 
 /** The validator's clock tolerance on the issuer side: the catalogue's cap of `T_skew` (section 3.5). */
 export const ISSUER_SKEW_SECONDS = 300;
@@ -330,12 +331,12 @@ async function runIssuerTestCase(definition: IssuerTestCaseDefinition, ctx: Cont
   }));
   const control = outcomes.find((o) => o.verdict === 'PASS') ?? outcomes[0] ?? null;
   const end = (verdict: Verdict, reason: string): IssuerTestCaseRecord => ({ ...base, verdict, reason, control, steps: [] });
-  const unmet = issuerApplicability(definition, ctx.ics);
+  const unmet = [...issuerApplicability(definition, ctx.ics), ...sessionApplicability(definition, ctx.ics)];
   if (unmet.length) return end('NOT APPLICABLE', `profile not met: ${unmet.join('; ')}`);
   if (control && control.verdict !== 'PASS') return end('INCONCLUSIVE', `positive control ${outcomes.map((o) => o.id).join(' or ')} did not pass in ${variant}`);
   const state: TestCaseState = { clients: new Map(), attestations: newAttestationState(), offersByValue: [], evidence: new Map(), ...newLifecycleState() };
   const steps: IssuerStepRecord[] = [];
-  for (const [index, step] of definition.steps.entries()) steps.push(await runIssuerStep(definition, variant, index + 1, step, ctx, state));
+  for (const [index, step] of definition.steps.entries()) steps.push(noteSessionStep(state, await runIssuerStep(definition, variant, index + 1, step, ctx, state)));
   // A step that does not apply to the Provider (NOT APPLICABLE) does not count, unless no step applies.
   const applicable = steps.filter((s) => s.verdict !== 'NOT APPLICABLE');
   const skipped = steps.filter((s) => s.verdict === 'NOT APPLICABLE').map((s) => `step ${s.step} not applicable: ${s.reason}`);
@@ -371,7 +372,9 @@ async function runIssuerStep(
     record.artifacts.push(relative(ctx.runDir, join(dir, name)));
   };
   try {
-    if (step.run?.kind === 'metadata') await runMetadata(step.expect, record, save, ctx);
+    // Issue 25: DPoP, batch, re-issuance, deferred, notification and robustness steps run on the session client.
+    if (handlesSessionStep(definition, step)) await runSessionStep(step, index, record, save, ctx, state);
+    else if (step.run?.kind === 'metadata') await runMetadata(step.expect, record, save, ctx);
     else if (step.run?.kind === 'issuance') await runIssuance(step, step.run, record, save, ctx, state);
     else if (step.run?.kind === 'token-reuse') await runTokenReuse(step, step.run, record, save, ctx, state);
     else if (step.run?.kind === 'wallet-event' && step.expect.codes.every((code) => code === 'INFO')) {
