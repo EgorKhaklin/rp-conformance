@@ -40,7 +40,7 @@ echo "linting ${#rp[@]} Relying Party test cases"
 status=0
 lint --enforce-all "${rp[@]}" || status=1
 # Every check the lint has, except those the issuer definitions do not satisfy yet.
-warn=${ISSUER_LINT_WARN-FC071,FC100}
+warn=${ISSUER_LINT_WARN-FC100}
 enforce=$(grep -o '"FC[0-9]*"' "$work/site/tools/fcaf_lint.py" | tr -d '"' | sort -u | grep -vxE "${warn//,/|}" | paste -sd, -)
 echo "linting ${#issuer[@]} PID Provider test cases${warn:+ (warnings only: $warn)}"
 lint --enforce "$enforce" "${issuer[@]}" || status=1

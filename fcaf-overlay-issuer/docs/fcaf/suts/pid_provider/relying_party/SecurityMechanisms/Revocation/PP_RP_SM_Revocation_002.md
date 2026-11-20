@@ -41,7 +41,7 @@ EUDI_specific | EUDI_required
 ## Expected results
 
 1. The Provider issues the credential (HTTP 200) in SD-JWT VC format (`dc+sd-jwt`). Every credential passes format, `issuer-trust` to `PP-T` on `TL-PID`, `issuer-signature`, `disclosures`, `validity`, `holder-binding` (bound to a proof key the KA attests) and `status-reference`, and the Status List Token it references passes the status list checks.
-2. A Relying Party with `TL-PID` validates the Status List Token to the Provider. The named checks pass: `status-list-trust` (the signer chains to the revocation anchor of `PP-T` on `TL-PID`, or to its issuance anchor where the list carries it under both services); `status-list-signature` (ES256, verifies with the signer certificate).
+2. A Relying Party with `TL-PID` validates the Status List Token to the Provider. The named checks pass: `status-list-trust` (the signer chains to the revocation anchor of `PP-T` on `TL-PID`, or to its issuance anchor where the list carries it under both services); `status-list-signature` (`ES256`, verifies with the signer certificate).
 
 ## Comments
 

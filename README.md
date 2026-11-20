@@ -125,7 +125,7 @@ pnpm fcaf:render --check
 scripts/fcaf-lint.sh
 ```
 
-`--check` fails when a committed overlay differs from what the definitions render; `pnpm test` checks the same. `scripts/fcaf-lint.sh` fetches the FCAF repository at the pinned commits and runs its lint with [fcaf-overlay/fcaf_lint-rp.patch](fcaf-overlay/fcaf_lint-rp.patch) and [fcaf-overlay-issuer/fcaf_lint-issuer.patch](fcaf-overlay-issuer/fcaf_lint-issuer.patch) applied; any finding fails it, except the two checks the issuer definitions do not satisfy yet ([fcaf-overlay-issuer/README.md](fcaf-overlay-issuer/README.md#lint)). CI runs all three.
+`--check` fails when a committed overlay differs from what the definitions render; `pnpm test` checks the same. `scripts/fcaf-lint.sh` fetches the FCAF repository at the pinned commits and runs its lint with [fcaf-overlay/fcaf_lint-rp.patch](fcaf-overlay/fcaf_lint-rp.patch) and [fcaf-overlay-issuer/fcaf_lint-issuer.patch](fcaf-overlay-issuer/fcaf_lint-issuer.patch) applied; any finding fails it, except the one check the issuer definitions do not satisfy yet ([fcaf-overlay-issuer/README.md](fcaf-overlay-issuer/README.md#lint)). CI runs all three.
 
 ## Licence
 

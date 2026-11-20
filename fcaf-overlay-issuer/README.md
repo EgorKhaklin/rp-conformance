@@ -45,12 +45,11 @@ renders both overlays; `pnpm fcaf:render --check` and `pnpm test` fail when the 
 
 ## Lint
 
-`scripts/fcaf-lint.sh` lays both overlays over `submitted`, applies both lint patches and lints every `RP_*` and `PP_*` test case. Every check blocks, except two that the issuer definitions do not satisfy yet and that are reported as warnings (`ISSUER_LINT_WARN`, default `FC071,FC100`); both are advisory checks of the FCAF lint, not in its default blocking set:
+`scripts/fcaf-lint.sh` lays both overlays over `submitted`, applies both lint patches and lints every `RP_*` and `PP_*` test case. Every check blocks, except one that the issuer definitions do not satisfy yet and that is reported as a warning (`ISSUER_LINT_WARN`, default `FC100`), an advisory check of the FCAF lint, not in its default blocking set:
 
 - `FC100`: most issuer test cases cite only [ARF] Annex 2, OpenID4VCI, HAIP and other specifications, and no `[CIR …]` or `[ETSI …]` item that anchors the test in the EUDI profile, as the Relying Party test cases do with `[CIR 2024/2982 amended]` and `[CIR 2024/2979 amended]`. Which Implementing Regulation anchors issuance needs deciding before the definitions can cite it.
-- `FC071`: the wording of the `status-list-signature` check in `packages/issuer-definitions/src/status.ts` writes `ES256` without backticks.
 
-Once the definitions are fixed, remove the code from `ISSUER_LINT_WARN`.
+Once the definitions cite such an anchor, remove the code from `ISSUER_LINT_WARN`.
 
 ## Open points before an upstream pull request
 

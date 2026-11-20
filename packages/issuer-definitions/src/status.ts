@@ -13,7 +13,7 @@ export const STATUS_CHECK_TEXT: Record<string, string> = {
   'status-list-format': '`status-list-format` (a Status List Token in the format of the credential)',
   'status-list-type': '`status-list-type` (`typ` `statuslist+jwt`, or `application/statuslist+cwt`)',
   'status-list-trust': '`status-list-trust` (the signer chains to the revocation anchor of `PP-T` on `TL-PID`, or to its issuance anchor where the list carries it under both services)',
-  'status-list-signature': '`status-list-signature` (ES256, verifies with the signer certificate)',
+  'status-list-signature': '`status-list-signature` (`ES256`, verifies with the signer certificate)',
   'status-list-claims': '`status-list-claims` (`sub`, `iat`, `status_list` with `bits` and `lst`)',
   'status-list-subject': "`status-list-subject` (`sub` equals the credential's status `uri`)",
   'status-list-validity': '`status-list-validity` (`exp` not passed)',
