@@ -129,7 +129,7 @@ const revocation008 = (format: FormatVariant) =>
     references: ['[ARF] Annex 2, VCR_09', '[ARF] Annex 2, ISSU_62'],
     profile: [...pidProfile(format, 'PA'), issuerProfiles['P-REV'], issuerProfiles['P-HOOK']],
     relevancy: relevancy.specificRequired,
-    technology: [...technologyOf(format), 'Token Status List', 'PID Rulebook'],
+    technology: [...technologyOf(format), 'Token Status List'],
     preconditions: [
       ...preconditions.base,
       'The adapter seeds `SUBJ-1` and `SUBJ-2` (ICS-17) and can replace the data of `SUBJ-1` by those of `SUBJ-2` (`changeSubject`, ICS-06); NOT APPLICABLE otherwise (decision 5).',

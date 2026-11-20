@@ -8,7 +8,7 @@ import { FORMAT_NAMES, GRANT_NAMES, iss, issuance } from './wording';
 /** What each check of an `inspect` step establishes, as the FCAF text names it. */
 export const INSPECTION_CHECK_TEXT: Record<IssuerInspectionCheck, string> = {
   'sd-jwt-typ': '`sd-jwt-typ` (the header carries `typ` `dc+sd-jwt`)',
-  'signer-algorithm': '`signer-algorithm` (`alg` is ES256, ES384 or ES512, ECCG agreed, with the signer key on its curve)',
+  'signer-algorithm': '`signer-algorithm` (`alg` is `ES256`, `ES384` or `ES512`, ECCG agreed, with the signer key on its curve)',
   'signer-chain': '`signer-chain` (`x5c` or `x5chain` carries the signer certificate first and its intermediates in order, no self-issued trust anchor)',
   'mdoc-digest-algorithm': '`mdoc-digest-algorithm` (the MSO `digestAlgorithm` is `SHA-256`)',
   'signer-profile': '`signer-profile` (the signer certificate is one the Test Registrar enrolled for the Provider in the ETSI TS 119 412-6 profile: end-entity, `keyUsage` `digitalSignature` without certificate or CRL signing, subject with country, organisation and common name, an authority key identifier, valid now; for mdoc the document signer extended key usage `1.0.18013.5.1.2`)',

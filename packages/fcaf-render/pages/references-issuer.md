@@ -15,3 +15,4 @@
 | [RFC7517] | - | [RFC 7517](https://datatracker.ietf.org/doc/html/rfc7517): JSON Web Key (JWK). |
 | [TokenStatusList] | - | Same as [Token Status List]. |
 | [TS3] | - | EUDI Wallet Technical Specification 3: Wallet Unit Attestations, with the Wallet Instance Attestation and the key attestation, in the [EUDI Wallet standards and technical specifications](https://github.com/eu-digital-identity-wallet/eudi-doc-standards-and-technical-specifications). |
+| [ETSI TS 119 412-6] | - | ETSI TS 119 412-6: Electronic Signatures and Trust Infrastructures (ESI); Certificate profile requirements for PID, Wallet, EAA, QEAA and PSBEAA providers. |

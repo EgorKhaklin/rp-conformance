@@ -1,3 +1,3 @@
 # PID Provider - Trust Infrastructure test cases
 
-No test cases of this class are written yet.
+{% include-markdown "./*/index.md" heading-offset=1 comments=true %}

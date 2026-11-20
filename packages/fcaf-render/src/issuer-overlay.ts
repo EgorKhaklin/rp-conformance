@@ -53,6 +53,8 @@ export const ISSUER_TECHNOLOGY: Record<string, string> = {
   'Attestation-Based Client Authentication': 'Every Provider; Wallet Instance Attestation as client authentication, [IETF draft-attestation-based-client-auth].',
   'Token Status List': 'Follows ICS-05 (`P-REV`); [Token Status List].',
   HTTP: 'Every Provider that publishes status lists or identifier lists.',
+  // Issue 26: PP_Inf_SM_TrustMechanisms
+  'ETSI TS 119 602 LoTE': 'Every Provider; the Wallet Provider list `TL-WP`, [ETSI TS 119 602].',
 };
 
 const trimNewlines = (text: string) => text.replace(/\n+$/, '');
