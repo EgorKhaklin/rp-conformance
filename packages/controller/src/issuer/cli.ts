@@ -2,7 +2,7 @@
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
-import { type IssuerAdapter, type IssuerTestCaseDefinition, isExecutable, variantOf } from '@rp-conformance/core';
+import { durationMs, type IssuerAdapter, type IssuerTestCaseDefinition, isExecutable, variantOf } from '@rp-conformance/core';
 import { issuerDefinitions } from '@rp-conformance/issuer-definitions';
 import { loadIssuerIcs } from './ics';
 import { issuerRunOutcome, loadIssuerKnownFindings } from './known-findings';
@@ -27,6 +27,9 @@ Options:
   --known-findings <file>
                          Known findings of the Provider (YAML). A FAIL listed there is reported as known and does not
                          fail the run; any other FAIL, INCONCLUSIVE, REVIEW or a run error does (exit code 1)
+  --max-wait <duration>  Longest a step may wait for an artifact to expire (its lifetime plus one hour), ISO 8601
+                         (PT2H) or seconds; default 0. Steps that would wait longer are NOT APPLICABLE and the test
+                         cases with such steps run last
   --list                 List the issuer test definitions, one line per test case and variant, and exit
 
 The report goes to <report-dir>/<run>/: report.json, summary.md, junit.xml and the artifacts of every step.
@@ -57,6 +60,7 @@ export async function issuerMain(argv: string[], io: Io, definitions = issuerDef
       'report-dir': { type: 'string', default: 'reports' },
       'harness-host': { type: 'string' },
       'known-findings': { type: 'string' },
+      'max-wait': { type: 'string' },
       list: { type: 'boolean' },
       help: { type: 'boolean', short: 'h' },
     },
@@ -78,6 +82,9 @@ export async function issuerMain(argv: string[], io: Io, definitions = issuerDef
   const adapter = (await entry.load()).createAdapter();
   const root = resolve(dirname(fileURLToPath(import.meta.url)), '../../../..');
   const ics = await loadIssuerIcs(values.ics ? resolve(values.ics) : join(root, 'adapters', entry.dir, 'ics.yaml'));
+  const maxWait = values['max-wait'];
+  const maxWaitSeconds = maxWait === undefined ? 0 : /^\d+$/.test(maxWait) ? Number(maxWait) : (durationMs(maxWait) ?? Number.NaN) / 1000;
+  if (Number.isNaN(maxWaitSeconds)) throw new Error(`--max-wait ${maxWait}: not an ISO 8601 duration or a number of seconds`);
   const knownFindings = values['known-findings'] ? await loadIssuerKnownFindings(resolve(values['known-findings'])) : undefined;
   const { report, reportPath } = await runIssuerConformance({
     adapter,
@@ -87,6 +94,7 @@ export async function issuerMain(argv: string[], io: Io, definitions = issuerDef
     reportDir: resolve(values['report-dir']),
     harnessHost: values['harness-host'] ?? adapter.harnessHost ?? '127.0.0.1',
     knownFindings,
+    maxWaitSeconds,
     log: (line) => io.out(`${line}\n`),
   });
   const summary = Object.entries(report.run.summary).map(([k, v]) => `${k} ${v}`).join(', ');

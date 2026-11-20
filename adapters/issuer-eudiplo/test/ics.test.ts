@@ -20,8 +20,9 @@ describe('ICS of EUDIPLO as PID Provider (pinned reference image)', () => {
     // Strict status checks of WIA and KA: a PID Provider rejects (decision 2).
     expect(ics.items['ICS-18']).toBe('reject');
     expect(ics.items['ICS-15.next_update_grace']).toBe('PT0S');
-    // Still lacking: authorization code with a login, DPoP server nonce, identifier lists.
-    expect(ics.profiles).not.toContain('P-AC');
+    // Authorization code at the built-in authorization server, authenticateSubject follows its redirect (issue 20).
+    expect(ics.profiles).toContain('P-AC');
+    // Still lacking: DPoP server nonce, identifier lists.
     expect(ics.profiles).not.toContain('P-IL');
     expect(ics.items['ICS-13.dpop_nonce']).toBe('No');
     expect(ics.items['ICS-16.min_entries']).toBeGreaterThanOrEqual(10_000);

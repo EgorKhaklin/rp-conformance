@@ -16,6 +16,9 @@ import { definitions as revocation } from './pid_provider/SecurityMechanisms/Rev
 import { definitions as rpSupportive } from './pid_provider_rp/Interaction/Supportive';
 import { definitions as rpRevocation } from './pid_provider_rp/SecurityMechanisms/Revocation';
 import { definitions as validity } from './pid_provider/SecurityMechanisms/Validity';
+// Issue 20: authorization code and pre-authorized code
+import { definitions as authorizationCode } from './pid_provider/Interaction/AuthorizationCode';
+import { definitions as preAuthorized } from './pid_provider/Interaction/PreAuthorized';
 
 export * from './wording';
 export * from './status';
@@ -43,6 +46,9 @@ export const issuerDefinitions: IssuerTestCaseDefinition[] = [
   ...pidSdJwt,
   ...pidMdoc,
   ...portrait,
+  // Issue 20
+  ...preAuthorized,
+  ...authorizationCode,
 ];
 
 /** The issuer definitions the harness can execute. */

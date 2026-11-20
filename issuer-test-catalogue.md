@@ -245,8 +245,8 @@ Columns as in the RP catalogue: **Objective**, **Stimulus** (mutation on top of 
 | ID | Objective | Stimulus | Expected | References | Var | Rel |
 | --- | --- | --- | --- | --- | --- | --- |
 | `PP_WS_IA_PreAuthorized_001_UF` | A pre-authorized code is single-use. | Second token request with the same code | REJ:invalid_grant | OpenID4VCI §4.1.1, §6.3, §13.6.1 | `PA` | G/R |
-| `PP_WS_IA_PreAuthorized_002_UF` | Wrong or missing `tx_code` is rejected, and repeated wrong values are limited. | Wrong; missing; 10 wrong attempts then right | REJ:invalid_grant; then REJ or POLICY | OpenID4VCI §6.1, §6.3, §13.6.1 | `PA` | G/R |
-| `PP_WS_IA_PreAuthorized_003_UF` | An expired pre-authorized code is rejected. | Use after the declared lifetime + 1 h | REJ:invalid_grant | OpenID4VCI §4.1.1, §6.3 | `PA` | G/R |
+| `PP_WS_IA_PreAuthorized_002_UF` | Wrong or missing `tx_code` is rejected, and repeated wrong values are limited. | Wrong; missing; 10 wrong attempts then right | REJ:invalid_grant (wrong); REJ:invalid_request (missing, §6.3); then REJ or POLICY | OpenID4VCI §6.1, §6.3, §13.6.1 | `PA` | G/R |
+| `PP_WS_IA_PreAuthorized_003_UF` | An expired pre-authorized code is rejected. | Use after the declared lifetime + 1 h (NOT APPLICABLE in a run whose wait limit is shorter; scheduled last otherwise) | REJ:invalid_grant | OpenID4VCI §4.1.1, §6.3 | `PA` | G/R |
 | `PP_WS_IA_PreAuthorized_004_UF` | A code from another offer of the same SUT does not give access to this offer's configuration. | Swap code | REJ | OpenID4VCI §4.1.1, §8.3.1.2 | `PA` | G/R |
 
 ##### PP_WS_IA_AuthorizationCode
@@ -256,7 +256,7 @@ Columns as in the RP catalogue: **Objective**, **Stimulus** (mutation on top of 
 | `PP_WS_IA_AuthorizationCode_001_UF` | An authorization request not sent through PAR is rejected. | Plain request at the authorization endpoint | REJ (OIDF `fapi2-…-ensure-unsigned-authorization-request-without-using-par-fails`) | HAIP 4, 4.3; RFC 9126 §5 | `AC` | S/R |
 | `PP_WS_IA_AuthorizationCode_002_UF` | PAR without PKCE, or with `plain`, is rejected. | No `code_challenge`; method `plain` | REJ (OIDF `fapi2-…-par-ensure-pkce-required`, `fapi2-…-par-plain-pkce-rejected`) | HAIP 4; RFC 7636 §4.3 | `AC` | S/R |
 | `PP_WS_IA_AuthorizationCode_003_UF` | A wrong `code_verifier` is rejected. | Other verifier | REJ:invalid_grant (OIDF `fapi2-…-incorrect-pkce-code-verifier-rejected`, `fapi2-…-ensure-pkce-code-verifier-required`) | RFC 7636 §4.6 | `AC` | G/R |
-| `PP_WS_IA_AuthorizationCode_004_UF` | A PAR `request_uri` is single-use and expires. | Reuse; use after `expires_in` | REJ (OIDF `fapi2-…-par-attempt-reuse-request_uri`, `fapi2-…-par-attempt-to-use-expired-request_uri`; partial) | RFC 9126 §4, §7.3 | `AC` | G/R |
+| `PP_WS_IA_AuthorizationCode_004_UF` | A PAR `request_uri` is single-use and expires. | Reuse; use after `expires_in` + 1 h (that half NOT APPLICABLE in a run whose wait limit is shorter; scheduled last otherwise) | REJ (OIDF `fapi2-…-par-attempt-reuse-request_uri`, `fapi2-…-par-attempt-to-use-expired-request_uri`; partial) | RFC 9126 §4, §7.3 | `AC` | G/R |
 | `PP_WS_IA_AuthorizationCode_005_UF` | An authorization code is single-use and bound to `client_id` and `redirect_uri`. | Reuse; other `client_id`; other `redirect_uri` | REJ:invalid_grant (OIDF `fapi2-…-attempt-reuse-authorization-code-after-one-second`, `fapi2-…-ensure-authorization-code-is-bound-to-client`; partial) | RFC 6749 §4.1.3, §10.5 | `AC` | G/R |
 | `PP_WS_IA_AuthorizationCode_006_UF` | Unknown `credential_configuration_id` in `authorization_details`, or unknown `scope`, is rejected. | Unknown values | REJ | OpenID4VCI §5.1.1, §5.1.2 | `AC` | G/R |
 | `PP_WS_IA_AuthorizationCode_007` | `state` is returned unaltered; `iss` is returned in the authorization response. | Capture | CONF (OIDF `fapi2-…-happy-flow`) | RFC 6749 §4.1.2; RFC 9207; HAIP 4 | `AC` | G/R |

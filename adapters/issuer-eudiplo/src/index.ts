@@ -1,11 +1,13 @@
 import { randomInt } from 'node:crypto';
-import type {
-  CreatedOffer,
-  CreateOfferRequest,
-  EnrolledCertificate,
-  EnrolmentRequest,
-  IssuerAdapter,
-  IssuerTestEnvironment,
+import {
+  AuthorizationEndpointError,
+  type CreatedOffer,
+  type CreateOfferRequest,
+  type EnrolledCertificate,
+  type EnrolmentRequest,
+  type IssuerAdapter,
+  type IssuerTestEnvironment,
+  type TestSubject,
 } from '@rp-conformance/core';
 import { icsList, icsNumber } from './ics';
 import { PID_FIELDS, PID_MDOC_FIELDS, PID_SD_JWT_EXTRA_FIELDS, pidClaimsFor } from './subjects';
@@ -40,6 +42,8 @@ const PID_SHORT_LIFETIME_SECONDS = 12 * 60 * 60;
 /** The PID configurations the adapter creates: format, lifetime, and whether they carry a status reference. */
 const PID_CONFIGURATIONS: Record<string, { format: 'SD' | 'MD'; lifetime: number; short: boolean }> = {
   [PID_SD_JWT_CONFIGURATION]: { format: 'SD', lifetime: PID_LIFETIME_SECONDS, short: false },
+  // Offered on its own by PP_WS_IA_PreAuthorized_004_UF (ICS-02.second, issue 20).
+  [SECOND_SD_JWT_CONFIGURATION]: { format: 'SD', lifetime: PID_LIFETIME_SECONDS, short: false },
   [PID_MDOC_CONFIGURATION]: { format: 'MD', lifetime: PID_LIFETIME_SECONDS, short: false },
   [PID_SD_JWT_SHORT_CONFIGURATION]: { format: 'SD', lifetime: PID_SHORT_LIFETIME_SECONDS, short: true },
   [PID_MDOC_SHORT_CONFIGURATION]: { format: 'MD', lifetime: PID_SHORT_LIFETIME_SECONDS, short: true },
@@ -121,7 +125,10 @@ const tenantIdOf = (namespace: string) => namespace.toLowerCase().replace(/[^a-z
  *   list settings, the PID configuration in SD-JWT VC and the issuance configuration: wallet attestation required, the
  *   harness's `TL-WP` as the only wallet provider list, key attestations with the ICS levels, DPoP.
  * - `createOffer` seeds the subject with the offer (`credentialClaims` `inline`), pre-authorized code with or without
- *   `tx_code`. EUDIPLO offers by reference only; for an offer by value the adapter resolves the reference itself.
+ *   `tx_code`, or authorization code. EUDIPLO offers by reference only; for an offer by value the adapter resolves the
+ *   reference itself.
+ * - `authenticateSubject` opens the authorization request at the built-in authorization server, which has no login, and
+ *   returns its redirect to the wallet.
  * - `setStatus` calls `POST /api/session/revoke` and confirms with `GET /api/session/{id}/credential-status`.
  * - `refreshTrust` clears EUDIPLO's trust list cache.
  */
@@ -346,8 +353,9 @@ export class IssuerEudiploAdapter implements IssuerAdapter {
     const short = env.ics.profiles.includes('P-SHORT');
     const droppedFromPid = await sdJwt(PID_SD_JWT_CONFIGURATION, false);
     this.capabilities.revokeWithWalletUnit = !droppedFromPid.includes('revokeWithWalletUnit');
-    // Issue 24 (PP_WS_MS_CredentialEndpoint_004_UF): a second configuration that no offer of the suite names, so a
-    // credential request can name a configuration the access token was not issued for.
+    // Issue 24 (PP_WS_MS_CredentialEndpoint_004_UF): a second configuration that no PID offer names, so a credential
+    // request can name a configuration the access token was not issued for. Issue 20 (PP_WS_IA_PreAuthorized_004_UF,
+    // ICS-02.second) offers it on its own, to try that offer's code against the PID configuration.
     await sdJwt(SECOND_SD_JWT_CONFIGURATION, false, 'Second PID configuration in SD-JWT VC format, never offered: target of PP_WS_MS_CredentialEndpoint_004_UF');
     if (short) await sdJwt(PID_SD_JWT_SHORT_CONFIGURATION, true);
     if (env.ics.profiles.includes('P-MD')) {
@@ -412,23 +420,22 @@ export class IssuerEudiploAdapter implements IssuerAdapter {
   }
 
   /**
-   * A credential offer for the subject, pre-authorized code grant, with the subject's claims inline. EUDIPLO always
-   * answers with an offer by reference (`credential_offer_uri`, resolvable once); for `byReference: false` the adapter
-   * resolves it and hands out the offer by value (`credential_offer`).
+   * A credential offer for the subject, with the subject's claims inline: pre-authorized code grant (with or without
+   * `tx_code`), or authorization code grant with `issuer_state`, both at the built-in authorization server. EUDIPLO
+   * always answers with an offer by reference (`credential_offer_uri`, resolvable once); for `byReference: false` the
+   * adapter resolves it and hands out the offer by value (`credential_offer`).
    */
   async createOffer(req: CreateOfferRequest): Promise<CreatedOffer> {
-    if (req.grant !== 'pre-authorized_code') {
-      throw new Error('the ICS declares no authorization code grant (P-AC): EUDIPLO built-in authorization server has no login to script');
-    }
     if (req.portraitOptOut) throw new Error('the ICS declares no portrait opt-out (ICS-17.portrait_opt_out): the PID configurations have no portrait');
     const unknown = req.configurations.filter((id) => !this.configurations.has(id));
     if (unknown.length) throw new Error(`the adapter configures no credential configuration ${unknown.join(', ')}`);
     // The subject's claims in the names of each configuration's format, with the ages and dates derived at issuance.
     const claimsOf = (id: string) => pidClaimsFor(req.subject, PID_CONFIGURATIONS[id].format, PID_CONFIGURATIONS[id].lifetime);
-    const txCode = req.txCode ? String(randomInt(0, 1_000_000)).padStart(6, '0') : undefined;
+    const preAuthorized = req.grant === 'pre-authorized_code';
+    const txCode = preAuthorized && req.txCode ? String(randomInt(0, 1_000_000)).padStart(6, '0') : undefined;
     const offer = await this.call<{ uri: string; session: string }>('POST', '/api/issuer/offer', {
       response_type: 'uri',
-      flow: 'pre_authorized_code',
+      flow: preAuthorized ? 'pre_authorized_code' : 'authorization_code',
       authorization_server: BUILT_IN_AS,
       credentialConfigurationIds: req.configurations,
       credentialClaims: Object.fromEntries(req.configurations.map((id) => [id, { type: 'inline', claims: claimsOf(id) }])),
@@ -437,6 +444,20 @@ export class IssuerEudiploAdapter implements IssuerAdapter {
     });
     const uri = req.byReference ? offer.uri : await this.byValue(offer.uri);
     return { offer: uri, sessionId: offer.session, ...(txCode ? { txCode } : {}) };
+  }
+
+  /**
+   * The subject's authentication at the built-in authorization server (ICS-03.subject_authentication): it has no login
+   * or consent step, the subject is the one whose claims the offer carries (bound by `issuer_state`), so the hook only
+   * opens the authorization request and returns where EUDIPLO redirects to: the wallet's `redirect_uri` with `code`,
+   * `state` and `iss`, or with `error`. An answer that is not a redirect (EUDIPLO answers a request without a pushed
+   * `request_uri` with HTTP 409) is thrown as `AuthorizationEndpointError`.
+   */
+  async authenticateSubject(authorizationRequestUrl: string, _subject: TestSubject): Promise<string> {
+    const response = await fetch(authorizationRequestUrl, { redirect: 'manual' });
+    const location = response.headers.get('location');
+    if (response.status >= 300 && response.status < 400 && location) return new URL(location, authorizationRequestUrl).toString();
+    throw new AuthorizationEndpointError(response.status, await response.text(), Object.fromEntries(response.headers.entries()));
   }
 
   /** Resolves an offer by reference and returns it by value, with the same scheme. */

@@ -101,7 +101,16 @@ export async function issueWithCredentialRequestFault(
   try {
     const offer = await client.resolveOffer(options.offer, evidence);
     const metadata = await client.fetchMetadata(offer.offer.credential_issuer, evidence, { signed: options.signedMetadata ?? false });
-    const token = await client.requestToken(offer.offer, metadata.result, evidence, options.txCode);
+    // Issue 20: in the authorization code flow, PAR and the authorization request through the adapter first.
+    const token =
+      options.grant === 'authorization_code'
+        ? await (async () => {
+            if (!options.authenticate) throw new Error('the authorization code flow needs the adapter to authenticate the subject (authenticateSubject)');
+            const configuration = options.credentialConfigurationId ?? offer.offer.credential_configuration_ids[0];
+            const authorization = await client.authorize(offer.offer, metadata.result, configuration, evidence, { authenticate: options.authenticate });
+            return client.requestAuthorizationCodeToken(metadata.result, authorization, evidence);
+          })()
+        : await client.requestToken(offer.offer, metadata.result, evidence, options.txCode);
     const cNonce = await client.requestNonce(metadata.result, evidence);
     const configurationId = options.credentialConfigurationId ?? offer.offer.credential_configuration_ids[0];
     const details = (Array.isArray(token.response.authorization_details) ? token.response.authorization_details : []) as Json[];
