@@ -3,8 +3,8 @@
 // EUDIPLO signs with an internal key chain of its own (the Test Registrar is issue 14, the issuer adapter issue 16).
 // Needs Docker, so it is not part of `pnpm test`:
 //
-//   EUDIPLO_IMAGE=ghcr.io/eudiplo/eudiplo:9.1.0 EUDIPLO_PORT=3215 \
-//     docker compose -p rp-conformance-i15 -f adapters/eudiplo/docker-compose.yml up -d --wait
+//   EUDIPLO_PORT=3215 docker compose --env-file adapters/issuer-eudiplo/reference.env -p rp-conformance-i15 \
+//     -f adapters/eudiplo/docker-compose.yml up -d --wait
 //   EUDIPLO_PORT=3215 pnpm test:issuer-wallet:eudiplo
 //   docker compose -p rp-conformance-i15 -f adapters/eudiplo/docker-compose.yml down -v
 //

@@ -1,8 +1,9 @@
 # Implementation Conformance Statement of EUDIPLO as PID Provider (issuer test catalogue section 4), as the EUDIPLO
-# issuer adapter configures ghcr.io/eudiplo/eudiplo:9.1.0. `profiles` are the profiles the answers select; `items` the
-# declared values, keyed by ICS item or `<item>.<name>` (IssuerIcs). "live" marks a value checked against the running
-# 9.1.0 by the adapter's integration test or by a call to its API; "source" one read from the v9.1.0 tag of EUDIPLO
-# (apps/backend/src/...) that only an issuance can show, which the issuance client of issue 15 confirms in issue 17.
+# issuer adapter configures the reference image pinned in reference.env (main image 9.1.0-main.ae0792a, by digest).
+# `profiles` are the profiles the answers select; `items` the declared values, keyed by ICS item or `<item>.<name>`
+# (IssuerIcs). "live" marks a value checked against the running pinned image by the adapter's integration test or by a
+# call to its API; "source" one read from EUDIPLO at revision ae0792a (apps/backend/src/..., apps/docs/docs/...) that
+# only an issuance can show, which the issuance client confirms in issue 17.
 profiles:
   - P-PID   # ICS-01
   - P-SD    # ICS-02
@@ -11,6 +12,7 @@ profiles:
   - P-REV   # ICS-05
   - P-SUSP  # ICS-05
   - P-HOOK  # ICS-06
+  - P-CHAIN # ICS-07
   - P-BATCH # ICS-08
   - P-REISS # ICS-09
   - P-NOT   # ICS-11
@@ -34,9 +36,9 @@ items:
   ICS-06: revoke, suspend, unsuspend         # setStatus: POST /api/session/revoke, confirmed by GET /api/session/{id}/credential-status. A revoked credential cannot be changed again (409)
   ICS-06.change_subject: "No"                # no changeSubject: EUDIPLO keeps no subject record to change; claims travel with each offer
   ICS-06.user_revocation_request: "No"
-  ICS-06.T_rev: PT1M                         # live: immediateUpdate true re-signs the list on every change; ttl 60 s, the minimum PUT /api/status-list-config accepts ("greater than or equal to 60")
-  ICS-07: "No"                               # live: POST /api/issuer/credentials rejects revokeWithWalletUnit as unrecognized_keys (added after 9.1.0, EUDIPLO/eudiplo#1468)
-  ICS-07.T_chain: none
+  ICS-06.T_rev: PT1M                         # live: immediateUpdate true re-signs the list on every change; ttl 60 s, the minimum PUT /api/status-list-config accepts (">=60")
+  ICS-07: "Yes"                              # live: revokeWithWalletUnit true on pid-sd-jwt-vc (read back by GET /api/issuer/credentials/{id}); EUDIPLO follows the key attestation's status list and revokes the PID when it says revoked (1); suspended (2) changes nothing (docs trust/attestation.md)
+  ICS-07.T_chain: PT7M                       # 30 s WALLET_UNIT_STATUS_CHECK_INTERVAL (adapters/eudiplo/docker-compose.yml, live in the container) + reuse of SL-WP-A for its ttl 300 s (harness default; EUDIPLO reuses a list for its ttl, at most 1 h) + T_rev 60 s = 390 s, rounded up
   ICS-08: "Yes"                              # batchSize below
   ICS-08.batch_size: 2                       # live: issuance configuration batchSize 2, published as batch_credential_issuance.batch_size (a maximum: one proof still gives one credential)
   ICS-08.credential_reuse_policy: none       # config.credentialReusePolicy not set
@@ -44,19 +46,19 @@ items:
   ICS-10: "No"                               # deferred issuance needs an attribute provider or webhook that defers; the adapter configures none
   ICS-11: "Yes"                              # live: notificationEndpointEnabled true, notification_endpoint in the metadata
   ICS-12: "Yes"                              # live: credential_request_encryption and credential_response_encryption advertised, encryption_required false
-  ICS-13.dpop_nonce: "No"                    # source: no DPoP-Nonce / use_dpop_nonce anywhere in apps/backend/src of 9.1.0
+  ICS-13.dpop_nonce: "No"                    # source: no DPoP-Nonce / use_dpop_nonce anywhere in apps/backend/src
   ICS-13.nonce_endpoint: "Yes"               # live: nonce_endpoint in the metadata
   ICS-13.dpop_required: "Yes"                # live: dPopRequired true
-  ICS-14.T_proof: PT10M                      # source: proofs are bound by c_nonce only, which lives 10 minutes (nonce.service.ts); above the 5 minute cap of the catalogue (README)
+  ICS-14.T_proof: not bounded                # source: a proof's iat is checked only against the future (skew); its age only through c_nonce, which lives 10 minutes (nonce.service.ts). Above the 5 minute cap of the catalogue: README
   ICS-14.T_skew: PT5S                        # source: CRYPTO_TOLERANCE default 5 s
   ICS-14.pre_authorized_code: PT24H          # offerLifetimeSeconds not set: the code lives as long as the session, SESSION_TTL default 86400 s
   ICS-14.c_nonce: PT10M                      # source: nonce.service.ts expiresAt now + 10 min
   ICS-14.access_token: PT5M                  # source: ACCESS_TOKEN_LIFETIME_SECONDS 300 (token-grant-rules.ts)
   ICS-15.T_refresh: PT5M                     # source: trust-store.service.ts cacheTtlMs 5 min; refreshTrust clears the cache (DELETE /api/cache/trust-list, live)
-  ICS-15.next_update_grace: not enforced     # source: 9.1.0 reads NextUpdate but keeps using an outdated list (enforced after 9.1.0, EUDIPLO/eudiplo#1441)
+  ICS-15.next_update_grace: PT0S             # source: a list whose NextUpdate has passed is discarded at once, also as wallet provider list, and so is one with a lower LoTESequenceNumber than one accepted before (docs trust/trust-lists.md, EUDIPLO/eudiplo#1441, #1457)
   ICS-16.min_entries: 10000                  # live: status list capacity 10000 (STATUS_CAPACITY default, set explicitly)
   ICS-16.timestamp_precision: PT1H           # source: issuance and expiry times rounded to the hour (credential-time.util.ts)
   ICS-17: seeds SUBJ-1 and SUBJ-2            # claims inline with each offer (credentialClaims, src/subjects.ts)
   ICS-17.portrait_opt_out: "No"              # the SD-JWT VC PID configuration has no portrait
-  ICS-18: accept                             # source: 9.1.0 accepts a WIA whose status list cannot be fetched (wallet-attestation.service.ts, "status checking is optional") and checks no KA status; not configurable before EUDIPLO/eudiplo#1340. A PID Provider must reject (decision 2): README
+  ICS-18: reject                             # live: walletAttestationStatusCheckMode strict (read back by GET /api/issuer/config): a WIA or KA whose status list cannot be fetched, is unreadable, expired, or signed by another key is rejected (docs trust/attestation.md). As decision 2 requires of a PID Provider
   ICS-19: "No"                               # embeddedDisclosurePolicy not set

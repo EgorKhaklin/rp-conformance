@@ -1,23 +1,26 @@
 // Integration test of the EUDIPLO issuer adapter against a running EUDIPLO (not part of `pnpm test`):
 //
-//   EUDIPLO_IMAGE=ghcr.io/eudiplo/eudiplo:9.1.0 EUDIPLO_PORT=3216 \
-//     docker compose -p rp-conformance-i16 -f adapters/eudiplo/docker-compose.yml up -d --wait
+//   EUDIPLO_PORT=3216 docker compose --env-file adapters/issuer-eudiplo/reference.env -p rp-conformance-i16 \
+//     -f adapters/eudiplo/docker-compose.yml up -d --wait
 //   EUDIPLO_PORT=3216 pnpm test:issuer-eudiplo
 //   docker compose -p rp-conformance-i16 -f adapters/eudiplo/docker-compose.yml down -v
 //
 // It enrols the SUT with the Test Registrar, publishes TL-WP and TL-PID, runs setUp, checks the Credential Issuer
 // metadata (plain and signed), creates offers each way, tries setStatus on a session without a credential, and tears
-// the tenant down. EUDIPLO_EXPECT_VERSION (default 9.1.0) is the version the test expects the instance to report.
+// the tenant down. EUDIPLO_EXPECT_VERSION (default: the pinned reference image, reference.env) is the version the test
+// expects the instance to report; the reference's own features (CSR, strict status checks, revocation chaining) are
+// checked only when it reports the reference version.
 import { buildSealedLote, createTestPki, enrolSut, toEnrolledCertificate, type TestPki } from '@rp-conformance/forge';
 import { TrustInfrastructure } from '@rp-conformance/trust-infrastructure';
 import { publishTlWp, WALLET_PROVIDER_IDS } from '@rp-conformance/wallet-provider';
 import type { IssuerTestEnvironment, PublishedTrustList } from '@rp-conformance/core';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { EudiploError, IssuerEudiploAdapter, loadIssuerIcs, PID_SD_JWT_CONFIGURATION, PID_SUBJECTS, PID_VCT } from '../src/index';
+import { EudiploError, IssuerEudiploAdapter, loadIssuerIcs, PID_SD_JWT_CONFIGURATION, PID_SUBJECTS, PID_VCT, REFERENCE_EUDIPLO } from '../src/index';
 
 const harnessHost = process.env.HARNESS_HOST ?? 'host.docker.internal';
 const namespace = `i16-${Date.now().toString(36)}`;
-const expectedVersion = process.env.EUDIPLO_EXPECT_VERSION ?? '9.1.0';
+const expectedVersion = process.env.EUDIPLO_EXPECT_VERSION ?? REFERENCE_EUDIPLO.version;
+const isReference = expectedVersion === REFERENCE_EUDIPLO.version;
 
 const decodeJwtPart = (jwt: string, part: 0 | 1) => JSON.parse(Buffer.from(jwt.split('.')[part], 'base64url').toString('utf8'));
 
@@ -82,6 +85,19 @@ describe('EUDIPLO issuer adapter', () => {
     expect(described.version).toBe(expectedVersion);
     expect(described.tenant).toBe(adapter.tenant);
     console.info('describe():', described);
+  });
+
+  it.runIf(isReference)('enrols the reference by CSR, with strict status checks and revocation chaining', async () => {
+    const described = await adapter.describe();
+    expect(described.revision).toBe(REFERENCE_EUDIPLO.revision);
+    expect(described.enrolment).toMatch(/^CSR/);
+    expect(described.walletAttestationStatusCheckMode).toBe('strict');
+    expect(described.revokeWithWalletUnit).toBe('on');
+    const { issuance, pid } = await adapter.configuration();
+    expect(issuance.walletAttestationStatusCheckMode).toBe('strict');
+    expect(issuance.walletAttestationRequired).toBe(true);
+    expect(pid.revokeWithWalletUnit).toBe(true);
+    expect(pid.statusManagement).toBe(true);
   });
 
   it('serves the Credential Issuer metadata of the tenant with the PID configuration', async () => {
