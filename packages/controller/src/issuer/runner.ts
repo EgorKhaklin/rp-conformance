@@ -27,6 +27,7 @@ import { type IssuerHarness, PID_TRUST_RULE, startIssuerHarness } from './harnes
 import { issuerApplicability, resolveConfigurations, usesTxCode } from './ics';
 import { describeIssuerFinding, type IssuerKnownFinding, issuerKnownFindingOf } from './known-findings';
 import { writeIssuerJUnit, writeIssuerSummary } from './report';
+import { handlesSessionStep, noteSessionStep, runSessionStep, sessionApplicability } from './session';
 
 /** The validator's clock tolerance on the issuer side: the catalogue's cap of `T_skew` (section 3.5). */
 export const ISSUER_SKEW_SECONDS = 300;
@@ -255,12 +256,12 @@ async function runIssuerTestCase(definition: IssuerTestCaseDefinition, ctx: Cont
   }));
   const control = outcomes.find((o) => o.verdict === 'PASS') ?? outcomes[0] ?? null;
   const end = (verdict: Verdict, reason: string): IssuerTestCaseRecord => ({ ...base, verdict, reason, control, steps: [] });
-  const unmet = issuerApplicability(definition, ctx.ics);
+  const unmet = [...issuerApplicability(definition, ctx.ics), ...sessionApplicability(definition, ctx.ics)];
   if (unmet.length) return end('NOT APPLICABLE', `profile not met: ${unmet.join('; ')}`);
   if (control && control.verdict !== 'PASS') return end('INCONCLUSIVE', `positive control ${outcomes.map((o) => o.id).join(' or ')} did not pass in ${variant}`);
   const state: TestCaseState = { clients: new Map() };
   const steps: IssuerStepRecord[] = [];
-  for (const [index, step] of definition.steps.entries()) steps.push(await runIssuerStep(definition, variant, index + 1, step, ctx, state));
+  for (const [index, step] of definition.steps.entries()) steps.push(noteSessionStep(state, await runIssuerStep(definition, variant, index + 1, step, ctx, state)));
   return { ...base, verdict: worst(steps.map((s) => s.verdict)), control, steps };
 }
 
@@ -293,7 +294,9 @@ async function runIssuerStep(
     record.artifacts.push(relative(ctx.runDir, join(dir, name)));
   };
   try {
-    if (step.run?.kind === 'issuance') await runIssuance(step, step.run, record, save, ctx, state);
+    // Issue 25: DPoP, batch, re-issuance, deferred, notification and robustness steps run on the session client.
+    if (handlesSessionStep(definition, step)) await runSessionStep(step, index, record, save, ctx, state);
+    else if (step.run?.kind === 'issuance') await runIssuance(step, step.run, record, save, ctx, state);
     else record.reason = step.run ? `the step action ${step.run.kind} is not implemented yet` : 'the step is text only';
   } catch (error) {
     record.verdict = 'INCONCLUSIVE';

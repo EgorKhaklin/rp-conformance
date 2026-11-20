@@ -3,3 +3,6 @@ export * from './http';
 export * from './jwts';
 export * from './requests';
 export * from './faults';
+export * from './jwe';
+export * from './session';
+export * from './session-faults';

@@ -1,0 +1,103 @@
+// PP_WS_SH_Encoding (issuer catalogue section 5.1.5): malformed and oversized requests, URLs in JOSE headers, status
+// references to untrusted or private addresses, and a decompression bomb as status list. The faults of `_003_UF` and
+// `_004_UF` are those of the points `wia`, `ka` and `proof` (PR 52); `NOFETCH` reads the Test Status Provider's log.
+import { defineIssuerTestCase, type FormatVariant, type GrantVariant, relevancy } from '@rp-conformance/core';
+import { iss, issuance, rej, technologyOf } from '../../wording';
+import { both, FORMAT, faultStep, GRANT, MAIN, noFetch, profileOf, ufPreconditions } from '../session';
+
+const encoding001 = (format: FormatVariant, grant: GrantVariant) =>
+  defineIssuerTestCase({
+    id: 'PP_WS_SH_Encoding_001_UF',
+    variants: [format, grant],
+    control: MAIN,
+    objective: 'Verify that the PID Provider rejects malformed JSON, a wrong `Content-Type` and malformed JWTs at its token and credential endpoints without a server error.',
+    references: ['[RFC 8725]', '[OpenID4VCI] section 8.3.1'],
+    profile: profileOf(format, grant),
+    relevancy: relevancy.genericRequired,
+    technology: technologyOf(format),
+    preconditions: ufPreconditions(),
+    steps: (['encoding.truncated-json', 'encoding.text-plain', 'encoding.token-text-plain', 'encoding.two-part-jwt', 'encoding.dpop-two-part-jwt'] as const).map((fault) =>
+      faultStep(format, grant, fault, rej()),
+    ),
+  });
+
+const encoding002 = (format: FormatVariant, grant: GrantVariant) =>
+  defineIssuerTestCase({
+    id: 'PP_WS_SH_Encoding_002_UF',
+    variants: [format, grant],
+    control: MAIN,
+    objective: 'Verify that the PID Provider rejects oversized requests and deeply nested JSON, and stays available.',
+    references: ['[OWASP API Security Top 10] API4:2023'],
+    profile: profileOf(format, grant),
+    relevancy: relevancy.genericRequired,
+    technology: technologyOf(format),
+    preconditions: ufPreconditions(),
+    steps: [
+      faultStep(format, grant, 'encoding.oversized', rej()),
+      faultStep(format, grant, 'encoding.deep-nesting', rej()),
+      { text: '`CW-1` runs `SCN-I` for `SUBJ-1` without mutation.', run: issuance(format, grant), expect: iss(format) },
+    ],
+    comments: ['Step 3 shows that the Provider is still available after the two requests.'],
+  });
+
+const encoding003 = (format: FormatVariant, grant: GrantVariant) =>
+  defineIssuerTestCase({
+    id: 'PP_WS_SH_Encoding_003_UF',
+    variants: [format, grant],
+    control: MAIN,
+    objective: 'Verify that the PID Provider does not dereference a `jku`, `x5u` or `kid` URL in the header of a proof, WIA or KA, and rejects the request.',
+    references: ['[RFC 8725] section 3.10'],
+    profile: profileOf(format, grant),
+    relevancy: relevancy.genericRequired,
+    technology: technologyOf(format),
+    preconditions: ufPreconditions(),
+    steps: (['wia.jku-header', 'wia.x5u-header', 'ka.jku-header', 'ka.x5u-header', 'proof.jku-header', 'proof.kid-url'] as const).map((fault) =>
+      faultStep(format, grant, fault, both(rej(), noFetch)),
+    ),
+  });
+
+const encoding004 = (format: FormatVariant, grant: GrantVariant) =>
+  defineIssuerTestCase({
+    id: 'PP_WS_SH_Encoding_004_UF',
+    variants: [format, grant],
+    control: MAIN,
+    objective: 'Verify that the PID Provider fetches no status `uri` of a WIA or KA that fails signature validation, and no validly signed status `uri` that points to a private address.',
+    references: ['[Token Status List] section 6.2', '[Token Status List] section 11.4', '[OWASP] Server-Side Request Forgery'],
+    profile: profileOf(format, grant),
+    relevancy: relevancy.genericRequired,
+    technology: technologyOf(format),
+    preconditions: ufPreconditions(),
+    steps: [
+      faultStep(format, grant, 'wia.ca-x-status-uri', both(rej(), noFetch)),
+      faultStep(format, grant, 'ka.ca-x-status-uri', both(rej(), noFetch)),
+      faultStep(format, grant, 'wia.status-uri-private', rej()),
+      faultStep(format, grant, 'ka.status-uri-private', rej()),
+    ],
+    comments: [
+      'A request to `169.254.169.254` does not reach the Test Status Provider, so the harness cannot log it: steps 3 and 4 expect REJ only. Whether the Provider tried the address is visible in its own logs (for EUDIPLO, `OUTBOUND_URL_ALLOW_PRIVATE_NETWORK` decides).',
+    ],
+  });
+
+const encoding005 = (format: FormatVariant, grant: GrantVariant) =>
+  defineIssuerTestCase({
+    id: 'PP_WS_SH_Encoding_005_UF',
+    variants: [format, grant],
+    control: MAIN,
+    objective: 'Verify that the PID Provider refuses a WIA or KA status list that is a decompression bomb without exhausting its resources.',
+    references: ['[Token Status List] section 11.1'],
+    profile: profileOf(format, grant),
+    relevancy: relevancy.genericRequired,
+    technology: technologyOf(format),
+    preconditions: ufPreconditions(),
+    steps: [
+      {
+        text: 'The Test Status Provider serves `SL-WP-A` as a Status List Token whose `lst` inflates to 1 GiB (fault `status-list.decompression-bomb`).',
+        run: { kind: 'wallet-event', event: 'status-list', walletUnit: 'CW-1', statusList: { id: 'SL-WP-A', faults: ['status-list.decompression-bomb'] } },
+        expect: { codes: ['INFO'], text: 'The Test Status Provider serves the new version of `SL-WP-A`.' },
+      },
+      { text: '`CW-1` runs `SCN-I` for `SUBJ-1` without mutation; the Provider reads the status of its WIA and KA in `SL-WP-A`.', run: issuance(format, grant), expect: rej() },
+    ],
+    comments: ['The Provider must stay available: a later test case of the run that passes shows it.'],
+  });
+
+export const definitions = [encoding001, encoding002, encoding003, encoding004, encoding005].map((d) => d(FORMAT, GRANT));

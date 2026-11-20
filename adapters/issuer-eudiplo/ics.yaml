@@ -15,6 +15,7 @@ profiles:
   - P-CHAIN # ICS-07
   - P-BATCH # ICS-08
   - P-REISS # ICS-09
+  - P-DEF   # ICS-10
   - P-NOT   # ICS-11
   - P-ENC   # ICS-12
   - P-DPN   # ICS-13: the nonce endpoint only, no DPoP server nonce (ICS-13.dpop_nonce)
@@ -43,7 +44,7 @@ items:
   ICS-08.batch_size: 2                       # live: issuance configuration batchSize 2, published as batch_credential_issuance.batch_size (a maximum: one proof still gives one credential)
   ICS-08.credential_reuse_policy: none       # config.credentialReusePolicy not set
   ICS-09: "Yes"                              # source: built-in token.refreshTokenEnabled default true (token-grant-rules.ts), refresh tokens bound to the DPoP key
-  ICS-10: "No"                               # deferred issuance needs an attribute provider or webhook that defers; the adapter configures none
+  ICS-10: "Yes"                              # live: offers with deferred: true take their claims from the adapter's webhook, which answers {deferred: true}; EUDIPLO answers 202 with transaction_id and interval, the adapter completes it (POST /api/issuer/deferred/{id}/complete). Inline claims never defer
   ICS-11: "Yes"                              # live: notificationEndpointEnabled true, notification_endpoint in the metadata
   ICS-12: "Yes"                              # live: credential_request_encryption and credential_response_encryption advertised, encryption_required false
   ICS-13.dpop_nonce: "No"                    # source: no DPoP-Nonce / use_dpop_nonce anywhere in apps/backend/src

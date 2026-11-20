@@ -44,6 +44,8 @@ export interface CreateOfferRequest {
   byReference: boolean;
   /** Pre-authorized code grant: protect the code with a transaction code (`tx_code`), returned in `CreatedOffer.txCode`. */
   txCode?: boolean;
+  /** Issue 25: the Provider defers the issuance (ICS-10) until `completeDeferred` is called for its `transaction_id`. */
+  deferred?: boolean;
 }
 
 export interface CreatedOffer {
@@ -74,6 +76,8 @@ export interface IssuerAdapter {
   authenticateSubject?(authorizationRequestUrl: string, subject: TestSubject): Promise<string>;
   /** Revoke, suspend or unsuspend what the session issued; resolves when the SUT reports it done (`OBS-ADM`). */
   setStatus?(sessionId: string, status: 'revoked' | 'suspended' | 'valid'): Promise<{ at: string }>;
+  /** Issue 25: complete a deferred issuance (`P-DEF`) for the subject, so the next poll returns the credential. */
+  completeDeferred?(transactionId: string, subject: TestSubject): Promise<void>;
   /** Replace SUBJ-1's data with SUBJ-2's (SM_Revocation_008). */
   changeSubject?(from: TestSubject, to: TestSubject): Promise<void>;
   /** Make the SUT fetch TL-WP now instead of waiting T_refresh. */
