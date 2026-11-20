@@ -15,6 +15,8 @@ export interface KnownFinding {
   finding: string;
   /** Where the finding is tracked, for example an issue or pull request. */
   reference?: string;
+  /** Where the evidence of the run that found it is, for a finding not yet reported upstream. */
+  evidence?: string;
 }
 
 /** Reads a YAML list of known findings (`testCase`, optional `flows`, `finding`, optional `reference`). */

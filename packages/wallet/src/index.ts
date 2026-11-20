@@ -379,6 +379,7 @@ export class ConformanceWallet {
         {
           disclose: [...new Set((credentialQuery.claims ?? []).map((claim) => String(claim.path[0])))],
           elements: requestedElements(credentialQuery.claims),
+          paths: (credentialQuery.claims ?? []).map((claim) => claim.path),
         },
         {
           audience: binding.audience,
