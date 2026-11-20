@@ -36,3 +36,12 @@ export const ISSUER_REQUEST_CHECKS = [
 ] as const;
 
 export type IssuerRequestCheck = (typeof ISSUER_REQUEST_CHECKS)[number];
+
+/**
+ * Checks of an issued credential against the WIA and KA it was issued for (`PP_WS_SM_ClientAttestation_015`,
+ * `PP_WS_SM_KeyAttestation_011`): its `exp` is no later than the end of their revocation maintenance period (ISSU_12c,
+ * WUA_30). Run where a `CONF` expectation names them.
+ */
+export const ISSUER_ATTESTATION_CHECKS = ['maintenance-period'] as const;
+
+export type IssuerAttestationCheck = (typeof ISSUER_ATTESTATION_CHECKS)[number];

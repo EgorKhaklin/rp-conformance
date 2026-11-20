@@ -14,6 +14,8 @@ import {
   encodeCbor,
   MDOC_DS_EXTENDED_KEY_USAGE,
   type Oid4vpHandover,
+  PID_DOCTYPE,
+  PID_NAMESPACE,
   readCose,
   sha256,
   sigStructure,
@@ -23,9 +25,10 @@ import {
 } from '@rp-conformance/forge';
 import { parseCertificate } from '@owf/x509';
 import { describeKey } from './disclosures';
-import { CheckRecorder, type ValidationMode, type ValidationResult } from './checks';
+import { checkClaims, type RequestedClaim } from './claims';
+import { CheckRecorder, NotApplicable, type ValidationMode, type ValidationResult } from './checks';
 import { evaluateIdentifierList } from './identifier-list';
-import { attempt, base64Of, evaluateStatusList, type FetchedStatusList, fail, isUri } from './status-list';
+import { attempt, base64Of, evaluateStatusList, type FetchedStatusList, fail, isUri, type StatusListFreshness } from './status-list';
 import type { MatchedIssuer, TrustRule, TrustStore } from './trust';
 
 /** The checks of an mdoc presentation that references a Status List Token in CWT format. */
@@ -63,10 +66,16 @@ export interface MdocValidationOptions {
   maxStatusListBytes: number;
   validStatuses?: number[];
   trustedAuthorities?: { type: string; values: string[] }[];
+  /** The claims of the credential query, for the check `claims`; left out, the check does not apply. */
+  requestedClaims?: RequestedClaim[];
   fetchStatusList: (uri: string) => Promise<FetchedStatusList>;
   fetchIdentifierList: (uri: string) => Promise<FetchedStatusList>;
   mode?: ValidationMode;
   now?: Date;
+  /** Freshness policy for Status List Tokens (ICS RP.R.7, RP.R.8). */
+  statusListFreshness?: StatusListFreshness;
+  /** Reject a PID whose administrative expiry date has passed (ICS RP.P.12 Reject). */
+  rejectPastExpiryDate?: boolean;
 }
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -229,7 +238,7 @@ export function checkMdocValidity(mso: CborMap, now: Date, skewSeconds: number):
  */
 export function readMsoStatus(mso: CborMap, requireStatus: boolean) {
   const status = mso.get('status');
-  let statusList: { uri: string; idx: number } | undefined;
+  let statusList: { uri: string; idx: number; certificate?: Uint8Array } | undefined;
   let identifierList: { uri: string; id: Uint8Array } | undefined;
   if (status === undefined) {
     const { validFrom, validUntil } = validityOf(mso);
@@ -247,7 +256,9 @@ export function readMsoStatus(mso: CborMap, requireStatus: boolean) {
     const idx = entry.get('idx');
     if (typeof idx !== 'number' || !Number.isInteger(idx) || idx < 0) fail(`idx ${JSON.stringify(jsonOf(idx))} is not an unsigned integer`);
     if (!isUri(entry.get('uri'))) fail(`uri ${JSON.stringify(entry.get('uri'))} is not a URI`);
-    statusList = { idx: idx as number, uri: entry.get('uri') as string };
+    const certificate = entry.get('certificate');
+    if (certificate !== undefined && !(certificate instanceof Uint8Array)) fail('the status_list certificate is not a byte string');
+    statusList = { idx: idx as number, uri: entry.get('uri') as string, ...(certificate ? { certificate: certificate as Uint8Array } : {}) };
   }
   if (identifierListEntry !== undefined) {
     const entry = asMap(identifierListEntry, 'identifier_list');
@@ -282,6 +293,8 @@ export async function validateMdocPresentation(presentation: string, options: Md
   let x5chain: Uint8Array[] = [];
   let issuer: MatchedIssuer | undefined;
   let claims: Record<string, Record<string, unknown>> | undefined;
+  /** The disclosed element values as decoded CBOR, for the data types of the PID rulebook. */
+  const rawClaims: Record<string, Record<string, unknown>> = {};
   let statusListReference: { uri: string; idx: number } | undefined;
   let identifierListReference: { uri: string; id: Uint8Array } | undefined;
   let statusListFetched = false;
@@ -330,10 +343,17 @@ export async function validateMdocPresentation(presentation: string, options: Md
     await recorder.run('disclosures', ['format'], () => {
       const disclosed = checkValueDigests(issuerSigned, mso, { rejectDuplicates: true });
       claims = disclosed.claims;
+      for (const element of disclosed.elements) (rawClaims[element.namespace] ??= {})[element.identifier] = element.value;
       return `${disclosed.elements.length} elements`;
     });
 
-    await recorder.run('validity', ['format'], () => checkMdocValidity(mso, now, options.skewSeconds));
+    await recorder.run('validity', ['format'], () => {
+      const detail = checkMdocValidity(mso, now, options.skewSeconds);
+      // RP_WS_SM_Validity_020: the administrative expiry date of a PID, under the policy of ICS RP.P.12.
+      const expiry = claims?.[PID_NAMESPACE]?.expiry_date;
+      if (options.rejectPastExpiryDate && typeof expiry === 'string' && expiry < now.toISOString().slice(0, 10)) fail(`the administrative expiry date ${expiry} has passed`);
+      return detail;
+    });
 
     // Device binding and session binding (ISO/IEC 18013-5 section 9.1.3, OpenID4VP Appendix B.2.6): a device signature
     // by the MSO's device key over the SessionTranscript of this request, with no unauthorised device-signed element.
@@ -363,6 +383,13 @@ export async function validateMdocPresentation(presentation: string, options: Md
       return read.detail;
     });
 
+    // The disclosed elements satisfy the query, and a PID's elements have the types of the PID rulebook.
+    await recorder.run('claims', ['format', 'disclosures'], () => {
+      if (!options.requestedClaims) return new NotApplicable('no credential query given');
+      const pid = mso.get('docType') === PID_DOCTYPE ? { encoding: 'mdoc' as const, namespace: PID_NAMESPACE, raw: rawClaims } : undefined;
+      return checkClaims(claims ?? {}, options.requestedClaims, pid);
+    });
+
     // Status procedures (Token Status List section 8.3, ISO/IEC 18013-5 section 12.3.6): in first-failure mode only for
     // a valid credential. The status list checks are recorded unless the MSO references only an identifier list.
     const status = mso.get('status');
@@ -381,6 +408,7 @@ export async function validateMdocPresentation(presentation: string, options: Md
         onFetched: () => {
           statusListFetched = true;
         },
+        freshness: options.statusListFreshness,
       });
     }
     if (hasIdentifierList) {

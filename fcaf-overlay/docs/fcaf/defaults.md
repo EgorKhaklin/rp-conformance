@@ -185,3 +185,15 @@ A DCQL query with one credential query for `default_credential_pubeaa`, requesti
 ### `default_query_eaa`
 
 A DCQL query with one credential query for `default_credential_eaa`, requesting `attribute_A`, `attribute_B` and `attribute_C`.
+
+### `default_query_pid_eaa`
+
+A DCQL query with the credential query of `default_query_pid` (`id` `pid`) and the credential query of `default_query_eaa` (`id` `eaa`), both in the credential format of the test case and both required, without `credential_sets`. Used for combined presentations.
+
+### `default_query_pid_or_eaa`
+
+A DCQL query with the credential queries of `default_query_pid` (`id` `pid`), `default_query_eaa` (`id` `eaa`) and `default_query_pubeaa` (`id` `pubeaa`), in the credential format of the test case, and two `credential_sets`: a required one with the options `pid` or `eaa`, and an optional one (`required` false) with the option `pubeaa`.
+
+### `default_query_pid_eaa_identifying`
+
+`default_query_pid_eaa`, except that the credential query `eaa` also requests the family name, the given name and the birth date (`birthdate` in IETF SD-JWT VC format, `birth_date` in mdoc format). Used for the attribute-based binding of combined presentations, with a variant of `default_credential_eaa` that additionally carries these attributes.

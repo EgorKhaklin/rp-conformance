@@ -65,7 +65,7 @@ export async function buildRequest(options: RequestBuildOptions): Promise<BuiltR
     }
     case 'request.unregistered-claim': {
       const claims = (first.claims ?? []) as { path: (string | number | null)[] }[];
-      claims.push({ path: first.format === 'mso_mdoc' ? [PID_NAMESPACE, 'nationality'] : ['nationalities'] });
+      claims.push({ path: first.format === 'mso_mdoc' ? [PID_NAMESPACE, 'email_address'] : ['email'] });
       first.claims = claims;
       break;
     }

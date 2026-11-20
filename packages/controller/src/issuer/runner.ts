@@ -16,6 +16,7 @@ import {
   type IssuerIcs,
   type IssuerStepDefinition,
   type IssuerTestCaseDefinition,
+  isCredentialRequestFault,
   isExecutable,
   type Verdict,
   variantOf,
@@ -23,12 +24,36 @@ import {
 import { type HttpExchange, IssuanceClient, type IssuanceEvidence, oauthErrorOf, walletUnitOf } from '@rp-conformance/issuer-wallet';
 import { comparePidFormats, type IssuedOutputOptions, validateIssuedMdoc, validateIssuedSdJwtVc } from '@rp-conformance/validator';
 import { worst } from '../evaluate';
+import {
+  type AttestationState,
+  applyWalletEvent,
+  isIssuerRequestFault,
+  maintenancePeriodCheck,
+  newAttestationState,
+  prepareIssuance,
+  rememberIssuance,
+  sentAttestations,
+} from './attestations';
+import { isOfferCapture, issueWithFault, runMetadata, runOfferCapture } from './artifacts';
 import { harnessInfo } from '../info';
 import { evaluateIssuance, type IssuanceObservation } from './evaluate';
 import { type IssuerHarness, PID_TRUST_RULE, startIssuerHarness } from './harness';
 import { issuerApplicability, issuerIcsValue, resolveConfigurations, usesTxCode } from './ics';
 import { describeIssuerFinding, type IssuerKnownFinding, issuerKnownFindingOf } from './known-findings';
 import { writeIssuerJUnit, writeIssuerSummary } from './report';
+// Lifecycle steps (issue 22): issuer-event, observe-status, present.
+import {
+  evaluateObservation,
+  evaluatePresentation,
+  type LifecycleState,
+  newLifecycleState,
+  observeStatus,
+  type PresentationObservation,
+  present,
+  runIssuerEvent,
+  type StatusObservation,
+  waits,
+} from './status';
 
 /** The validator's clock tolerance on the issuer side: the catalogue's cap of `T_skew` (section 3.5). */
 export const ISSUER_SKEW_SECONDS = 300;
@@ -76,8 +101,18 @@ export interface IssuerStepRecord {
   credentials: IssuedCredentialRecord[];
   /** Checks over all credentials of the step, for example `pid-formats` (both formats of one issuance). */
   stepChecks?: CheckResult[];
+  /** The named checks over the captured metadata or offer (`CONF`). */
+  checks?: CheckResult[];
+  /** The reference validator's credential request checks over the faulty request (point `credential-request`). */
+  requestChecks?: CheckResult[];
   /** Why the flow stopped before a credential arrived. */
   error?: string;
+  /** `issuer-event`: what the adapter reported done (`OBS-ADM`). */
+  event?: { sessionId: string; at: string; status: string };
+  /** `observe-status`: every poll of the published lists and the publication checks (`OBS-SL`). */
+  statusObservation?: StatusObservation;
+  /** `present`: the reference Relying Party's result. */
+  presentation?: Omit<PresentationObservation, 'result'>;
   artifacts: string[];
   verdict: Verdict;
   reason: string;
@@ -212,7 +247,7 @@ export async function runIssuerConformance(options: IssuerRunOptions): Promise<{
     }
     report.run.provider = await options.adapter.describe?.().catch(() => undefined);
     log(`adapter ${options.adapter.name} set up${report.run.provider ? ` (${Object.entries(report.run.provider).map(([k, v]) => `${k} ${v}`).join(', ')})` : ''}`);
-    for (const definition of selected) {
+    const execute = async (definition: IssuerTestCaseDefinition) => {
       const started = Date.now();
       const record = await runIssuerTestCase(definition, { ...options, harness, runDir, report });
       record.durationMs = Date.now() - started;
@@ -221,7 +256,12 @@ export async function runIssuerConformance(options: IssuerRunOptions): Promise<{
       report.results.push(record);
       log(`${record.verdict.padEnd(14)} ${record.testCase} [${record.variant}]${record.knownFinding ? ' (known finding)' : ''}${record.reason ? ` ${record.reason}` : ''}`);
       for (const step of record.steps) log(`    step ${step.step} ${step.verdict}: ${step.reason}`);
-    }
+    };
+    // Test cases whose steps wait (`REVOKED(t)`, polling across `exp`) run after the others and in parallel (design
+    // section 6.3); a test case gated on a control still runs after it.
+    const waiting = selected.filter((d) => waits(d.steps) && !d.control);
+    for (const definition of selected.filter((d) => !waiting.includes(d))) await execute(definition);
+    await Promise.all(waiting.map(execute));
   } finally {
     await options.adapter.tearDown?.().catch(() => {});
     await harness.stop();
@@ -247,9 +287,16 @@ interface Context extends IssuerRunOptions {
   report: IssuerRunReport;
 }
 
-/** State shared by the steps of one test case: one issuance client (one DPoP key) per Wallet Unit (design section 5.1). */
-interface TestCaseState {
+/**
+ * State shared by the steps of one test case: one issuance client (one DPoP key) per Wallet Unit (design section 5.1),
+ * and what the lifecycle steps read of earlier steps.
+ */
+interface TestCaseState extends LifecycleState {
   clients: Map<string, IssuanceClient>;
+  /** Moved status references and replay values of the Wallet Units (issue 19). */
+  attestations: AttestationState;
+  /** Offers by value captured in the test case (`PP_WS_MS_Offer_002`). */
+  offersByValue: Record<string, unknown>[];
 }
 
 async function runIssuerTestCase(definition: IssuerTestCaseDefinition, ctx: Context): Promise<IssuerTestCaseRecord> {
@@ -264,10 +311,12 @@ async function runIssuerTestCase(definition: IssuerTestCaseDefinition, ctx: Cont
   const unmet = issuerApplicability(definition, ctx.ics);
   if (unmet.length) return end('NOT APPLICABLE', `profile not met: ${unmet.join('; ')}`);
   if (control && control.verdict !== 'PASS') return end('INCONCLUSIVE', `positive control ${outcomes.map((o) => o.id).join(' or ')} did not pass in ${variant}`);
-  const state: TestCaseState = { clients: new Map() };
+  const state: TestCaseState = { clients: new Map(), attestations: newAttestationState(), offersByValue: [], ...newLifecycleState() };
   const steps: IssuerStepRecord[] = [];
   for (const [index, step] of definition.steps.entries()) steps.push(await runIssuerStep(definition, variant, index + 1, step, ctx, state));
-  return { ...base, verdict: worst(steps.map((s) => s.verdict)), control, steps };
+  // A step that does not apply to the Provider (NOT APPLICABLE) does not count, unless no step applies.
+  const applicable = steps.filter((s) => s.verdict !== 'NOT APPLICABLE');
+  return { ...base, verdict: applicable.length ? worst(applicable.map((s) => s.verdict)) : 'NOT APPLICABLE', control, steps };
 }
 
 async function runIssuerStep(
@@ -299,8 +348,23 @@ async function runIssuerStep(
     record.artifacts.push(relative(ctx.runDir, join(dir, name)));
   };
   try {
-    if (step.run?.kind === 'issuance') await runIssuance(step, step.run, record, save, ctx, state);
-    else record.reason = step.run ? `the step action ${step.run.kind} is not implemented yet` : 'the step is text only';
+    if (step.run?.kind === 'metadata') await runMetadata(step.expect, record, save, ctx);
+    else if (step.run?.kind === 'issuance') await runIssuance(step, step.run, record, save, ctx, state);
+    else if (step.run?.kind === 'wallet-event' && step.expect.codes.every((code) => code === 'INFO')) {
+      record.walletUnit = step.run.walletUnit ?? 'CW-1';
+      const served = await applyWalletEvent(step.run, {
+        twp: ctx.harness.twp,
+        statusProvider: ctx.harness.status,
+        namespace: ctx.harness.namespace,
+        state: state.attestations,
+        skewSeconds: ISSUER_SKEW_SECONDS,
+      });
+      record.verdict = 'PASS';
+      record.reason = `recorded: ${served}`;
+    }
+    else if (step.run?.kind === 'issuer-event' || step.run?.kind === 'observe-status' || step.run?.kind === 'present') {
+      await runLifecycleStep(step, step.run, record, save, ctx, state);
+    } else record.reason = step.run ? `the step action ${step.run.kind} is not implemented yet` : 'the step is text only';
   } catch (error) {
     record.verdict = 'INCONCLUSIVE';
     record.reason = `the harness could not execute the step: ${(error as Error).message}`;
@@ -311,7 +375,8 @@ async function runIssuerStep(
 /** What the issuance client and the issuance action support so far; anything else leaves the step INCONCLUSIVE. */
 function unsupported(action: IssuanceAction): string | undefined {
   if (action.grant !== 'pre-authorized_code') return 'the issuance client implements the pre-authorized code flow only';
-  if (action.faults.length) return `issuer faults are not implemented yet (${action.faults.join(', ')})`;
+  const notImplemented = action.faults.filter((fault) => !isCredentialRequestFault(fault) && !isIssuerRequestFault(fault));
+  if (notImplemented.length) return `issuer faults are not implemented yet (${notImplemented.join(', ')})`;
   const options: string[] = (['stopAfterToken', 'deferred', 'encryption', 'credentialIdentifier'] as const).filter((option) => action[option]);
   if ((action.batchSize ?? 1) > 1) options.push('batchSize');
   return options.length ? `the issuance option(s) ${options.join(', ')} are not implemented yet` : undefined;
@@ -331,6 +396,7 @@ async function runIssuance(
     record.reason = 'the ICS declares no portrait opt-out (ICS-17.portrait_opt_out)';
     return;
   }
+  if (isOfferCapture(step.expect)) return runOfferCapture(step.expect, action, record, save, ctx, state);
   const missing = unsupported(action);
   if (missing) {
     record.reason = missing;
@@ -346,12 +412,46 @@ async function runIssuance(
   const offer = await ctx.adapter.createOffer({ subject, configurations, grant: action.grant, byReference, txCode, ...(action.portraitOptOut ? { portraitOptOut: true } : {}) });
   record.offer = { sessionId: offer.sessionId, offer: offer.offer, byReference, txCode: offer.txCode !== undefined, configurations };
 
-  let client = state.clients.get(unit);
+  // A plain issuance reuses the unit's client (one DPoP key per Wallet Unit); a step with a fault, a moved status
+  // reference or another proof type gets a client with its own binding and hooks (issue 19).
+  const plain = !action.faults.some(isIssuerRequestFault) && !action.proofType && !action.keyAttestationNonce && !state.attestations.status.has(unit);
+  const prepared = plain ? undefined : await prepareIssuance(action, ctx.harness.twp, state.attestations);
+  let client = plain ? state.clients.get(unit) : undefined;
   if (!client) {
-    client = await IssuanceClient.create(walletUnitOf(ctx.harness.twp, unit), { allowInsecureUrls: true });
-    state.clients.set(unit, client);
+    client = await IssuanceClient.create(prepared?.unit ?? walletUnitOf(ctx.harness.twp, unit), {
+      allowInsecureUrls: true,
+      ...(prepared ? { hooks: prepared.hooks } : {}),
+    });
+    if (plain) state.clients.set(unit, client);
   }
-  const evidence = await client.issue({ offer: offer.offer, ...(offer.txCode !== undefined ? { txCode: offer.txCode } : {}), credentialConfigurationIds: configurations });
+  const requestFault = action.faults.find(isCredentialRequestFault);
+  let evidence: IssuanceEvidence;
+  if (requestFault) {
+    const faulty = await issueWithFault(requestFault, offer, configurations[0] as string, unit, ctx);
+    evidence = faulty.evidence;
+    if (faulty.requestChecks) record.requestChecks = faulty.requestChecks;
+    if (faulty.notApplicable) {
+      record.exchanges = evidence.exchanges;
+      record.reason = `the fault ${requestFault} cannot be applied: ${faulty.notApplicable}`;
+      return;
+    }
+  } else {
+    evidence = await client.issue({ offer: offer.offer, ...(offer.txCode !== undefined ? { txCode: offer.txCode } : {}), credentialConfigurationIds: configurations });
+  }
+  // `REJ:invalid_nonce, then ISS`: the same request again, without the fault, with a fresh `c_nonce`.
+  const firstAttempt = { exchanges: evidence.exchanges.length, credentials: evidence.credentials.length };
+  if (action.retryWithFreshNonce && prepared && evidence.error && evidence.token && evidence.metadata) {
+    prepared.withoutFault();
+    try {
+      const cNonce = await client.requestNonce(evidence.metadata.result, evidence);
+      await client.requestCredential(evidence.metadata.result, evidence.token, configurations[0], cNonce, evidence);
+      delete evidence.error;
+    } catch (error) {
+      evidence.error = `retry with a fresh c_nonce: ${(error as Error).message}`;
+    }
+  }
+  rememberIssuance(state.attestations, unit, evidence);
+  state.issued.set(record.step, { sessionId: offer.sessionId, credentials: evidence.credentials });
   record.exchanges = evidence.exchanges;
   if (evidence.token) record.token = { tokenType: evidence.token.tokenType };
   if (evidence.error) record.error = evidence.error;
@@ -362,10 +462,26 @@ async function runIssuance(
     const mdoc = record.credentials.find((c) => c.format === 'mso_mdoc');
     record.stepChecks = [comparePidFormats(sdJwt?.claims, mdoc?.pidClaims)];
   }
+  if (step.expect.checks?.includes('maintenance-period')) {
+    const sent = sentAttestations(evidence.exchanges);
+    for (const credential of record.credentials) credential.checks.push(maintenancePeriodCheck(credential.credential, sent));
+  }
   for (const [i, credential] of record.credentials.entries()) await save(`credential-${i + 1}.txt`, credential.credential);
   await save('issuance.json', `${JSON.stringify({ offer: record.offer, offerObject: evidence.offer, metadata: evidence.metadata, exchanges: evidence.exchanges }, null, 2)}\n`);
 
-  const evaluation = evaluateIssuance(step.expect, observationOf(evidence, record.credentials, record.stepChecks));
+  // `proof.p521` applies only where the configuration does not advertise ES512 for `jwt` proofs (catalogue
+  // PP_WS_SM_ProofOfPossession_009_UF: "P-521 if not advertised").
+  const proofAlgorithms = (evidence.metadata?.result.credentialIssuer.credential_configurations_supported[configurations[0]] as
+    | { proof_types_supported?: { jwt?: { proof_signing_alg_values_supported?: string[] } } }
+    | undefined)?.proof_types_supported?.jwt?.proof_signing_alg_values_supported;
+  if (action.faults.includes('proof.p521') && proofAlgorithms?.includes('ES512')) {
+    record.verdict = 'NOT APPLICABLE';
+    record.reason = `the configuration advertises ES512 for jwt proofs (${proofAlgorithms.join(', ')}); ${record.credentials.length ? `issued ${record.credentials.length} credential(s)` : 'no credential issued'}`;
+    return;
+  }
+  const evaluation = action.retryWithFreshNonce
+    ? evaluateRetry(step, evidence, record.credentials, firstAttempt)
+    : evaluateIssuance(step.expect, observationOf(evidence, record.credentials, record.stepChecks));
   record.verdict = evaluation.verdict;
   record.reason = evaluation.reason;
 }
@@ -393,6 +509,51 @@ function outputOptions(step: IssuerStepDefinition, action: IssuanceAction, subje
       return { status: response.status, body: new Uint8Array(await response.arrayBuffer()) };
     },
   };
+}
+
+/** The lifecycle steps (status.ts): `issuer-event`, `observe-status` and `present`, with their evidence. */
+async function runLifecycleStep(
+  step: IssuerStepDefinition,
+  action: Extract<IssuerStepDefinition['run'], { kind: 'issuer-event' | 'observe-status' | 'present' }>,
+  record: IssuerStepRecord,
+  save: (name: string, content: string) => Promise<void>,
+  ctx: Context,
+  state: TestCaseState,
+): Promise<void> {
+  const lifecycle = { harness: ctx.harness, ics: ctx.ics, harnessHost: ctx.harnessHost, ...(ctx.log ? { log: ctx.log } : {}) };
+  if (action.kind === 'issuer-event') {
+    const { event, ...evaluation } = await runIssuerEvent(action, record.step, state, { ...lifecycle, adapter: ctx.adapter });
+    if (event) record.event = event;
+    Object.assign(record, evaluation);
+    return;
+  }
+  if (action.kind === 'observe-status') {
+    const observation = await observeStatus(action, record.step, state, lifecycle);
+    record.statusObservation = observation;
+    await save('status-observation.json', `${JSON.stringify(observation, null, 2)}\n`);
+    Object.assign(record, evaluateObservation(step.expect, observation, ctx.ics));
+    return;
+  }
+  const { result, ...presentation } = await present(action, state, lifecycle);
+  record.presentation = presentation;
+  await save('presentation.json', `${JSON.stringify({ ...presentation, result }, null, 2)}\n`);
+  Object.assign(record, evaluatePresentation(step.expect, { ...presentation, ...(result ? { result } : {}) }));
+}
+
+/**
+ * A step with `retryWithFreshNonce`: its first code (`REJ:invalid_nonce`) is judged on the faulty attempt, the others
+ * (`ISS`) on the retry; the step's verdict is the worse of both.
+ */
+function evaluateRetry(step: IssuerStepDefinition, evidence: IssuanceEvidence, credentials: IssuedCredentialRecord[], first: { exchanges: number; credentials: number }) {
+  const [rejected, ...retried] = step.expect.codes;
+  const attempt = observationOf({ exchanges: evidence.exchanges.slice(0, first.exchanges), ...(evidence.error && evidence.exchanges.length === first.exchanges ? { error: evidence.error } : {}) }, credentials.slice(0, first.credentials));
+  const one = evaluateIssuance({ ...step.expect, codes: [rejected] }, attempt);
+  if (evidence.exchanges.length === first.exchanges) {
+    return { verdict: worst([one.verdict, 'FAIL']), reason: `${one.reason}; no retry was sent${evidence.error ? ` (${evidence.error})` : ''}` };
+  }
+  const retry = { exchanges: evidence.exchanges.slice(first.exchanges), ...(evidence.error ? { error: evidence.error } : {}) };
+  const two = evaluateIssuance({ ...step.expect, codes: retried }, observationOf(retry, credentials.slice(first.credentials)));
+  return { verdict: worst([one.verdict, two.verdict]), reason: `first request: ${one.reason}; retry with a fresh c_nonce: ${two.reason}` };
 }
 
 /** `OBS-CRED`: every credential the step received through the reference validator, with the suite's trust configuration. */

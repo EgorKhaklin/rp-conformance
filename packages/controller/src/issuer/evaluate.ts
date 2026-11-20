@@ -58,15 +58,22 @@ export function evaluateIssued(observation: IssuanceObservation, named: string[]
     return { verdict: 'FAIL', reason: `no credential was issued: ${describe(end)}${observation.error ? ` (${observation.error})` : ''}` };
   }
   const problems: string[] = [];
+  // A named check of the step as a whole (`pid-formats`, over both formats of one issuance) is judged on the step's
+  // checks; every other named check on each credential.
+  const stepChecks = observation.stepChecks ?? [];
+  const onStep = named.filter((check) => stepChecks.some((c) => c.check === check));
   for (const [index, credential] of observation.credentials.entries()) {
     const label = observation.credentials.length > 1 ? `credential ${index + 1}: ` : '';
     const failures = credential.checks.filter((c) => c.status === 'fail');
     if (failures.length) problems.push(`${label}${failures.map((c) => `${c.check} failed (${c.detail ?? 'no detail'})`).join('; ')}`);
-    const missing = named.filter((check) => !credential.checks.some((c) => c.check === check && c.status === 'pass'));
+    const missing = named.filter((check) => !onStep.includes(check) && !credential.checks.some((c) => c.check === check && c.status === 'pass'));
     if (missing.length && !failures.length) problems.push(`${label}named checks did not pass: ${missing.join(', ')}`);
   }
+  for (const check of stepChecks.filter((c) => onStep.includes(c.check) && c.status !== 'pass')) {
+    problems.push(`${check.check} ${check.status === 'fail' ? 'failed' : 'was skipped'} on the step (${check.detail ?? 'no detail'})`);
+  }
   if (problems.length) return { verdict: 'FAIL', reason: problems.join('; ') };
-  const passed = [...new Set(observation.credentials.flatMap((c) => c.checks.filter((r) => r.status === 'pass').map((r) => r.check)))];
+  const passed = [...new Set([...observation.credentials, { checks: stepChecks }].flatMap((c) => c.checks.filter((r) => r.status === 'pass').map((r) => r.check)))];
   return { verdict: 'PASS', reason: `issued ${observation.credentials.length} credential(s); every check passed (${passed.join(', ')})` };
 }
 
@@ -89,51 +96,32 @@ export function evaluateRejected(observation: IssuanceObservation, code?: string
   return { verdict: 'PASS', reason: `rejected at ${end.step}: HTTP ${end.status}, error ${end.error}` };
 }
 
-/**
- * `CONF` for an issuance step (issuer catalogue section 2.5, design section 6.3): the issued credentials conform to the
- * rule, that is every check the expectation names passed on each credential that ran it, and on the step (`stepChecks`).
- * Only the named checks decide; the other checks are recorded, and their failures are named in the reason as belonging
- * to other test cases. Without a credential the rule cannot be checked: FAIL for a rejected request, INCONCLUSIVE when
- * the Provider did not answer. A named check that was skipped (a check it requires failed) or ran nowhere is INCONCLUSIVE.
- */
-export function evaluateConforms(observation: IssuanceObservation, named: string[] = []): Evaluation {
-  if (named.length === 0) return { verdict: 'INCONCLUSIVE', reason: 'CONF names no check' };
+/** What an issuance step ended with, for `INFO`. */
+function outcomeOf(observation: IssuanceObservation): string {
   const failed = serverError(observation);
-  if (failed) return { verdict: 'FAIL', reason: `the Provider answered with a server error: ${describe(failed)}` };
-  if (observation.credentials.length === 0) {
-    const end = last(observation);
-    if (!end || end.status === undefined) return { verdict: 'INCONCLUSIVE', reason: `no credential to check: ${end ? describe(end) : (observation.error ?? 'no request was sent')}` };
-    return { verdict: 'FAIL', reason: `no credential was issued: ${describe(end)}${observation.error ? ` (${observation.error})` : ''}` };
-  }
-  const sets = [...observation.credentials.map((c, i) => ({ label: observation.credentials.length > 1 ? `credential ${i + 1}` : 'the credential', checks: c.checks })), { label: 'the step', checks: observation.stepChecks ?? [] }];
-  const failures: string[] = [];
-  const skipped: string[] = [];
-  const passed: string[] = [];
-  for (const check of named) {
-    const results = sets.flatMap((set) => set.checks.filter((c) => c.check === check).map((c) => ({ ...c, label: set.label })));
-    if (results.length === 0) skipped.push(`${check} was not evaluated`);
-    for (const r of results) {
-      if (r.status === 'fail') failures.push(`${check} failed on ${r.label} (${r.detail ?? 'no detail'})`);
-      else if (r.status === 'skip') skipped.push(`${check} skipped on ${r.label} (${r.detail ?? 'no detail'})`);
-      else passed.push(`${check}${r.detail ? `: ${r.detail}` : ''}`);
-    }
-  }
-  const others = [...new Set(sets.flatMap((set) => set.checks.filter((c) => c.status === 'fail' && !named.includes(c.check)).map((c) => c.check)))];
-  const note = others.length ? `; other checks failed (${others.join(', ')}), which other test cases report` : '';
-  if (failures.length) return { verdict: 'FAIL', reason: `${failures.join('; ')}${note}` };
-  if (skipped.length) return { verdict: 'INCONCLUSIVE', reason: `${skipped.join('; ')}${note}` };
-  return { verdict: 'PASS', reason: `${passed.join('; ')}${note}` };
+  if (failed) return `the Provider answered with a server error: ${describe(failed)}`;
+  if (observation.credentials.length) return `issued ${observation.credentials.length} credential(s)`;
+  const end = last(observation);
+  return end ? `ended at ${describe(end)}` : `no request was sent${observation.error ? ` (${observation.error})` : ''}`;
 }
 
-/** Evaluates the codes of an issuance step; the step's verdict is the worst of them. */
+/**
+ * Evaluates the codes of an issuance step; the step's verdict is the worst of them, or with `oneOf` the best (the
+ * catalogue's "REJ or CONF"). `CONF` on an issuance step is `ISS` whose named checks must also pass. `INFO` records
+ * the outcome and passes, unless the Provider answered with HTTP 5xx.
+ */
 export function evaluateIssuance(expectation: IssuerExpectation, observation: IssuanceObservation): Evaluation {
   const evaluations = expectation.codes.map((code: IssuerExpectationCode): Evaluation => {
-    if (code === 'ISS') return evaluateIssued(observation, expectation.checks);
+    if (code === 'ISS' || code === 'CONF') return evaluateIssued(observation, expectation.checks);
     if (code === 'REJ') return evaluateRejected(observation);
     if (code.startsWith('REJ:')) return evaluateRejected(observation, code.slice('REJ:'.length));
-    if (code === 'CONF') return evaluateConforms(observation, expectation.checks);
-    if (code === 'INFO') return { verdict: 'PASS', reason: 'recorded' };
+    if (code === 'INFO') return serverError(observation) ? { verdict: 'FAIL', reason: outcomeOf(observation) } : { verdict: 'PASS', reason: `recorded: ${outcomeOf(observation)}` };
     return { verdict: 'INCONCLUSIVE', reason: `expected result ${code} is not implemented for an issuance step` };
   });
+  if (expectation.oneOf) {
+    const passed = evaluations.find((e) => e.verdict === 'PASS');
+    if (passed) return passed;
+    return { verdict: worst(evaluations.map((e) => e.verdict)), reason: `none of ${expectation.codes.join(', ')}: ${evaluations.map((e) => e.reason).join('; ')}` };
+  }
   return { verdict: worst(evaluations.map((e) => e.verdict)), reason: evaluations.map((e) => e.reason).join('; ') };
 }

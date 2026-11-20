@@ -31,7 +31,7 @@ One tenant per namespace, as the RP adapter does (`adapters/eudiplo`):
 | Hook | EUDIPLO calls |
 | --- | --- |
 | `enrol(namespace)` | Creates the tenant and four standalone key chains (`attestation` for SD-JWT VC, `attestation` for the mdoc document signer, `statusList`, `access`) and returns their CSRs (`GET /api/key-chain/{id}/csr`) with the profile of each credential signing key (`credentialSigningProfiles`). On an instance without the CSR route (9.1.0) it returns `undefined` and the Test Registrar generates the keys. |
-| `setUp(env, namespace)` | Tenant with the roles `issuance:manage` and `issuance:offer` (one left from an earlier run is replaced). Key chains: the Registrar's certificates for the CSR key chains (`PUT /api/key-chain/{id}` `activeCertificate`), or else the Registrar's keys imported with their chains (`POST /api/key-chain/import`): credential signer under `PP-T`, status list signer under the revocation anchor of `PP-T`, access certificate from `AC-A`. Status list settings (`PUT /api/status-list-config`): 2 bits, 10 000 entries, `ttl` 60 s, `immediateUpdate`. The PID configuration `pid-sd-jwt-vc` (`dc+sd-jwt`, `vct` `urn:eudi:pid:1`, `keyBinding`, `statusManagement`, `keyAttestationsRequired` with the ICS levels, `revokeWithWalletUnit`, 30 days); with `P-MD` the PID in mdoc `pid-mso-mdoc` (`mso_mdoc`, docType and namespace `eu.europa.ec.eudi.pid.1`, signed by the document signer the Registrar issued); with `P-SHORT` the short-lived `pid-sd-jwt-vc-short` and `pid-mso-mdoc-short` (12 hours, no status reference). The issuance configuration: built-in authorization server, `walletAttestationRequired`, `walletProviderTrustLists` = the harness's `TL-WP` pinned to its scheme operator certificate, `walletAttestationStatusCheckMode` `strict` (wallet attestations at the authorization server, key attestations at the credential endpoint), `batchSize` from the ICS, DPoP, notification endpoint, and the Registrar's registration certificate in `issuer_info`. |
+| `setUp(env, namespace)` | Tenant with the roles `issuance:manage` and `issuance:offer` (one left from an earlier run is replaced). Key chains: the Registrar's certificates for the CSR key chains (`PUT /api/key-chain/{id}` `activeCertificate`), or else the Registrar's keys imported with their chains (`POST /api/key-chain/import`): credential signer under `PP-T`, status list signer under the revocation anchor of `PP-T`, access certificate from `AC-A`. Status list settings (`PUT /api/status-list-config`): 2 bits, 10 000 entries, `ttl` 60 s, `immediateUpdate`. The PID configuration `pid-sd-jwt-vc` (`dc+sd-jwt`, `vct` `urn:eudi:pid:1`, `keyBinding`, `statusManagement`, `keyAttestationsRequired` with the ICS levels, `revokeWithWalletUnit`, 30 days, and on every configuration the ARF Annex II reuse policy `credentialReusePolicy`: method A `once_only` with the batch size, then method B `limited_time`); with `P-MD` the PID in mdoc `pid-mso-mdoc` (`mso_mdoc`, docType and namespace `eu.europa.ec.eudi.pid.1`, signed by the document signer the Registrar issued); with `P-SHORT` the short-lived `pid-sd-jwt-vc-short` and `pid-mso-mdoc-short` (12 hours, no status reference). A second, identical configuration `pid-sd-jwt-vc-2` that no offer names, so `PP_WS_MS_CredentialEndpoint_004_UF` can request a configuration the access token was not issued for. The issuance configuration: built-in authorization server, `walletAttestationRequired`, `walletProviderTrustLists` = the harness's `TL-WP` pinned to its scheme operator certificate, `walletAttestationStatusCheckMode` `strict` (wallet attestations at the authorization server, key attestations at the credential endpoint), `batchSize` from the ICS, DPoP, notification endpoint, and the Registrar's registration certificate in `issuer_info`. |
 | `createOffer` | `POST /api/issuer/offer`, pre-authorized code at the built-in authorization server, the subject's claims inline (`credentialClaims`) in the names of each configuration's format, with the age attributes and the issuance and expiry dates derived at issuance (`pidClaimsFor`), optionally a 6-digit `tx_code` (`txCode: true`). EUDIPLO offers by reference only; for `byReference: false` the adapter resolves the reference (once, it is single-use) and hands out `credential_offer` by value. |
 | `setStatus` | `POST /api/session/revoke` (`0` valid, `1` revoked, `2` suspended), then `GET /api/session/{id}/credential-status` must show the new status for every credential of the session. |
 | `refreshTrust` | `DELETE /api/cache/trust-list` |
@@ -93,8 +93,21 @@ of the reference's own features run only when it is the reference version.
 
 `setStatus` cannot be shown without an issued credential: for a session that has issued none, EUDIPLO answers
 `409 No status mapping found for session ... and credential configuration undefined`, and
-`GET /api/session/{id}/credential-status` answers `[]`. The test asserts exactly that; revocation of an issued PID comes
-with the issuance client and the first issuer test cases (issue 17).
+`GET /api/session/{id}/credential-status` answers `[]`. The test asserts exactly that. Revocation of an issued PID is
+exercised by the revocation test cases (issue 22): `PP_WS_SM_Revocation_003` and `PP_RP_SM_Revocation_008` revoke
+through `setStatus` and see the published list change within `T_rev`.
+
+## Status lists (issue 22)
+
+The status list test cases (`PP_WS_SM_Revocation_001` to `_003`, `PP_RP_IA_Supportive_*`, `PP_RP_SM_Revocation_*`)
+fetch the lists EUDIPLO publishes under `/issuers/{tenant}/status-management/status-list/{id}` anonymously, as a
+Relying Party does. EUDIPLO answers `Accept: application/statuslist+cwt` with a CWT and anything else with a JWT
+(`ICS-05.token_formats`). It re-signs a list on every change (`immediateUpdate`) and when a fetch finds it expired, so
+every fetch returns a token that has not expired (`PP_RP_SM_Revocation_005`). It sets no cache headers on the status
+list response, a known finding of `PP_RP_IA_Supportive_002` (issue text in
+[`upstream-findings/status-list-cache-headers.md`](upstream-findings/status-list-cache-headers.md)). It publishes no
+identifier lists and the adapter configures no mdoc PID, so `PP_WS_SM_Revocation_002` and the `MD` variants of
+`PP_RP_SM_Revocation_001` and `_007` are NOT APPLICABLE.
 
 ## What the pinned image still lacks, and the test cases it leaves not validated
 
@@ -105,11 +118,27 @@ Checked against the running image and EUDIPLO's source at `ae0792a`.
 | No login at the built-in authorization server: it issues authorization codes without a login or consent step | No `authenticateSubject` yet, `P-AC` No (see below) | `PP_WS_IA_AuthorizationCode_*` and every `AC` variant |
 | No DPoP server nonce (no `DPoP-Nonce` or `use_dpop_nonce` in the source) | NOT APPLICABLE (`ICS-13.dpop_nonce` No; `P-DPN` stands for the nonce endpoint only) | `PP_WS_SM_TokenBinding_006_UF` |
 | Identifier lists are read as verifier but never published by the issuer | `P-IL` No | `PP_RP_SM_Revocation_007` and the identifier list variants of `SCN-P` |
-| A proof's `iat` is checked only against the future; its age is bounded only by the `c_nonce`, which lives 10 minutes | `ICS-14.T_proof` "not bounded"; the test cases take the 5 minute cap | `PP_WS_SM_ProofOfPossession_006_UF` (`iat` − 1 h with a fresh `c_nonce`): expected FAIL, a known finding once it runs |
+| A proof's `iat` is checked only against the future in the source; its age is bounded only by the `c_nonce`, which lives 10 minutes | `ICS-14.T_proof` "not bounded"; the test cases take the 5 minute cap | none: `PP_WS_SM_ProofOfPossession_006_UF` passes, the pinned image refuses `iat` − 1 h with `invalid_proof` (issue 19 run) |
 | No subject record to change: the claims travel with each offer | No `changeSubject` | `PP_WS_SM_Revocation_008` (NOT APPLICABLE) |
-| With `walletAttestationRequired`, the authorization server metadata still lists `none` next to `attest_jwt_client_auth` in `token_endpoint_auth_methods_supported` | Whether a request without attestation is accepted is for the client attestation test cases to show | to be seen in `PP_WS_SM_ClientAttestation_*` |
-| Shortest status list lifetime 60 s (`ttl` minimum, live) | `T_rev` PT1M with `immediateUpdate` | none: `REVOKED(T_rev)` test cases poll for a minute |
+| With `walletAttestationRequired`, the authorization server metadata still lists `none` next to `attest_jwt_client_auth` in `token_endpoint_auth_methods_supported` | A token request without WIA, or without PoP, is still refused with `invalid_client` | none: `PP_WS_SM_ClientAttestation_002_UF` passes |
+| Shortest status list lifetime 60 s (`ttl` minimum, live) | `T_rev` PT1M with `immediateUpdate` | none: `REVOKED(T_rev)` test cases (`PP_WS_SM_Revocation_003`, `PP_RP_SM_Revocation_008`) poll for a minute, `PP_RP_SM_Revocation_005` across one `exp` |
 | Revocation chaining is a poll, and a suspended wallet unit changes nothing | `T_chain` PT7M; a suspended WIA or KA is still rejected at issuance (strict), but suspension does not chain | none (the catalogue chains revocation only) |
+
+Known findings of the security mechanism test cases (issue 19), each with its prepared upstream issue text in
+[`upstream-findings/`](upstream-findings) and its entries in [`known-findings.yaml`](known-findings.yaml):
+
+| Finding | Test cases |
+| --- | --- |
+| The status of a TS3 WIA or KA (`client_status.status`, `key_storage_status.status`) is never read; only a top-level `status` claim is, so strict mode never fetches `SL-WP-A` | `PP_WS_SM_ClientAttestation_012_UF`, `_013_UF`, `PP_WS_SM_KeyAttestation_008_UF`, `_009_UF` |
+| WIA and KA are accepted under each other's anchor of the same Wallet Provider | `PP_WS_SM_ClientAttestation_006_UF`, `PP_WS_SM_KeyAttestation_004_UF` |
+| A client attestation PoP `jti` is accepted twice | `PP_WS_SM_ClientAttestation_009_UF` |
+| The PID's expiry is not bounded by the WIA's or KA's revocation maintenance period | `PP_WS_SM_ClientAttestation_015`, `_016_UF`, `PP_WS_SM_KeyAttestation_011` |
+| The `nonce` of a KA in a `jwt` proof is not checked | `PP_WS_SM_KeyAttestation_007_UF` |
+| A key proof with `alg` `none` gets `invalid_credential_request` instead of `invalid_proof` | `PP_WS_SM_ProofOfPossession_002_UF` |
+
+`PP_WS_SM_ProofOfPossession_009_UF`: EUDIPLO advertises `ES512` for `jwt` proofs, so its P-521 step is NOT APPLICABLE
+and the test case is judged on the off-curve step. `PP_WS_SM_ProofOfPossession_007_UF` (`AC` only) is NOT APPLICABLE
+without `P-AC`.
 
 Not configured by the adapter although EUDIPLO supports it; each can be added when the test cases need it:
 

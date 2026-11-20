@@ -87,6 +87,9 @@ importers:
       '@rp-conformance/issuer-wallet':
         specifier: workspace:*
         version: link:../issuer-wallet
+      '@rp-conformance/reference-rp':
+        specifier: workspace:*
+        version: link:../reference-rp
       '@rp-conformance/status-provider':
         specifier: workspace:*
         version: link:../status-provider

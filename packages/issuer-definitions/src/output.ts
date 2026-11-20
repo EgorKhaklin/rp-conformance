@@ -21,19 +21,19 @@ export const shortConfigurationOf = (format: FormatVariant) => `ICS-05.short.${f
 export const shortPidProfile = (format: FormatVariant, grant: GrantVariant) => [...pidProfile(format, grant), issuerProfiles['P-SHORT']];
 
 /**
- * `CONF` (issuer catalogue section 2.5): the Provider issues, and the credential conforms to the rule, that is the named
- * checks pass. The other checks of the reference validator are recorded; `IA_MainInteraction_001` judges them.
+ * `CONF` (issuer catalogue section 2.5) on an issuance step: `ISS`, and the named checks of the rule pass as well. The
+ * output checks run only where a test case names them, so each rule is judged by its own test case.
  */
 export function conf(checks: CheckId[], rule: string, format?: FormatVariant): IssuerExpectation {
   return {
     codes: ['CONF'],
     checks,
-    text: `The Provider issues the credential (HTTP 200)${format ? ` in ${FORMAT_NAMES[format]} format` : ''}, and ${rule} (${checks.map((c) => `\`${c}\``).join(', ')}).`,
+    text: `The Provider issues the credential (HTTP 200)${format ? ` in ${FORMAT_NAMES[format]} format` : ''}, it passes every check of the reference validator, and ${rule} (${checks.map((c) => `\`${c}\``).join(', ')}).`,
   };
 }
 
 /** `Comments` shared by the output test cases. */
 export const OUTPUT_COMMENTS = [
-  'The issued credential is checked by the reference validator with the named check only; the other checks of the reference validator are recorded in the report and judged by `PP_WS_IA_MainInteraction_001`.',
+  'The named check runs in this test case only; the other checks of the reference validator run as in `PP_WS_IA_MainInteraction_001` and must pass too.',
   'Execute this test case once for each format named and each grant the Provider declares in its ICS (ICS-02, ICS-03).',
 ];

@@ -14,10 +14,17 @@ RP.P.6: 300     # T_kb, seconds
 RP.P.7: PT30S   # T_tx: transaction lifetime
 RP.P.8: "Yes"   # request_uri_method post, wallet_nonce echoed
 RP.P.9: "Yes"   # front end /done/<id> redeems the response code once, for the user session that started the transaction
+RP.P.10: "Yes"  # attribute-based binding of combined presentations: family name, given name, birth date
+RP.P.11: 1048576  # maximum Authorization Response size, bytes
+RP.P.12: Reject  # PID whose administrative expiry date has passed
 RP.R.1: "Yes"   # checks the revocation status of PIDs
 RP.R.2: Reject
 RP.R.3: None
 RP.R.4: 1048576
+RP.R.5: "Yes"   # caches Status List Tokens for their ttl
+RP.R.6: PT5S    # status list retrieval timeout
+RP.R.7: P7D     # maximum age of a Status List Token by its iat
+RP.R.8: "Yes"   # refuses a Status List Token iat in the future
 RP.T.1: PT1H
 RP.T.2: PT1H    # grace period G: a stale list is used and signalled as trust-list-stale
 RP.T.3: "Yes"

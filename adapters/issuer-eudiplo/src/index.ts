@@ -16,6 +16,8 @@ export { PID_FIELDS, PID_MDOC_FIELDS, PID_SUBJECTS, pidClaimsFor } from './subje
 
 /** The ID of the PID credential configuration in SD-JWT VC format, as the Credential Issuer metadata names it. */
 export const PID_SD_JWT_CONFIGURATION = 'pid-sd-jwt-vc';
+/** A second PID configuration that no offer names (issue 24, PP_WS_MS_CredentialEndpoint_004_UF). */
+export const SECOND_SD_JWT_CONFIGURATION = 'pid-sd-jwt-vc-2';
 /** `vct` of the PID in SD-JWT VC format (PID Rulebook). */
 export const PID_VCT = 'urn:eudi:pid:1';
 /** The ID of the PID credential configuration in mdoc format (ICS-02.MD). */
@@ -302,14 +304,18 @@ export class IssuerEudiploAdapter implements IssuerAdapter {
       user_authentication: icsList(env.ics, 'ICS-04.user_authentication', ['iso_18045_high']),
     };
     this.configurations.clear();
+    const batchSize = icsNumber(env.ics, 'ICS-08.batch_size', 1);
+    // Issue 24 (PP_WS_MS_Metadata_009): the reuse policy of ARF Annex II, method A (once_only) preferred over method B
+    // (limited_time), consistent with the batch size (ICS-08.credential_reuse_policy), on every configuration.
+    const reuse = batchSize >= 2 ? { credentialReusePolicy: reusePolicy(batchSize) } : {};
     const display = (name: string) => [{ name, locale: 'en-US', description: 'Person identification data of the conformance test subject' }];
     // Revocation chaining (WURevocation_18): EUDIPLO follows the status of the key attestation (the wallet unit
     // attestation) and revokes the PID with it. 9.1.0 does not know the field.
-    const sdJwt = async (id: string, short: boolean) => {
+    const sdJwt = async (id: string, short: boolean, description?: string) => {
       const dropped = await this.postWithoutUnknownKeys('/api/issuer/credentials', {
         id,
-        description: `PID in SD-JWT VC format (PID Rulebook), default_configuration_PP_1${short ? ', short-lived without status reference' : ''}`,
-        config: { format: 'dc+sd-jwt', display: display(short ? 'PID (short-lived)' : 'PID'), keyAttestationsRequired },
+        description: description ?? `PID in SD-JWT VC format (PID Rulebook), default_configuration_PP_1${short ? ', short-lived without status reference' : ''}`,
+        config: { format: 'dc+sd-jwt', display: display(short ? 'PID (short-lived)' : 'PID'), keyAttestationsRequired, ...reuse },
         vct: PID_VCT,
         keyBinding: true,
         statusManagement: !short,
@@ -327,7 +333,7 @@ export class IssuerEudiploAdapter implements IssuerAdapter {
       await this.postWithoutUnknownKeys('/api/issuer/credentials', {
         id,
         description: `PID in mdoc format (PID Rulebook), default_configuration_PP_1${short ? ', short-lived without status reference' : ''}`,
-        config: { format: 'mso_mdoc', docType: PID_DOCTYPE, display: display(short ? 'PID mdoc (short-lived)' : 'PID mdoc'), keyAttestationsRequired },
+        config: { format: 'mso_mdoc', docType: PID_DOCTYPE, display: display(short ? 'PID mdoc (short-lived)' : 'PID mdoc'), keyAttestationsRequired, ...reuse },
         keyBinding: true,
         statusManagement: !short,
         keyChainId: mdocAttestation,
@@ -340,6 +346,9 @@ export class IssuerEudiploAdapter implements IssuerAdapter {
     const short = env.ics.profiles.includes('P-SHORT');
     const droppedFromPid = await sdJwt(PID_SD_JWT_CONFIGURATION, false);
     this.capabilities.revokeWithWalletUnit = !droppedFromPid.includes('revokeWithWalletUnit');
+    // Issue 24 (PP_WS_MS_CredentialEndpoint_004_UF): a second configuration that no offer of the suite names, so a
+    // credential request can name a configuration the access token was not issued for.
+    await sdJwt(SECOND_SD_JWT_CONFIGURATION, false, 'Second PID configuration in SD-JWT VC format, never offered: target of PP_WS_MS_CredentialEndpoint_004_UF');
     if (short) await sdJwt(PID_SD_JWT_SHORT_CONFIGURATION, true);
     if (env.ics.profiles.includes('P-MD')) {
       if (!mdocAttestation) throw new Error('the ICS declares mdoc (P-MD), but the Test Registrar issued no document signer');
@@ -355,7 +364,7 @@ export class IssuerEudiploAdapter implements IssuerAdapter {
       authorizationServers: [{ type: 'built-in', id: BUILT_IN_AS, walletAttestationRequired: true }],
       walletAttestationRequired: true,
       walletProviderTrustLists,
-      batchSize: icsNumber(env.ics, 'ICS-08.batch_size', 1),
+      batchSize,
       dPopRequired: true,
       notificationEndpointEnabled: true,
       // 9.1.0 imports the Registrar's certificate with `mode` `import` (its default `generate` asks a registrar);
@@ -502,6 +511,15 @@ export class IssuerEudiploAdapter implements IssuerAdapter {
     this.configurations.clear();
   }
 }
+
+/** ARF Annex II reuse policy: method A (once only) with the batch size, then method B (limited time, one day before expiry). */
+const reusePolicy = (batchSize: number) => ({
+  id: 'arf_annex_ii',
+  options: [
+    { details: ['once_only'], batch_size: batchSize, reissue_trigger_unused: Math.max(0, batchSize - 1) },
+    { details: ['limited_time'], reissue_trigger_lifetime_left: 86_400 },
+  ],
+});
 
 const derOf = (pem: string) => pem.replace(/-----(BEGIN|END) CERTIFICATE-----/g, '').replace(/\s+/g, '');
 
