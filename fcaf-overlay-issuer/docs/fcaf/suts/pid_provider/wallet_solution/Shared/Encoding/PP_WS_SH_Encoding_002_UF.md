@@ -8,7 +8,7 @@ Verify that the PID Provider rejects an oversized request, records how it handle
 
 - [OWASP API Security Top 10] API4:2023
 - [OpenID4VCI] section 8.2
-- [RFC 8259] section 9
+- [RFC8259] section 9
 
 ## Profile applicability
 

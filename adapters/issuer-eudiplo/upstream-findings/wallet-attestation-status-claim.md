@@ -39,9 +39,13 @@ So for a TS3 1.5 WIA or KA no status list is ever requested:
 | `PP_WS_SM_Revocation_007` | the WSCD (KA entry) is revoked after issuance | the PID stays valid; no wallet unit is recorded for chaining (`checkStatus` records one only from a top-level `status`) |
 | `PP_WS_SH_Encoding_004_UF`, steps 3 and 4 | `client_status` / `key_storage_status` point to `http://169.254.169.254/…` | issues the PID |
 
-The last row shows only that the TS3 claims are not read, not a weakness against server-side request forgery: with the
-same address in a top-level `status` (steps 5 and 6 of the same test case) EUDIPLO reads it and refuses the attestation
-whose status it cannot obtain. Likewise `PP_WS_SH_Encoding_005_UF` (a status list that is a decompression bomb) cannot
+The last row shows only that the TS3 claims are not read, not a weakness against server-side request forgery. With the
+same address in a top-level `status` (steps 5 and 6 of the same test case) EUDIPLO reads it, tries to fetch it ("Failed
+to fetch status list from http://169.254.169.254/latest/meta-data/status: Outbound request timed out after 10000 ms")
+and refuses the attestation (HTTP 401 `invalid_client` for the WIA, HTTP 400 `invalid_proof` for the KA). It fetches the
+address because the suite's Compose setup sets `OUTBOUND_URL_ALLOW_PRIVATE_NETWORK: 'true'`, which the harness needs to
+serve its lists from a private address; how EUDIPLO's outbound guard treats the address in its default configuration is
+not tested. Likewise `PP_WS_SH_Encoding_005_UF` (a status list that is a decompression bomb) cannot
 show anything while the list is never fetched; it is no evidence for this report.
 
 The missing revocation chaining for the WIA is a separate gap, reported in

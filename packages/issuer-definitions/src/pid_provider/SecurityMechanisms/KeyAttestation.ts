@@ -94,8 +94,8 @@ function keyAttestation(format: FormatVariant, grant: GrantVariant): IssuerTestC
         faultStep(format, grant, 'ka.nonce-missing', rejected(['invalid_nonce', 'invalid_proof']), { proofType: 'attestation' }),
       ],
       comments: [
-        'As the `attestation` proof type the KA is the key proof, so OpenID4VCI 1.0 Appendix F.4 ("if the server has a Nonce Endpoint, the nonce in the key proof matches the server-provided c_nonce value") and TS3 section 2.2.2.2 require its `c_nonce`: step 5 expects the rejection.',
-        'In a `jwt` proof (steps 3 and 4) the nonce that F.4 and TS3 section 2.2.2.2 ("the `jwt` element includes a valid `c_nonce`") require is the proof\'s own, which is valid. Appendix F.1 says the KA\'s `nonce` "MUST be set to a server-provided c_nonce", a rule for the wallet that F.4 does not turn into a check of the Credential Issuer; step 4 is the same request as the valid baseline of the area. Both steps are informational since the spec review of 2026-11-20 (issuer catalogue section 8.3).',
+        'As the `attestation` proof type the KA is the key proof, so OpenID4VCI 1.0 Appendix F.4 ("if the server has a Nonce Endpoint, the nonce in the key proof matches the server-provided `c_nonce` value") and TS3 section 2.2.2.2 require its `c_nonce`: step 5 expects the rejection.',
+        'In a `jwt` proof (steps 3 and 4) the nonce that F.4 and TS3 section 2.2.2.2 ("the `jwt` element includes a valid `c_nonce`") require is the proof\'s own, which is valid. Appendix F.1 says the KA\'s `nonce` "MUST be set to a server-provided `c_nonce`", a rule for the wallet that F.4 does not turn into a check of the Credential Issuer; step 4 is the same request as the valid baseline of the area. Both steps are informational since the spec review of 2026-11-20 (issuer catalogue section 8.3).',
       ],
     }),
     testCase(format, grant, {

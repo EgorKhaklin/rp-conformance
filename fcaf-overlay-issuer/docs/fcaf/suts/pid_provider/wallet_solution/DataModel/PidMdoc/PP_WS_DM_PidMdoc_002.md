@@ -7,8 +7,8 @@ Verify that the PID in mdoc format carries every mandatory attribute and metadat
 ## References
 
 - [ARF] Annex 2, PID_08, PID_09, PID_10
-- [PID Rulebook] v1.7, section 3.1.2
-- [RFC 8943]
+- [PID rulebook] v1.7, section 3.1.2
+- [RFC8943]
 
 ## Profile applicability
 

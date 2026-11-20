@@ -83,7 +83,7 @@ function proofOfPossession(format: FormatVariant, grant: GrantVariant): IssuerTe
             steps: [
               faultStep(format, grant, 'proof.iss-other', {
                 codes: ['INFO'],
-                text: 'Whether the Provider rejects the request (`invalid_proof`) or issues the PID is recorded; HTTP 5xx fails. The proof violates Appendix F.1 ("The value of this claim MUST be the client_id of the Client making the Credential request"), but the checks a Credential Issuer MUST make in Appendix F.4 do not include `iss`.',
+                text: 'Whether the Provider rejects the request (`invalid_proof`) or issues the PID is recorded; HTTP 5xx fails. The proof violates Appendix F.1 ("The value of this claim MUST be the `client_id` of the Client making the Credential request"), but the checks a Credential Issuer MUST make in Appendix F.4 do not include `iss`.',
               }),
             ],
             comments: [

@@ -59,7 +59,7 @@ const notification002 = (format: FormatVariant, grant: GrantVariant) =>
         run: { kind: 'notification', ofStep: 1, event: 'credential_accepted', faults: ['notification.event-unknown'] },
         expect: {
           codes: ['INFO'],
-          text: 'The answer is recorded. OpenID4VCI 1.0 section 11.3 prescribes HTTP 400 with an error object only "When the notification_id value is invalid"; for an unknown `event` it names `invalid_notification_request` as a code that SHOULD be used, without requiring an error response, so no verdict is given on it.',
+          text: 'The answer is recorded. OpenID4VCI 1.0 section 11.3 prescribes HTTP 400 with an error object only "When the `notification_id` value is invalid"; for an unknown `event` it names `invalid_notification_request` as a code that SHOULD be used, without requiring an error response, so no verdict is given on it.',
         },
       },
     ],

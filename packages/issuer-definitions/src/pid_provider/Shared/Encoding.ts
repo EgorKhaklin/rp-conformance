@@ -27,7 +27,7 @@ const encoding002 = (format: FormatVariant, grant: GrantVariant) =>
     variants: [format, grant],
     control: MAIN,
     objective: 'Verify that the PID Provider rejects an oversized request, records how it handles deeply nested JSON, and stays available.',
-    references: ['[OWASP API Security Top 10] API4:2023', '[OpenID4VCI] section 8.2', '[RFC 8259] section 9'],
+    references: ['[OWASP API Security Top 10] API4:2023', '[OpenID4VCI] section 8.2', '[RFC8259] section 9'],
     profile: profileOf(format, grant),
     relevancy: relevancy.genericRequired,
     technology: technologyOf(format),
