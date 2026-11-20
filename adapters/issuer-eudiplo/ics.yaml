@@ -6,9 +6,11 @@
 profiles:
   - P-PID   # ICS-01
   - P-SD    # ICS-02
+  - P-MD    # ICS-02
   - P-PA    # ICS-03
   - P-DB    # ICS-04
   - P-REV   # ICS-05
+  - P-SHORT # ICS-05: the short-lived configurations ICS-05.short.SD and ICS-05.short.MD
   - P-SUSP  # ICS-05
   - P-HOOK  # ICS-06
   - P-BATCH # ICS-08
@@ -19,8 +21,9 @@ profiles:
 
 items:
   ICS-01: PID Provider                       # entity PP-T on TL-PID; PID Rulebook
-  ICS-02: SD-JWT VC                          # live: pid-sd-jwt-vc, format dc+sd-jwt, vct urn:eudi:pid:1. EUDIPLO issues mso_mdoc too; the adapter configures no mdoc PID (PID_02 not met, README)
+  ICS-02: SD-JWT VC and mdoc                 # live: pid-sd-jwt-vc (dc+sd-jwt, vct urn:eudi:pid:1) and pid-mso-mdoc (mso_mdoc, doctype eu.europa.ec.eudi.pid.1)
   ICS-02.SD: pid-sd-jwt-vc                   # the configuration that issues the PID in SD-JWT VC, as definitions name it (ICS-02.<format variant>)
+  ICS-02.MD: pid-mso-mdoc                    # the configuration that issues the PID in mdoc, signed by the document signer the Registrar issued
   ICS-03: pre-authorized code              # live: flow pre_authorized_code at the built-in authorization server, with and without tx_code. No P-AC: no authenticateSubject (README)
   ICS-03.tx_code: with and without           # live: tx_code of 6 digits, input_mode numeric; txCodeMaxAttempts default 5
   ICS-03.subject_authentication: none        # the built-in authorization server issues codes without a login step (docs issuance/authorization-servers.md)
@@ -28,7 +31,11 @@ items:
   ICS-04.key_storage: [iso_18045_high]       # live: keyAttestationsRequired, published as key_attestations_required
   ICS-04.user_authentication: [iso_18045_high]
   ICS-05: Token Status List                  # live: statusManagement true. JWT, and CWT for Accept application/statuslist+cwt (docs issuance/revocation.md; a token exists only once a credential is issued)
-  ICS-05.short_lived: "No"                   # lifeTime 30 days
+  ICS-05.short_lived: "Yes"                  # the PID configurations live 30 days with a status reference; the short-lived ones 12 hours without
+  ICS-05.short.SD: pid-sd-jwt-vc-short       # short-lived PID in SD-JWT VC: statusManagement false, lifeTime 12 h (SM_Validity_002)
+  ICS-05.short.MD: pid-mso-mdoc-short        # short-lived PID in mdoc: statusManagement false, lifeTime 12 h
+  ICS-05.validity_period: P30D               # lifeTime of ICS-02.SD and ICS-02.MD (SM_Validity_004); EUDIPLO rounds iat down and exp up to the hour (ICS-16.timestamp_precision)
+  ICS-05.short.validity_period: PT12H        # lifeTime of ICS-05.short.SD and ICS-05.short.MD
   ICS-05.identifier_list: "No"               # source: EUDIPLO reads identifier lists as verifier (trust/status-list-verifier.service.ts) but publishes none
   ICS-05.suspension: "Yes"                   # live: status list bits 2 (PUT /api/status-list-config); status 2 = suspended
   ICS-06: revoke, suspend, unsuspend         # setStatus: POST /api/session/revoke, confirmed by GET /api/session/{id}/credential-status. A revoked credential cannot be changed again (409)
@@ -57,6 +64,6 @@ items:
   ICS-16.min_entries: 10000                  # live: status list capacity 10000 (STATUS_CAPACITY default, set explicitly)
   ICS-16.timestamp_precision: PT1H           # source: issuance and expiry times rounded to the hour (credential-time.util.ts)
   ICS-17: seeds SUBJ-1 and SUBJ-2            # claims inline with each offer (credentialClaims, src/subjects.ts)
-  ICS-17.portrait_opt_out: "No"              # the SD-JWT VC PID configuration has no portrait
+  ICS-17.portrait_opt_out: "No"              # the PID configurations have no portrait; inline claims cannot carry the empty bstr an mdoc needs (DM_Portrait_001 NOT APPLICABLE)
   ICS-18: accept                             # source: 9.1.0 accepts a WIA whose status list cannot be fetched (wallet-attestation.service.ts, "status checking is optional") and checks no KA status; not configurable before EUDIPLO/eudiplo#1340. A PID Provider must reject (decision 2): README
   ICS-19: "No"                               # embeddedDisclosurePolicy not set

@@ -1,6 +1,7 @@
 // The issuance client (issuer harness design section 5.1), valid path of the pre-authorized code flow: offer by value
 // or by reference, Credential Issuer and Authorization Server metadata (`SCN-M`), token request with client attestation
-// and DPoP, nonce, credential request with an `openid4vci-proof+jwt` carrying the KA (`SCN-I`). The libraries parse and
+// and DPoP, nonce, credential request with an `openid4vci-proof+jwt` carrying the KA (`SCN-I`), for SD-JWT VC and mdoc,
+// and for several configurations with one access token. The libraries parse and
 // validate offer and metadata; every message the client sends to the token, nonce and credential endpoints is built
 // by a function of its own (`jwts.ts`, `requests.ts`) and passes the hooks before it is signed or sent.
 import { createHash, randomBytes } from 'node:crypto';
@@ -108,6 +109,12 @@ export interface IssueOptions {
   txCode?: string;
   /** Default the first of the offer's `credential_configuration_ids`. */
   credentialConfigurationId?: string;
+  /**
+   * Several configurations of the offer, requested one after the other with the same access token, each with a fresh
+   * `c_nonce` and proof (`IA_MainInteraction_003`: both formats of the PID with one access token). Takes precedence
+   * over `credentialConfigurationId`.
+   */
+  credentialConfigurationIds?: string[];
   /** Also fetch the metadata with `Accept: application/jwt` (default true). */
   signedMetadata?: boolean;
 }
@@ -162,9 +169,13 @@ export class IssuanceClient {
       const offer = await this.resolveOffer(options.offer, evidence);
       const metadata = await this.fetchMetadata(offer.offer.credential_issuer, evidence, { signed: options.signedMetadata ?? true });
       const token = await this.requestToken(offer.offer, metadata.result, evidence, options.txCode);
-      const cNonce = await this.requestNonce(metadata.result, evidence);
-      const configurationId = options.credentialConfigurationId ?? offer.offer.credential_configuration_ids[0];
-      await this.requestCredential(metadata.result, token, configurationId, cNonce, evidence);
+      const configurationIds = options.credentialConfigurationIds?.length
+        ? options.credentialConfigurationIds
+        : [options.credentialConfigurationId ?? offer.offer.credential_configuration_ids[0]];
+      for (const configurationId of configurationIds) {
+        const cNonce = await this.requestNonce(metadata.result, evidence);
+        await this.requestCredential(metadata.result, token, configurationId, cNonce, evidence);
+      }
     } catch (error) {
       evidence.error = (error as Error).message;
     }
@@ -265,7 +276,9 @@ export class IssuanceClient {
   ): Promise<IssuedCredential[]> {
     const configuration = metadata.credentialIssuer.credential_configurations_supported[credentialConfigurationId];
     if (!configuration) throw new IssuanceError(`the metadata has no credential configuration ${credentialConfigurationId}`);
-    if (configuration.format !== 'dc+sd-jwt') throw new IssuanceError(`format ${configuration.format}: the client requests SD-JWT VC (dc+sd-jwt) only`);
+    if (configuration.format !== 'dc+sd-jwt' && configuration.format !== 'mso_mdoc') {
+      throw new IssuanceError(`format ${configuration.format}: the client requests SD-JWT VC (dc+sd-jwt) and mdoc (mso_mdoc) only`);
+    }
     const endpoint = metadata.credentialIssuer.credential_endpoint;
     const ka = await this.unit.keyAttestation();
     const proofKey = ka.keys[0];
@@ -293,7 +306,8 @@ export class IssuanceClient {
     }
     const issued = credentials.map((entry) => {
       const credential = (entry as { credential?: unknown }).credential;
-      if (typeof credential !== 'string') throw new IssuanceError('a credentials entry carries no SD-JWT VC string', evidence.exchanges.at(-1));
+      // SD-JWT VC: the compact SD-JWT; mdoc: base64url of IssuerSigned (OpenID4VCI Appendix A.1.2, A.2.4).
+      if (typeof credential !== 'string') throw new IssuanceError(`a credentials entry carries no ${configuration.format} string`, evidence.exchanges.at(-1));
       return { credentialConfigurationId, format: configuration.format, credential, proofKey, keyAttestation: ka.jwt };
     });
     evidence.credentials.push(...issued);

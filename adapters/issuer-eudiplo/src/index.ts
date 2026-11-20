@@ -8,22 +8,39 @@ import type {
   IssuerTestEnvironment,
 } from '@rp-conformance/core';
 import { icsList, icsNumber } from './ics';
-import { PID_FIELDS, PID_SUBJECTS } from './subjects';
+import { PID_FIELDS, PID_MDOC_FIELDS, PID_SD_JWT_EXTRA_FIELDS, pidClaimsFor } from './subjects';
 
 export { ICS_PATH, icsList, icsNumber, loadIssuerIcs } from './ics';
-export { PID_FIELDS, PID_SUBJECTS } from './subjects';
+export { PID_FIELDS, PID_MDOC_FIELDS, PID_SUBJECTS, pidClaimsFor } from './subjects';
 
 /** The ID of the PID credential configuration in SD-JWT VC format, as the Credential Issuer metadata names it. */
 export const PID_SD_JWT_CONFIGURATION = 'pid-sd-jwt-vc';
 /** `vct` of the PID in SD-JWT VC format (PID Rulebook). */
 export const PID_VCT = 'urn:eudi:pid:1';
+/** The ID of the PID credential configuration in mdoc format (ICS-02.MD). */
+export const PID_MDOC_CONFIGURATION = 'pid-mso-mdoc';
+/** DocType of the PID in mdoc format (PID Rulebook). */
+export const PID_DOCTYPE = 'eu.europa.ec.eudi.pid.1';
+/** The short-lived PID configurations (ICS-05.short.SD, ICS-05.short.MD): no status reference, 12 hours. */
+export const PID_SD_JWT_SHORT_CONFIGURATION = 'pid-sd-jwt-vc-short';
+export const PID_MDOC_SHORT_CONFIGURATION = 'pid-mso-mdoc-short';
 /** The built-in authorization server of the tenant: the only one that redeems pre-authorized codes. */
 const BUILT_IN_AS = 'issuer-built-in';
 
 /** Shortest status list token lifetime EUDIPLO 9.1.0 accepts (`ttl`, `GET/PUT /api/status-list-config`, minimum 60). */
 export const STATUS_LIST_TTL_SECONDS = 60;
-/** Lifetime of the PID; more than 24 hours, so it is not short-lived (`P-SHORT` No). */
+/** Lifetime of the PID; more than 24 hours, so it carries a status reference (ICS-05.validity_period). */
 const PID_LIFETIME_SECONDS = 30 * 24 * 60 * 60;
+/** Lifetime of the short-lived PID, without status reference (ICS-05.short.validity_period). */
+const PID_SHORT_LIFETIME_SECONDS = 12 * 60 * 60;
+
+/** The PID configurations the adapter creates: format, lifetime, and whether they carry a status reference. */
+const PID_CONFIGURATIONS: Record<string, { format: 'SD' | 'MD'; lifetime: number; short: boolean }> = {
+  [PID_SD_JWT_CONFIGURATION]: { format: 'SD', lifetime: PID_LIFETIME_SECONDS, short: false },
+  [PID_MDOC_CONFIGURATION]: { format: 'MD', lifetime: PID_LIFETIME_SECONDS, short: false },
+  [PID_SD_JWT_SHORT_CONFIGURATION]: { format: 'SD', lifetime: PID_SHORT_LIFETIME_SECONDS, short: true },
+  [PID_MDOC_SHORT_CONFIGURATION]: { format: 'MD', lifetime: PID_SHORT_LIFETIME_SECONDS, short: true },
+};
 
 export interface IssuerEudiploAdapterOptions {
   /**
@@ -77,6 +94,8 @@ export class EudiploError extends Error {
 /** The key chains of the tenant, by usage. */
 interface KeyChains {
   attestation: string;
+  /** The mdoc document signer, where the ICS declares mdoc (P-MD). */
+  mdocAttestation?: string;
   statusList?: string;
   access: string;
 }
@@ -108,6 +127,8 @@ export class IssuerEudiploAdapter implements IssuerAdapter {
   private keyChains?: KeyChains;
   private version?: { version?: string; revision?: string };
   private method?: 'csr' | 'generated';
+  /** The configurations `setUp` created. */
+  private configurations = new Set<string>();
   private capabilities: EudiploCapabilities = { csr: false, statusCheckMode: false };
 
   constructor(private readonly options: IssuerEudiploAdapterOptions = {}) {
@@ -207,13 +228,15 @@ export class IssuerEudiploAdapter implements IssuerAdapter {
       (await this.call<{ id: string }>('POST', '/api/key-chain', { usageType, type: 'standalone', description })).id;
     const csrOf = async (id: string) => (await this.call<{ csr: string }>('GET', `/api/key-chain/${id}/csr`)).csr;
     this.keyChains = {
-      attestation: await create('attestation', 'PID signer, certified by the Test Registrar under PP-T'),
+      attestation: await create('attestation', 'PID signer (SD-JWT VC), certified by the Test Registrar under PP-T'),
+      mdocAttestation: await create('attestation', 'PID document signer (mdoc), certified by the Test Registrar under PP-T'),
       statusList: await create('statusList', 'Status list signer, certified by the Test Registrar under PP-T'),
       access: await create('access', 'Access certificate from AC-A'),
     };
     this.method = 'csr';
     return {
-      credentialSigning: [await csrOf(this.keyChains.attestation)],
+      credentialSigning: [await csrOf(this.keyChains.attestation), await csrOf(this.keyChains.mdocAttestation as string)],
+      credentialSigningProfiles: ['sd-jwt-vc', 'mdoc'],
       statusListSigning: await csrOf(this.keyChains.statusList as string),
       access: await csrOf(this.keyChains.access),
     };
@@ -242,15 +265,20 @@ export class IssuerEudiploAdapter implements IssuerAdapter {
       await this.createTenant(namespace);
       this.method = 'generated';
     }
-    const [signer] = env.credentialSigningCertificates;
-    if (!signer) throw new Error('no credential signing certificate from the Test Registrar');
+    const profiles = env.credentialSigningProfiles ?? env.credentialSigningCertificates.map(() => 'sd-jwt-vc' as const);
+    const signer = env.credentialSigningCertificates[profiles.indexOf('sd-jwt-vc')];
+    const documentSigner = profiles.includes('mdoc') ? env.credentialSigningCertificates[profiles.indexOf('mdoc')] : undefined;
+    if (!signer) throw new Error('no credential signing certificate for SD-JWT VC from the Test Registrar');
     const enrolled = this.keyChains;
     const attestation = await this.keyChain('attestation', signer, 'PID signer under PP-T, from the Test Registrar', enrolled?.attestation);
+    const mdocAttestation = documentSigner
+      ? await this.keyChain('attestation', documentSigner, 'PID document signer under PP-T, from the Test Registrar', enrolled?.mdocAttestation)
+      : undefined;
     const statusList = env.statusListSigningCertificate
       ? await this.keyChain('statusList', env.statusListSigningCertificate, 'Status list signer under PP-T, from the Test Registrar', enrolled?.statusList)
       : undefined;
     const access = await this.keyChain('access', env.accessCertificate, 'Access certificate from AC-A, from the Test Registrar', enrolled?.access);
-    this.keyChains = { attestation, statusList, access };
+    this.keyChains = { attestation, ...(mdocAttestation ? { mdocAttestation } : {}), statusList, access };
 
     // Status lists: 2 bits per entry (suspension), at least 10 000 entries (ICS-16, decision 4), the shortest token
     // lifetime EUDIPLO accepts, re-signed on every change. Without a status list key chain EUDIPLO signs with the
@@ -267,21 +295,45 @@ export class IssuerEudiploAdapter implements IssuerAdapter {
       key_storage: icsList(env.ics, 'ICS-04.key_storage', ['iso_18045_high']),
       user_authentication: icsList(env.ics, 'ICS-04.user_authentication', ['iso_18045_high']),
     };
-    await this.call('POST', '/api/issuer/credentials', {
-      id: PID_SD_JWT_CONFIGURATION,
-      description: 'PID in SD-JWT VC format (PID Rulebook), default_configuration_PP_1',
-      config: {
-        format: 'dc+sd-jwt',
-        display: [{ name: 'PID', locale: 'en-US', description: 'Person identification data of the conformance test subject' }],
-        keyAttestationsRequired,
-      },
-      vct: PID_VCT,
-      keyBinding: true,
-      statusManagement: true,
-      keyChainId: attestation,
-      lifeTime: PID_LIFETIME_SECONDS,
-      fields: PID_FIELDS,
-    });
+    this.configurations.clear();
+    const display = (name: string) => [{ name, locale: 'en-US', description: 'Person identification data of the conformance test subject' }];
+    const sdJwt = async (id: string, short: boolean) => {
+      await this.call('POST', '/api/issuer/credentials', {
+        id,
+        description: `PID in SD-JWT VC format (PID Rulebook), default_configuration_PP_1${short ? ', short-lived without status reference' : ''}`,
+        config: { format: 'dc+sd-jwt', display: display(short ? 'PID (short-lived)' : 'PID'), keyAttestationsRequired },
+        vct: PID_VCT,
+        keyBinding: true,
+        statusManagement: !short,
+        keyChainId: attestation,
+        lifeTime: short ? PID_SHORT_LIFETIME_SECONDS : PID_LIFETIME_SECONDS,
+        fields: [...PID_FIELDS, ...PID_SD_JWT_EXTRA_FIELDS],
+      });
+      this.configurations.add(id);
+    };
+    // The PID in mdoc format (ICS-02.MD), signed by the document signer: EUDIPLO signs an mdoc with the key chain of
+    // its configuration and puts the claims of a field's namespace in that namespace.
+    const mdoc = async (id: string, short: boolean) => {
+      await this.call('POST', '/api/issuer/credentials', {
+        id,
+        description: `PID in mdoc format (PID Rulebook), default_configuration_PP_1${short ? ', short-lived without status reference' : ''}`,
+        config: { format: 'mso_mdoc', docType: PID_DOCTYPE, display: display(short ? 'PID mdoc (short-lived)' : 'PID mdoc'), keyAttestationsRequired },
+        keyBinding: true,
+        statusManagement: !short,
+        keyChainId: mdocAttestation,
+        lifeTime: short ? PID_SHORT_LIFETIME_SECONDS : PID_LIFETIME_SECONDS,
+        fields: PID_MDOC_FIELDS,
+      });
+      this.configurations.add(id);
+    };
+    const short = env.ics.profiles.includes('P-SHORT');
+    await sdJwt(PID_SD_JWT_CONFIGURATION, false);
+    if (short) await sdJwt(PID_SD_JWT_SHORT_CONFIGURATION, true);
+    if (env.ics.profiles.includes('P-MD')) {
+      if (!mdocAttestation) throw new Error('the ICS declares mdoc (P-MD), but the Test Registrar issued no document signer');
+      await mdoc(PID_MDOC_CONFIGURATION, false);
+      if (short) await mdoc(PID_MDOC_SHORT_CONFIGURATION, true);
+    }
 
     const tlWp = env.trustLists.find((list) => list.id === 'TL-WP');
     if (!tlWp) throw new Error('TL-WP is not published');
@@ -346,16 +398,18 @@ export class IssuerEudiploAdapter implements IssuerAdapter {
     if (req.grant !== 'pre-authorized_code') {
       throw new Error('the ICS declares no authorization code grant (P-AC): EUDIPLO built-in authorization server has no login to script');
     }
-    const claims = PID_SUBJECTS[req.subject];
-    const unknown = req.configurations.filter((id) => id !== PID_SD_JWT_CONFIGURATION);
+    if (req.portraitOptOut) throw new Error('the ICS declares no portrait opt-out (ICS-17.portrait_opt_out): the PID configurations have no portrait');
+    const unknown = req.configurations.filter((id) => !this.configurations.has(id));
     if (unknown.length) throw new Error(`the adapter configures no credential configuration ${unknown.join(', ')}`);
+    // The subject's claims in the names of each configuration's format, with the ages and dates derived at issuance.
+    const claimsOf = (id: string) => pidClaimsFor(req.subject, PID_CONFIGURATIONS[id].format, PID_CONFIGURATIONS[id].lifetime);
     const txCode = req.txCode ? String(randomInt(0, 1_000_000)).padStart(6, '0') : undefined;
     const offer = await this.call<{ uri: string; session: string }>('POST', '/api/issuer/offer', {
       response_type: 'uri',
       flow: 'pre_authorized_code',
       authorization_server: BUILT_IN_AS,
       credentialConfigurationIds: req.configurations,
-      credentialClaims: Object.fromEntries(req.configurations.map((id) => [id, { type: 'inline', claims }])),
+      credentialClaims: Object.fromEntries(req.configurations.map((id) => [id, { type: 'inline', claims: claimsOf(id) }])),
       ...(txCode ? { tx_code: txCode, tx_code_description: 'Transaction code of the conformance test' } : {}),
       reference: `${req.subject}`,
     });
@@ -423,6 +477,7 @@ export class IssuerEudiploAdapter implements IssuerAdapter {
     this.token = undefined;
     this.keyChains = undefined;
     this.method = undefined;
+    this.configurations.clear();
   }
 }
 

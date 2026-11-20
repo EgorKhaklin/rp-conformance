@@ -9,6 +9,13 @@
 #     ...
 #   reference: EUDIPLO/eudiplo#<n>
 #
-# Remove an entry once EUDIPLO fixes it; the run names a known finding whose test case passed. The one executable test
-# case, PP_WS_IA_MainInteraction_001 [SD+PA], passes, so the list is empty. The README lists the FAILs expected against 9.1.0.
-[]
+# Remove an entry once EUDIPLO fixes it; the run names a known finding whose test case passed. The README lists the FAILs
+# expected against 9.1.0. Entries not yet reported upstream name the issue text prepared in upstream-findings/.
+
+# SM_Validity and DM_* (issue 21). Upstream issue text: upstream-findings/mdoc-full-date.md
+- testCase: PP_WS_DM_PidMdoc_002
+  variants: [MD+PA, MD+AC]
+  finding: >-
+    EUDIPLO issues the mdoc PID's birth_date, issuance_date and expiry_date as CBOR text strings, not as full-date
+    (tag 1004) or tdate (tag 0) as the PID Rulebook section 4.2 requires: its claim field types have no date type
+  reference: adapters/issuer-eudiplo/upstream-findings/mdoc-full-date.md (not yet reported upstream)

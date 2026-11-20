@@ -11,15 +11,26 @@ One tenant per namespace, as the RP adapter does (`adapters/eudiplo`):
 | Hook | EUDIPLO calls |
 | --- | --- |
 | `enrol(namespace)` | Where the instance has `GET /api/key-chain/{id}/csr`: creates the tenant and three standalone key chains (`attestation`, `statusList`, `access`) and returns their CSRs. **9.1.0 has no CSR endpoint** (`GET /api/key-chain/{id}/csr` answers `404 Cannot GET`; added after 9.1.0 by EUDIPLO/eudiplo#1397), so on 9.1.0 it returns `undefined` and the Test Registrar generates the keys. |
-| `setUp(env, namespace)` | Tenant with the roles `issuance:manage` and `issuance:offer` (a tenant left from an earlier run is replaced). Key chains: the CSR key chains get the Registrar's certificates (`PUT /api/key-chain/{id}` `activeCertificate`), or the Registrar's keys are imported with their chains (`POST /api/key-chain/import`): credential signer under `PP-T`, status list signer under the revocation anchor of `PP-T`, access certificate from `AC-A`. Status list settings (`PUT /api/status-list-config`): 2 bits, 10 000 entries, `ttl` 60 s, `immediateUpdate`. The PID configuration `pid-sd-jwt-vc` (`dc+sd-jwt`, `vct` `urn:eudi:pid:1`, `keyBinding`, `statusManagement`, `keyAttestationsRequired` with the ICS levels, 30 days). The issuance configuration: built-in authorization server, `walletAttestationRequired`, `walletProviderTrustLists` = the harness's `TL-WP` pinned to its scheme operator certificate, `batchSize` from the ICS, DPoP, notification endpoint, the Registrar's registration certificate in `issuer_info`, and `walletAttestationStatusCheckMode` `strict` where the instance knows it (not 9.1.0). |
-| `createOffer` | `POST /api/issuer/offer`, pre-authorized code at the built-in authorization server, the subject's claims inline (`credentialClaims`), optionally a 6-digit `tx_code` (`txCode: true`). EUDIPLO offers by reference only; for `byReference: false` the adapter resolves the reference (once, it is single-use) and hands out `credential_offer` by value. |
+| `setUp(env, namespace)` | Tenant with the roles `issuance:manage` and `issuance:offer` (a tenant left from an earlier run is replaced). Key chains: the CSR key chains get the Registrar's certificates (`PUT /api/key-chain/{id}` `activeCertificate`), or the Registrar's keys are imported with their chains (`POST /api/key-chain/import`): credential signer under `PP-T`, status list signer under the revocation anchor of `PP-T`, access certificate from `AC-A`. Status list settings (`PUT /api/status-list-config`): 2 bits, 10 000 entries, `ttl` 60 s, `immediateUpdate`. The PID configuration `pid-sd-jwt-vc` (`dc+sd-jwt`, `vct` `urn:eudi:pid:1`, `keyBinding`, `statusManagement`, `keyAttestationsRequired` with the ICS levels, 30 days); with `P-MD` the PID in mdoc `pid-mso-mdoc` (`mso_mdoc`, docType and namespace `eu.europa.ec.eudi.pid.1`, signed by the document signer the Registrar issued); with `P-SHORT` the short-lived `pid-sd-jwt-vc-short` and `pid-mso-mdoc-short` (12 hours, no status reference). The issuance configuration: built-in authorization server, `walletAttestationRequired`, `walletProviderTrustLists` = the harness's `TL-WP` pinned to its scheme operator certificate, `batchSize` from the ICS, DPoP, notification endpoint, the Registrar's registration certificate in `issuer_info`, and `walletAttestationStatusCheckMode` `strict` where the instance knows it (not 9.1.0). |
+| `createOffer` | `POST /api/issuer/offer`, pre-authorized code at the built-in authorization server, the subject's claims inline (`credentialClaims`) in the names of each configuration's format, with the age attributes and the issuance and expiry dates derived at issuance (`pidClaimsFor`), optionally a 6-digit `tx_code` (`txCode: true`). EUDIPLO offers by reference only; for `byReference: false` the adapter resolves the reference (once, it is single-use) and hands out `credential_offer` by value. |
 | `setStatus` | `POST /api/session/revoke` (`0` valid, `1` revoked, `2` suspended), then `GET /api/session/{id}/credential-status` must show the new status for every credential of the session. |
 | `refreshTrust` | `DELETE /api/cache/trust-list` |
 | `describe` | URL, version and revision (`GET /api/version`), tenant, enrolment method, whether the strict status check could be set |
 | `tearDown` | `DELETE /api/tenant/{id}` |
 
-The values the adapter seeds for `SUBJ-1` and `SUBJ-2` are in [`src/subjects.ts`](src/subjects.ts) (`PID_SUBJECTS`):
-the Conformance Wallet compares the issued claims with them.
+The values the adapter seeds for `SUBJ-1` and `SUBJ-2` are the suite's (`PID_TEST_SUBJECTS` of `@rp-conformance/core`),
+in [`src/subjects.ts`](src/subjects.ts) (`PID_SUBJECTS`, `pidClaimsFor`): the Conformance Wallet compares the issued
+claims with them (`pid-values`).
+
+With CSR enrolment the adapter creates two attestation key chains, one for SD-JWT VC and one for the mdoc document
+signer, and names their profiles in the enrolment request (`credentialSigningProfiles`); the Registrar certifies the
+second in the document signer profile of ISO/IEC 18013-5 Annex B.
+
+EUDIPLO's claim field types are JSON types; it has no date type for mdoc, so the mdoc PID carries `birth_date`,
+`issuance_date` and `expiry_date` as text strings instead of `full-date` (tag 1004): `PP_WS_DM_PidMdoc_002` is a known
+finding, with the issue text in [`upstream-findings/mdoc-full-date.md`](upstream-findings/mdoc-full-date.md). The
+portrait opt-out (`DM_Portrait_001`) is not offered: the PID configurations have no portrait, and inline JSON claims
+cannot carry the empty byte string an mdoc needs (`ICS-17.portrait_opt_out` No).
 
 Where a field of a later EUDIPLO release is not known to the instance under test, EUDIPLO's schema validation rejects
 it with `unrecognized_keys`; the adapter then leaves the field out and repeats the call, so the same adapter runs

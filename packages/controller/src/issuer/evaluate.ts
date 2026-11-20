@@ -27,6 +27,8 @@ export interface IssuanceObservation {
   /** The Provider issued an access token in the step. */
   tokenIssued: boolean;
   credentials: ObservedCredential[];
+  /** Checks over all credentials of the step, for example `pid-formats`. */
+  stepChecks?: CheckResult[];
   /** Why the flow stopped before a credential arrived, as the issuance client reports it. */
   error?: string;
 }
@@ -87,12 +89,49 @@ export function evaluateRejected(observation: IssuanceObservation, code?: string
   return { verdict: 'PASS', reason: `rejected at ${end.step}: HTTP ${end.status}, error ${end.error}` };
 }
 
+/**
+ * `CONF` for an issuance step (issuer catalogue section 2.5, design section 6.3): the issued credentials conform to the
+ * rule, that is every check the expectation names passed on each credential that ran it, and on the step (`stepChecks`).
+ * Only the named checks decide; the other checks are recorded, and their failures are named in the reason as belonging
+ * to other test cases. Without a credential the rule cannot be checked: FAIL for a rejected request, INCONCLUSIVE when
+ * the Provider did not answer. A named check that was skipped (a check it requires failed) or ran nowhere is INCONCLUSIVE.
+ */
+export function evaluateConforms(observation: IssuanceObservation, named: string[] = []): Evaluation {
+  if (named.length === 0) return { verdict: 'INCONCLUSIVE', reason: 'CONF names no check' };
+  const failed = serverError(observation);
+  if (failed) return { verdict: 'FAIL', reason: `the Provider answered with a server error: ${describe(failed)}` };
+  if (observation.credentials.length === 0) {
+    const end = last(observation);
+    if (!end || end.status === undefined) return { verdict: 'INCONCLUSIVE', reason: `no credential to check: ${end ? describe(end) : (observation.error ?? 'no request was sent')}` };
+    return { verdict: 'FAIL', reason: `no credential was issued: ${describe(end)}${observation.error ? ` (${observation.error})` : ''}` };
+  }
+  const sets = [...observation.credentials.map((c, i) => ({ label: observation.credentials.length > 1 ? `credential ${i + 1}` : 'the credential', checks: c.checks })), { label: 'the step', checks: observation.stepChecks ?? [] }];
+  const failures: string[] = [];
+  const skipped: string[] = [];
+  const passed: string[] = [];
+  for (const check of named) {
+    const results = sets.flatMap((set) => set.checks.filter((c) => c.check === check).map((c) => ({ ...c, label: set.label })));
+    if (results.length === 0) skipped.push(`${check} was not evaluated`);
+    for (const r of results) {
+      if (r.status === 'fail') failures.push(`${check} failed on ${r.label} (${r.detail ?? 'no detail'})`);
+      else if (r.status === 'skip') skipped.push(`${check} skipped on ${r.label} (${r.detail ?? 'no detail'})`);
+      else passed.push(`${check}${r.detail ? `: ${r.detail}` : ''}`);
+    }
+  }
+  const others = [...new Set(sets.flatMap((set) => set.checks.filter((c) => c.status === 'fail' && !named.includes(c.check)).map((c) => c.check)))];
+  const note = others.length ? `; other checks failed (${others.join(', ')}), which other test cases report` : '';
+  if (failures.length) return { verdict: 'FAIL', reason: `${failures.join('; ')}${note}` };
+  if (skipped.length) return { verdict: 'INCONCLUSIVE', reason: `${skipped.join('; ')}${note}` };
+  return { verdict: 'PASS', reason: `${passed.join('; ')}${note}` };
+}
+
 /** Evaluates the codes of an issuance step; the step's verdict is the worst of them. */
 export function evaluateIssuance(expectation: IssuerExpectation, observation: IssuanceObservation): Evaluation {
   const evaluations = expectation.codes.map((code: IssuerExpectationCode): Evaluation => {
     if (code === 'ISS') return evaluateIssued(observation, expectation.checks);
     if (code === 'REJ') return evaluateRejected(observation);
     if (code.startsWith('REJ:')) return evaluateRejected(observation, code.slice('REJ:'.length));
+    if (code === 'CONF') return evaluateConforms(observation, expectation.checks);
     if (code === 'INFO') return { verdict: 'PASS', reason: 'recorded' };
     return { verdict: 'INCONCLUSIVE', reason: `expected result ${code} is not implemented for an issuance step` };
   });

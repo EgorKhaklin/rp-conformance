@@ -9,6 +9,8 @@ import { join, relative } from 'node:path';
 import {
   type CheckResult,
   controlsOf,
+  durationMs,
+  PID_TEST_SUBJECTS,
   type IssuanceAction,
   type IssuerAdapter,
   type IssuerIcs,
@@ -19,12 +21,12 @@ import {
   variantOf,
 } from '@rp-conformance/core';
 import { type HttpExchange, IssuanceClient, type IssuanceEvidence, oauthErrorOf, walletUnitOf } from '@rp-conformance/issuer-wallet';
-import { validateIssuedSdJwtVc } from '@rp-conformance/validator';
+import { comparePidFormats, type IssuedOutputOptions, validateIssuedMdoc, validateIssuedSdJwtVc } from '@rp-conformance/validator';
 import { worst } from '../evaluate';
 import { harnessInfo } from '../info';
 import { evaluateIssuance, type IssuanceObservation } from './evaluate';
 import { type IssuerHarness, PID_TRUST_RULE, startIssuerHarness } from './harness';
-import { issuerApplicability, resolveConfigurations, usesTxCode } from './ics';
+import { issuerApplicability, issuerIcsValue, resolveConfigurations, usesTxCode } from './ics';
 import { describeIssuerFinding, type IssuerKnownFinding, issuerKnownFindingOf } from './known-findings';
 import { writeIssuerJUnit, writeIssuerSummary } from './report';
 
@@ -46,8 +48,10 @@ export interface IssuedCredentialRecord {
   valid: boolean;
   /** The trusted entity the issuer matched, for example `PP-T`. */
   issuer?: string;
-  /** Issuer-signed claims with the disclosed values. */
+  /** Issuer-signed claims with the disclosed values; for an mdoc the elements by namespace. */
   claims?: Record<string, unknown>;
+  /** For an mdoc: the PID attributes of namespace `eu.europa.ec.eudi.pid.1`, for `pid-formats`. */
+  pidClaims?: Record<string, unknown>;
   checks: CheckResult[];
 }
 
@@ -70,6 +74,8 @@ export interface IssuerStepRecord {
   /** Whether the Provider issued an access token, and its type. */
   token?: { tokenType: string };
   credentials: IssuedCredentialRecord[];
+  /** Checks over all credentials of the step, for example `pid-formats` (both formats of one issuance). */
+  stepChecks?: CheckResult[];
   /** Why the flow stopped before a credential arrived. */
   error?: string;
   artifacts: string[];
@@ -320,6 +326,11 @@ async function runIssuance(
   ctx: Context,
   state: TestCaseState,
 ): Promise<void> {
+  if (action.portraitOptOut && issuerIcsValue(ctx.ics, 'ICS-17.portrait_opt_out') !== 'Yes') {
+    record.verdict = 'NOT APPLICABLE';
+    record.reason = 'the ICS declares no portrait opt-out (ICS-17.portrait_opt_out)';
+    return;
+  }
   const missing = unsupported(action);
   if (missing) {
     record.reason = missing;
@@ -332,7 +343,7 @@ async function runIssuance(
   const configurations = resolveConfigurations(action.configurations, ctx.ics);
   const txCode = usesTxCode(ctx.ics);
   const byReference = action.offerByReference ?? false;
-  const offer = await ctx.adapter.createOffer({ subject, configurations, grant: action.grant, byReference, txCode });
+  const offer = await ctx.adapter.createOffer({ subject, configurations, grant: action.grant, byReference, txCode, ...(action.portraitOptOut ? { portraitOptOut: true } : {}) });
   record.offer = { sessionId: offer.sessionId, offer: offer.offer, byReference, txCode: offer.txCode !== undefined, configurations };
 
   let client = state.clients.get(unit);
@@ -340,26 +351,59 @@ async function runIssuance(
     client = await IssuanceClient.create(walletUnitOf(ctx.harness.twp, unit), { allowInsecureUrls: true });
     state.clients.set(unit, client);
   }
-  const evidence = await client.issue({ offer: offer.offer, ...(offer.txCode !== undefined ? { txCode: offer.txCode } : {}), credentialConfigurationId: configurations[0] });
+  const evidence = await client.issue({ offer: offer.offer, ...(offer.txCode !== undefined ? { txCode: offer.txCode } : {}), credentialConfigurationIds: configurations });
   record.exchanges = evidence.exchanges;
   if (evidence.token) record.token = { tokenType: evidence.token.tokenType };
   if (evidence.error) record.error = evidence.error;
-  record.credentials = await validateCredentials(evidence, ctx);
+  const output = outputOptions(step, action, subject, ctx);
+  record.credentials = await validateCredentials(evidence, ctx, output);
+  if (output.checks.includes('pid-formats')) {
+    const sdJwt = record.credentials.find((c) => c.format === 'dc+sd-jwt');
+    const mdoc = record.credentials.find((c) => c.format === 'mso_mdoc');
+    record.stepChecks = [comparePidFormats(sdJwt?.claims, mdoc?.pidClaims)];
+  }
   for (const [i, credential] of record.credentials.entries()) await save(`credential-${i + 1}.txt`, credential.credential);
   await save('issuance.json', `${JSON.stringify({ offer: record.offer, offerObject: evidence.offer, metadata: evidence.metadata, exchanges: evidence.exchanges }, null, 2)}\n`);
 
-  const evaluation = evaluateIssuance(step.expect, observationOf(evidence, record.credentials));
+  const evaluation = evaluateIssuance(step.expect, observationOf(evidence, record.credentials, record.stepChecks));
   record.verdict = evaluation.verdict;
   record.reason = evaluation.reason;
 }
 
+/**
+ * What the output checks the step's expectation names (`checks`) compare with: the subject's data, and the validity
+ * period the ICS declares for the step's configuration (`ICS-05.validity_period`, `ICS-05.short.validity_period` for a
+ * short-lived one) within the declared timestamp precision (`ICS-16.timestamp_precision`).
+ */
+function outputOptions(step: IssuerStepDefinition, action: IssuanceAction, subject: string, ctx: Context): IssuedOutputOptions {
+  const seconds = (key: string) => {
+    const ms = durationMs(issuerIcsValue(ctx.ics, key));
+    return ms === undefined ? undefined : ms / 1000;
+  };
+  const short = action.configurations.some((c) => c.startsWith('ICS-05.short.'));
+  const declared = seconds(short ? 'ICS-05.short.validity_period' : 'ICS-05.validity_period');
+  const precision = seconds('ICS-16.timestamp_precision');
+  return {
+    checks: (step.expect.checks ?? []) as IssuedOutputOptions['checks'],
+    subject: PID_TEST_SUBJECTS[subject as keyof typeof PID_TEST_SUBJECTS],
+    ...(declared !== undefined ? { declaredValiditySeconds: declared } : {}),
+    ...(precision !== undefined ? { precisionSeconds: precision } : {}),
+    fetchTypeMetadata: async (url) => {
+      const response = await ctx.harness.fetch(url);
+      return { status: response.status, body: new Uint8Array(await response.arrayBuffer()) };
+    },
+  };
+}
+
 /** `OBS-CRED`: every credential the step received through the reference validator, with the suite's trust configuration. */
-async function validateCredentials(evidence: IssuanceEvidence, ctx: Context): Promise<IssuedCredentialRecord[]> {
+async function validateCredentials(evidence: IssuanceEvidence, ctx: Context, output?: IssuedOutputOptions): Promise<IssuedCredentialRecord[]> {
   const trust = ctx.harness.trustStore;
   if (!trust) throw new Error('the reference validator has no trust configuration (no enrolment)');
   const records: IssuedCredentialRecord[] = [];
   for (const issued of evidence.credentials) {
-    const configuration = evidence.metadata?.result.credentialIssuer.credential_configurations_supported[issued.credentialConfigurationId] as { vct?: string } | undefined;
+    const configuration = evidence.metadata?.result.credentialIssuer.credential_configurations_supported[issued.credentialConfigurationId] as
+      | { vct?: string; doctype?: string }
+      | undefined;
     const base = {
       configuration: issued.credentialConfigurationId,
       format: issued.format,
@@ -367,20 +411,44 @@ async function validateCredentials(evidence: IssuanceEvidence, ctx: Context): Pr
       proofKey: issued.proofKey.publicJwk,
       keyAttestation: issued.keyAttestation,
     };
-    if (issued.format !== 'dc+sd-jwt') {
-      records.push({ ...base, valid: false, checks: [{ check: 'format', status: 'fail', detail: `the reference validator checks dc+sd-jwt only, not ${issued.format}` }] });
-      continue;
-    }
-    const validation = await validateIssuedSdJwtVc(issued.credential, {
+    const common = {
       trust,
       trustRule: PID_TRUST_RULE,
       issuerEntity: ctx.harness.enrolment?.entity ?? 'PP-T',
-      expectedVct: configuration?.vct ? [configuration.vct] : [],
       proofKeys: [issued.proofKey.publicJwk],
       keyAttestations: [issued.keyAttestation],
       skewSeconds: ISSUER_SKEW_SECONDS,
       requireStatus: true,
       maxStatusListBytes: MAX_STATUS_LIST_BYTES,
+      ...(output ? { output } : {}),
+    };
+    if (issued.format === 'mso_mdoc') {
+      // The MSO references the Status List Token in CWT format (ISO/IEC 18013-5 second edition, Token Status List).
+      const validation = await validateIssuedMdoc(issued.credential, {
+        ...common,
+        expectedDocType: configuration?.doctype ?? '',
+        fetchStatusList: async (uri) => {
+          const response = await ctx.harness.fetch(uri, { headers: { accept: 'application/statuslist+cwt' } });
+          return { status: response.status, body: new Uint8Array(await response.arrayBuffer()), contentType: response.headers.get('content-type') };
+        },
+      });
+      records.push({
+        ...base,
+        valid: validation.valid,
+        ...(validation.issuer ? { issuer: validation.issuer } : {}),
+        ...(validation.claims ? { claims: validation.claims } : {}),
+        ...(validation.pidClaims ? { pidClaims: validation.pidClaims } : {}),
+        checks: validation.checks,
+      });
+      continue;
+    }
+    if (issued.format !== 'dc+sd-jwt') {
+      records.push({ ...base, valid: false, checks: [{ check: 'format', status: 'fail', detail: `the reference validator checks dc+sd-jwt and mso_mdoc only, not ${issued.format}` }] });
+      continue;
+    }
+    const validation = await validateIssuedSdJwtVc(issued.credential, {
+      ...common,
+      expectedVct: configuration?.vct ? [configuration.vct] : [],
       fetchStatusList: async (uri) => {
         const response = await ctx.harness.fetch(uri, { headers: { accept: 'application/statuslist+jwt' } });
         return { status: response.status, body: await response.text(), contentType: response.headers.get('content-type') };
@@ -398,7 +466,7 @@ async function validateCredentials(evidence: IssuanceEvidence, ctx: Context): Pr
 }
 
 /** What the evaluators need of the evidence: every exchange with its status and OAuth error, and the checks. */
-export function observationOf(evidence: Pick<IssuanceEvidence, 'exchanges' | 'token' | 'error'>, credentials: { checks: CheckResult[] }[]): IssuanceObservation {
+export function observationOf(evidence: Pick<IssuanceEvidence, 'exchanges' | 'token' | 'error'>, credentials: { checks: CheckResult[] }[], stepChecks?: CheckResult[]): IssuanceObservation {
   return {
     exchanges: evidence.exchanges.map((exchange) => {
       const error = exchange.response && exchange.response.status >= 400 ? oauthErrorOf(exchange.response) : undefined;
@@ -411,6 +479,7 @@ export function observationOf(evidence: Pick<IssuanceEvidence, 'exchanges' | 'to
     }),
     tokenIssued: evidence.token !== undefined,
     credentials: credentials.map((c) => ({ checks: c.checks })),
+    ...(stepChecks?.length ? { stepChecks } : {}),
     ...(evidence.error ? { error: evidence.error } : {}),
   };
 }

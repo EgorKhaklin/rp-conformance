@@ -104,3 +104,34 @@ describe('observationOf', () => {
     expect(observation.tokenIssued).toBe(true);
   });
 });
+
+describe('CONF on an issuance step', () => {
+  const named = (status: CheckResult['status'], detail = 'detail'): CheckResult => ({ check: 'pid-attributes', status, detail });
+
+  it('passes when the named check passes, and names other failures as belonging to other test cases', () => {
+    const checks = [...passing.map((c) => (c.check === 'status' ? { ...c, status: 'fail' as const } : c)), named('pass')];
+    const evaluation = evaluateIssuance({ codes: ['CONF'], text: '', checks: ['pid-attributes'] }, issued(checks));
+    expect(evaluation).toMatchObject({ verdict: 'PASS', reason: expect.stringContaining('other checks failed (status)') });
+  });
+
+  it('fails when the named check fails on a credential', () => {
+    expect(evaluateIssuance({ codes: ['CONF'], text: '', checks: ['pid-attributes'] }, issued([...passing, named('fail', 'birth_date is a text string')]))).toMatchObject({
+      verdict: 'FAIL',
+      reason: expect.stringContaining('pid-attributes failed on the credential (birth_date is a text string)'),
+    });
+  });
+
+  it('reads step checks, and is INCONCLUSIVE when the named check was skipped or ran nowhere', () => {
+    const step: IssuanceObservation = { ...issued(), stepChecks: [{ check: 'pid-formats', status: 'pass', detail: 'same values' }] };
+    expect(evaluateIssuance({ codes: ['CONF'], text: '', checks: ['pid-formats'] }, step).verdict).toBe('PASS');
+    expect(evaluateIssuance({ codes: ['CONF'], text: '', checks: ['pid-attributes'] }, issued([...passing, named('skip', 'requires disclosures')])).verdict).toBe('INCONCLUSIVE');
+    expect(evaluateIssuance({ codes: ['CONF'], text: '', checks: ['pid-unique'] }, issued()).verdict).toBe('INCONCLUSIVE');
+  });
+
+  it('fails without a credential, unless the Provider did not answer', () => {
+    expect(evaluateIssuance({ codes: ['CONF'], text: '', checks: ['pid-type'] }, rejectedAt('credential', 400, 'invalid_proof', true)).verdict).toBe('FAIL');
+    expect(evaluateIssuance({ codes: ['CONF'], text: '', checks: ['pid-type'] }, { ...rejectedAt('token', 400), exchanges: [{ step: 'token', transportError: 'ECONNREFUSED' }] }).verdict).toBe(
+      'INCONCLUSIVE',
+    );
+  });
+});

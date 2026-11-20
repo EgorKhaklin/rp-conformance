@@ -60,6 +60,8 @@ export interface IssuanceAction {
   encryption?: boolean;
   /** Request by `credential_identifier` instead of `credential_configuration_id`. */
   credentialIdentifier?: boolean;
+  /** The User opts out of the portrait (PID_03); the step applies only where the ICS declares the opt-out (ICS-17). */
+  portraitOptOut?: boolean;
 }
 
 /** An artifact of an earlier step that a `token-reuse` step sends again. */
