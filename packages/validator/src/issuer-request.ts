@@ -176,7 +176,7 @@ async function trustedUnder(x5c: string[], services: { entity: string; service: 
     if (path.ok) return `${entity} ${service.name ?? service.type}`;
     reasons.push(path.reason);
   }
-  return fail(`${what} does not chain to an anchor of TL-WP for its purpose${reasons.length ? ` (${[...new Set(reasons)].join('; ')})` : ''}`);
+  return fail(`${what} does not chain to an anchor of TL-WP${reasons.length ? ` (${[...new Set(reasons)].join('; ')})` : ''}`);
 }
 
 const seconds = (date: Date) => Math.floor(date.getTime() / 1000);
@@ -288,11 +288,10 @@ export async function validateIssuerRequest(input: IssuerRequestInput, options: 
     });
     await recorder.run('wia-signature', ['wia-format'], () => verifyAttestationSignature(wia!, 'WIA'));
     await recorder.run('wia-trust', ['wia-format'], async () => {
-      // TS3 section 3.2: the WIA's anchor is the WalletSolution/Issuance service named by its `wallet_name`.
-      const services = issuanceServices(options.walletProviders).flatMap(({ entity, services: list }) =>
-        list.filter((service) => service.name === wia!.payload.wallet_name).map((service) => ({ entity, service })),
-      );
-      if (services.length === 0) fail(`TL-WP lists no WalletSolution/Issuance service named ${String(wia!.payload.wallet_name)}`);
+      // TS3 section 2.2.1.2: the signing certificate "can be verified with a trust anchor found on the Trusted List for
+      // Wallet Providers". The anchor is bound to the Wallet Provider, not to one of its services: the mapping of
+      // `wallet_name` to a ServiceName in TS3 section 3.2 is informative (spec review 2026-11-20).
+      const services = issuanceServices(options.walletProviders).flatMap(({ entity, services: list }) => list.map((service) => ({ entity, service })));
       return trustedUnder(x5cOf(wia!, 'WIA'), services, now, 'WIA');
     });
     await recorder.run('wia-validity', ['wia-format'], () => {
@@ -336,12 +335,9 @@ export async function validateIssuerRequest(input: IssuerRequestInput, options: 
     });
     await recorder.run('ka-signature', ['ka-format'], () => verifyAttestationSignature(ka!, 'KA'));
     await recorder.run('ka-trust', ['ka-format'], async () => {
-      // TS3 section 3.2: a Wallet Provider that lists a separate WSCD service signs KAs under it, not under the service of
-      // its Wallet Solution (the one the WIA's `wallet_name` names); with a single issuance service, that one signs both.
-      const walletName = tryDecode(input.clientAttestation)?.payload.wallet_name;
-      const services = issuanceServices(options.walletProviders).flatMap(({ entity, services: list }) =>
-        list.filter((service) => list.length === 1 || service.name !== walletName).map((service) => ({ entity, service })),
-      );
+      // TS3 section 2.2.2.2: any trust anchor of the Trusted List for Wallet Providers; TS3 section 3.2 is informative and
+      // maps no KA field to a service (spec review 2026-11-20).
+      const services = issuanceServices(options.walletProviders).flatMap(({ entity, services: list }) => list.map((service) => ({ entity, service })));
       return trustedUnder(x5cOf(ka!, 'KA'), services, now, 'KA');
     });
     await recorder.run('ka-validity', ['ka-format'], () => {

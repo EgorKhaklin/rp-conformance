@@ -114,13 +114,13 @@ export async function validateGrantFlow(input: GrantFlowInput, options: GrantFlo
           requested.push(id as string);
         }
       }
+      // Section 5.1.2: "Credential Issuers MUST ignore unknown scope values in a request"; only known ones request a
+      // credential.
       if (params.scope !== undefined) {
         const scopes = new Set(Object.values(options.configurations).map((c) => c.scope).filter(Boolean));
-        const unknown = params.scope.split(' ').filter((s) => s && !scopes.has(s));
-        if (unknown.length) fail(`scope ${unknown.join(' ')} names no offered credential configuration`);
-        requested.push(params.scope);
+        requested.push(...params.scope.split(' ').filter((s) => s && scopes.has(s)));
       }
-      if (!requested.length) fail('neither authorization_details nor scope');
+      if (!requested.length) fail('neither authorization_details nor a known scope value');
       return requested.join(', ');
     });
     // RFC 9126 sections 2.2, 4 and 7.3: the request_uri the PAR returned, used once, before it expires.

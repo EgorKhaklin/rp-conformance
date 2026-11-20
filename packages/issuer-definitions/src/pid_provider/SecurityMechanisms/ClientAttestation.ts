@@ -49,9 +49,18 @@ function clientAttestation(format: FormatVariant, grant: GrantVariant): IssuerTe
     }),
     testCase(format, grant, {
       id: id('006_UF'),
-      objective: `Verify that the PID Provider rejects a WIA signed under \`WP-A\`'s KA CA, an anchor \`TL-WP\` publishes for another purpose of the same Wallet Provider, ${where}.`,
-      references: ['[ARF] Annex 2, ISSU_30a', '[TS3] section 3.2', '[ETSI TS 119 602]'],
-      steps: [faultStep(format, grant, 'wia.signer-ka-ca', invalidClient)],
+      objective: `Record how the PID Provider treats a WIA signed under \`WP-A\`'s KA CA, an anchor \`TL-WP\` publishes for another service of the same Wallet Provider, ${where}.`,
+      references: ['[ARF] Annex 2, ISSU_28, ISSU_30a', '[TS3] sections 2.2.1.2 and 3.2', '[ETSI TS 119 602]'],
+      relevancy: relevancy.specificOptional,
+      steps: [
+        faultStep(format, grant, 'wia.signer-ka-ca', {
+          codes: ['INFO'],
+          text: 'Whether the Provider rejects the WIA or issues the PID is recorded; HTTP 5xx fails. Both conform: TS3 section 2.2.1.2 requires a chain to "a trust anchor found on the Trusted List for Wallet Providers", which the KA CA of `WP-A` is.',
+        }),
+      ],
+      comments: [
+        'Informational since the spec review of 2026-11-20 (issuer catalogue section 8.3): TS3 sections 2.2.1.2 and 2.2.2.2 and ARF ISSU_28 and ISSU_30a bind the trust anchors to the Wallet Provider, not to one of its services; the mapping of TS3 section 3.2 is informative, and maps no KA field at all. Rejecting such a WIA is a stricter local policy.',
+      ],
     }),
     testCase(format, grant, {
       id: id('007_UF'),
@@ -69,14 +78,20 @@ function clientAttestation(format: FormatVariant, grant: GrantVariant): IssuerTe
     }),
     testCase(format, grant, {
       id: id('009_UF'),
-      objective: `Verify that the PID Provider rejects a PoP with a wrong \`aud\`, a stale \`iat\`, or a \`jti\` it has seen before ${where}.`,
-      references: [ACBA],
+      objective: `Verify that the PID Provider rejects a PoP with a wrong \`aud\` or a stale \`iat\` ${where}, and record whether it detects a \`jti\` it has seen before.`,
+      references: [ACBA, '[Attestation-Based Client Auth] section 12.1'],
       relevancy: relevancy.genericRequired,
       steps: [
         validStep(format, grant, { why: 'its PoP `jti` is replayed in the last step' }),
         faultStep(format, grant, 'wia-pop.aud-other', invalidClient),
         faultStep(format, grant, 'wia-pop.iat-stale', invalidClient),
-        faultStep(format, grant, 'wia-pop.jti-replayed', invalidClient),
+        faultStep(format, grant, 'wia-pop.jti-replayed', {
+          codes: ['INFO'],
+          text: 'Whether the Provider rejects the replayed PoP is recorded; HTTP 5xx fails. draft-ietf-oauth-attestation-based-client-auth-08 section 12.1: "An Authorization Server SHOULD implement measures to detect replay attacks", with a `jti` list as one RECOMMENDED option; no MUST.',
+        }),
+      ],
+      comments: [
+        'Step 4 is informational since the spec review of 2026-11-20 (issuer catalogue section 8.3): replay detection of the Client Attestation PoP is a SHOULD, and a short `iat` window (step 3) is an alternative measure. A Provider that rejects the replay is the hardened behaviour.',
       ],
     }),
     testCase(format, grant, {
@@ -120,15 +135,18 @@ function clientAttestation(format: FormatVariant, grant: GrantVariant): IssuerTe
     }),
     testCase(format, grant, {
       id: id('015'),
-      objective: `Verify that the PID Provider issues the PID in ${FORMAT_NAMES[format]} format with an expiry no later than the end of the WIA's revocation maintenance period, when that period ends in 30 days.`,
-      references: ['[ARF] Annex 2, ISSU_12c, WUA_30', '[TS3] section 2.4.1'],
-      steps: [faultStep(format, grant, 'wia.maintenance-30-days', maintenanceConf(format, 'WIA'))],
-      comments: ['PID only. The KA keeps its maintenance period of more than a year, so only the WIA bounds the expiry.'],
+      objective: `Verify that the PID Provider issues the PID in ${FORMAT_NAMES[format]} format with an expiry no later than the end of the WIA's revocation maintenance period, when that period ends in 31 days.`,
+      references: ['[ARF] Annex 2, ISSU_12c, WUA_30', '[TS3] sections 2.4.1, 2.4.2 and 2.4.3'],
+      steps: [faultStep(format, grant, 'wia.maintenance-31-days', maintenanceConf(format, 'WIA'))],
+      comments: [
+        'PID only. The KA keeps its maintenance period of more than a year, so only the WIA bounds the expiry.',
+        'An EUDI/TS3 requirement (TS3 section 2.4.3, ARF ISSU_12c), not one of OpenID4VCI. The stimulus is 31 days, the remaining period TS3 section 2.4.2 guarantees a Wallet Unit can always present ("at least 31 days in the future"); before the spec review of 2026-11-20 it was 30 days, below that guarantee, which a Provider with a 30-day PID could not meet with any validity it declares.',
+      ],
     }),
     testCase(format, grant, {
       id: id('016_UF'),
       objective: `Verify that the PID Provider rejects a WIA whose revocation maintenance period ends tomorrow, below the minimum remaining period it requires, or issues a PID that expires no later than that end.`,
-      references: ['[ARF] Annex 2, WUA_32, ISSU_12c', '[TS3] section 2.4.1'],
+      references: ['[ARF] Annex 2, ISSU_12c', '[TS3] sections 2.4.1 and 2.4.3'],
       steps: [
         faultStep(format, grant, 'wia.maintenance-tomorrow', {
           codes: ['REJ', 'CONF'],
@@ -136,6 +154,9 @@ function clientAttestation(format: FormatVariant, grant: GrantVariant): IssuerTe
           checks: ['maintenance-period'],
           text: 'Either the Provider issues no credential and no token and answers with HTTP 4xx and an OAuth error object, or it issues a PID that passes every check of `ISS` and whose `exp` is no later than the `exp` of the WIA\'s `client_status` claim (`maintenance-period`); never HTTP 5xx.',
         }),
+      ],
+      comments: [
+        'An EUDI/TS3 requirement: TS3 section 2.4.3 "The technical validity period of a PID SHALL end before the `client_status.exp` of the WIA" and ARF ISSU_12c. WUA_32 (communicating a minimum remaining period) is not the rule tested here.',
       ],
     }),
   ];

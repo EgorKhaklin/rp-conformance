@@ -2,11 +2,11 @@
 
 ## Objective
 
-Verify that the PID Provider rejects a credential request with more proofs than its `batch_size`.
+Record how the PID Provider answers a credential request with more `jwt` proofs than its `batch_size`.
 
 ## References
 
-- [OpenID4VCI] section 8.2
+- [OpenID4VCI] section 12.2.4
 
 ## Profile applicability
 
@@ -17,7 +17,7 @@ Verify that the PID Provider rejects a credential request with more proofs than 
 
 ## EUDI-wallet relevancy
 
-EUDI_generic | EUDI_required
+EUDI_generic | EUDI_optional
 
 ## Technology
 
@@ -38,8 +38,10 @@ EUDI_generic | EUDI_required
 
 ## Expected results
 
-1. The Provider issues no credential and answers with HTTP 4xx and an OAuth or OpenID4VCI error object with `error` `invalid_proof` or `invalid_credential_request`; never HTTP 5xx.
+1. Whether the Provider rejects the request (`invalid_proof` or `invalid_credential_request`) or issues the credentials is recorded; HTTP 5xx fails. OpenID4VCI 1.0 section 12.2.4 defines `batch_size` as "the maximum array size for the proofs parameter in a Credential Request", which the request exceeds, but states no rejection the Credential Issuer MUST give.
 
 ## Comments
+
+Informational since the spec review of 2026-11-20 (issuer catalogue section 8.3): `batch_size` is defined in section 12.2.4, not section 8.2, and no MUST requires the Credential Issuer to reject a larger `proofs` array. Rejecting it is the hardened behaviour; EUDIPLO enforces it for `attestation` proofs (it counts `attested_keys`), not for `jwt` proofs.
 
 Variant `SD+PA` (`P-PID`, `P-SD`, `P-PA`, `P-BATCH`) (issuer catalogue section 2.3); it applies when the Provider's ICS puts it in these profiles.

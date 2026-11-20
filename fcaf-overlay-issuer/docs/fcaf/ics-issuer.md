@@ -24,7 +24,7 @@ Items with the ID `N/A` are surrogate ICS items that select test cases through t
 | ICS-12 | Credential request and response encryption | `P-ENC` |  |
 | ICS-13 | DPoP server nonce used; nonce endpoint offered | `P-DPN` |  |
 | ICS-14 | `T_proof`, `T_skew` (each at most 5 minutes), lifetime of pre-authorized codes, `c_nonce` and access tokens | Declared values |  |
-| ICS-15 | `T_refresh` for `TL-WP` and the grace period after its `NextUpdate` | Declared values | Decides the `POLICY` expected results. |
+| ICS-15 | `T_refresh` for `TL-WP`, the grace period after its `NextUpdate`, and whether the previous `TL-WP` stays in force after a version whose seal fails (`keep`) or no list is used until a valid version arrives (`discard`) | Declared values | Decides the `POLICY` expected results. |
 | ICS-16 | Minimum number of entries per status list (herd privacy, VCR_18), at least 10 000 (decision 4); declared timestamp precision for batch issuance (ISSU_36) | Declared values |  |
 | ICS-17 | Whether the adapter seeds `SUBJ-1` and `SUBJ-2`, or the fixed test identities and their attribute values if it cannot (decision 5); whether the PID portrait opt-out is offered (PID_03) | Declared values |  |
 | ICS-18 | Policy when the WIA or KA status cannot be obtained (status list unreachable or invalid). Attestation Providers only; PID Providers reject (decision 2). | Declared values | Decides the `POLICY` expected results. |

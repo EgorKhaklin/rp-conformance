@@ -2,12 +2,12 @@
 
 ## Objective
 
-Verify that the Relying Party does not release attributes of a PID in mdoc format that were disclosed without being requested.
+Record whether the Relying Party releases attributes of a PID in mdoc format that were disclosed without being requested.
 
 ## References
 
-- [ARF] Annex 2, OIA_16
-- [OpenID4VP] section 15.4.2
+- [OpenID4VP] section 6.4
+- [GDPR] Art. 5(1)(c)
 - [CIR 2024/2982 amended] Annex II
 
 ## Profile applicability
@@ -34,11 +34,11 @@ EUDI_specific | EUDI_optional
 
 ## Expected results
 
-1. Either the Relying Party rejects the presentation (its verification result reports a failure and releases no attribute value from the presentation, and the endpoint receiving the Authorization Response does not answer with HTTP status 5xx), or it accepts the presentation and releases exactly the attributes requested in `default_query_pid`, with the issuer-signed values of `default_credential_pid`. In neither case does its verification result release `place_of_birth` or `nationality`.
+1. Whether the Relying Party rejects the presentation, or accepts it and releases `place_of_birth` or `nationality` besides the requested attributes, is recorded; HTTP 5xx fails.
 
 ## Comments
 
-OpenID4VP leaves it to the Relying Party whether to reject a presentation with claims it did not request or to ignore them; either passes, as long as the extra attributes are not released.
+Informational since the spec review of 2026-11-20 (catalogue section 8.3): OpenID4VP 1.0 section 6.4 ("Wallets MUST NOT send selectively disclosable claims that have not been selected") binds the wallet, not the Relying Party. ARF OIA_16 is about discarding unique elements and timestamps, and OpenID4VP section 15.4.2 about which claims a Verifier requests; neither says what a Relying Party does with claims it did not request. Not releasing them is the data-minimising behaviour (GDPR Art. 5(1)(c)).
 
 Whether the Relying Party retains the extra attributes cannot be observed at its interfaces; the test book item `RP_TB_001` covers retention.
 

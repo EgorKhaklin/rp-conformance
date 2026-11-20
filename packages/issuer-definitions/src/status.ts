@@ -23,7 +23,7 @@ export const STATUS_CHECK_TEXT: Record<string, string> = {
   'sl-uri': '`sl-uri` (an https URI without user information; an http URI on the loopback host stands for https in a local run)',
   'sl-anonymous': '`sl-anonymous` (HTTP 200 to a GET without `Authorization` header or cookie, no authentication challenge)',
   'sl-media-type': '`sl-media-type` (for each format the ICS declares (ICS-05), `Accept` of that media type is answered with that `Content-Type` and a token in that format)',
-  'sl-cache': '`sl-cache` (`Cache-Control` or `Expires` present; `max-age` no longer than `ttl` and not beyond `exp`, `Expires` not after `exp`, or `no-cache`/`no-store`)',
+  'sl-cache': '`sl-cache` (if `Cache-Control` or `Expires` is present: `max-age` no longer than `ttl` and not beyond `exp`, `Expires` not after `exp`, or `no-cache`/`no-store`; no header at all passes)',
   'sl-uri-privacy': '`sl-uri-privacy` (no status URI carries a query or fragment, the response sets no cookie, and the credentials share their status URIs instead of one URI per credential)',
   'sl-lifetime': '`sl-lifetime` (`iat`, `exp` and `ttl` present; `exp` after `iat` and in the future; `ttl` positive)',
   'sl-entries': '`sl-entries` (at least the minimum number of entries of ICS-16, and at least 10 000)',

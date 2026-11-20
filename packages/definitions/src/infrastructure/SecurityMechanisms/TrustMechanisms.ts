@@ -38,7 +38,7 @@ const LOTE = ['[ETSI TS 119 602]', '[ARF] Annex 2, OIA_15a, OIA_15b'];
 const TL = ['[ETSI TS 119 612] Annex A', '[ARF] Annex 2, OIA_13, OIA_15b'];
 const WAIT = 'Wait until the Relying Party has retrieved it, at most `T_refresh`.';
 const LAST_VALID =
-  'A Relying Party keeps using the last valid version of a list until its `NextUpdate` plus the grace period `G`. The new version adds an entity, so a Relying Party that used it would accept that entity\'s credential.';
+  'The new version adds an entity, so a Relying Party that used it would accept that entity\'s credential. Whether the last valid version then stays in use (until its `NextUpdate` plus the grace period `G`) is the policy the Relying Party declares in RP.T.4.';
 const CREDENTIAL_FORMAT = 'The credential format does not affect this test case; use the credentials in a format the Relying Party requests.';
 
 interface InfCase {
@@ -97,6 +97,18 @@ const pidOf = (issuer: string, expect: 'ACC' | 'REJ') =>
     expect: expect === 'ACC' ? acc() : rej(),
   });
 const validPid = () => step({ ...presentationStep.valid({ credential: pid.sdJwtVc() }), expect: acc({ credential: PID }) });
+/** The valid PID after a version of `TL-PID` that failed its seal: as the Relying Party declares in RP.T.4. */
+const validPidAfterBadSeal = () =>
+  step({
+    ...presentationStep.valid({ credential: pid.sdJwtVc() }),
+    expect: {
+      codes: ['POLICY'],
+      policy: { item: 'RP.T.4' },
+      text: 'As the Relying Party declares in RP.T.4: `Keep` accepts the presentation and releases exactly the requested attributes (the last valid version of `TL-PID` stays in use); `Discard` rejects it (no usable `TL-PID`).',
+    },
+  });
+const KEEP_OR_DISCARD =
+  'Step 3 is `POLICY` (RP.T.4) since the spec review of 2026-11-20 (catalogue section 9): ETSI TS 119 602 and the ARF require the seal of a list to be verified before it is used, but no specification requires a Relying Party to keep the last valid version, so discarding the list (fail-closed) conforms too.';
 
 const qeaaOfQpN = (expectAccepted: boolean) =>
   step({
@@ -122,17 +134,17 @@ export const definitions = [
   }),
   trustMechanisms({
     number: 2,
-    objective: 'Verify that the Relying Party does not use a version of the PID Provider list whose seal is invalid, and keeps using the last valid version.',
+    objective: 'Verify that the Relying Party does not use a version of the PID Provider list whose seal is invalid, and then acts as it declares (RP.T.4): it keeps the last valid version, or uses none.',
     references: LOTE,
-    steps: [addingPpC('trust-list.seal-bitflip'), pidOf('PP-C', 'REJ'), validPid()],
-    comments: [LAST_VALID],
+    steps: [addingPpC('trust-list.seal-bitflip'), pidOf('PP-C', 'REJ'), validPidAfterBadSeal()],
+    comments: [LAST_VALID, KEEP_OR_DISCARD],
   }),
   trustMechanisms({
     number: 3,
-    objective: 'Verify that the Relying Party does not use a version of the PID Provider list sealed by a key other than that of its scheme operator, and keeps using the last valid version.',
+    objective: 'Verify that the Relying Party does not use a version of the PID Provider list sealed by a key other than that of its scheme operator, and then acts as it declares (RP.T.4): it keeps the last valid version, or uses none.',
     references: LOTE,
-    steps: [addingPpC('trust-list.sealed-by-ca-x'), pidOf('PP-C', 'REJ'), validPid()],
-    comments: [LAST_VALID],
+    steps: [addingPpC('trust-list.sealed-by-ca-x'), pidOf('PP-C', 'REJ'), validPidAfterBadSeal()],
+    comments: [LAST_VALID, KEEP_OR_DISCARD],
   }),
   trustMechanisms({
     number: 4,
@@ -172,10 +184,22 @@ export const definitions = [
   }),
   trustMechanisms({
     number: 6,
-    objective: 'Verify that the Relying Party does not use a list of the wrong type as the PID Provider list.',
-    references: [...LOTE, '[ARF] Annex 2, OIA_15'],
-    steps: [addingPpC('trust-list.wrong-type'), pidOf('PP-C', 'REJ')],
-    comments: [LAST_VALID],
+    objective: 'Record whether the Relying Party uses a list whose `LoTEType` is not that of a PID Providers list as the PID Provider list.',
+    references: [...LOTE, '[ETSI TS 119 602] clause 6.3.3, Annexes D and E', '[ARF] Annex 2, OIA_15'],
+    steps: [
+      addingPpC('trust-list.wrong-type'),
+      step({
+        ...presentationStep.credentialVariant('it is issued by `PP-C`', { credential: pid.sdJwtVc({ issuer: 'PP-C' }) }),
+        expect: {
+          codes: ['INFO'],
+          text: 'Whether the Relying Party accepts or rejects the PID of `PP-C` is recorded; HTTP 5xx fails.',
+        },
+      }),
+    ],
+    comments: [
+      LAST_VALID,
+      'Informational since the spec review of 2026-11-20 (catalogue section 8.3). The version is itself not a conforming list of either type: its `LoTEType` is that of a Wallet Providers list (ETSI TS 119 602 Annex E, Table E.1), while it carries PID Providers with PID/Issuance services (Annex D). The `LoTEType` "permits a parser to determine the form of any following field to expect" (clause 6.3.3); no clause requires a Relying Party to refuse a list fetched from the PID list location because of it. Nor does the type alone turn the entries into PID Providers: `PP-C` carries a PID/Issuance service in either case.',
+    ],
   }),
   trustMechanisms({
     number: 8,

@@ -2,11 +2,12 @@
 
 ## Objective
 
-Verify that the Provider's status list response sets HTTP cache headers consistent with the token's `ttl` and `exp`.
+Verify that HTTP cache headers of the Provider's status list response, if it sets any, are consistent with the token's `ttl` and `exp`.
 
 ## References
 
-- [TokenStatusList] sections 8.1 and 13.7
+- [TokenStatusList] sections 8.2 and 13.7
+- [RFC 9111] section 4.2
 
 ## Profile applicability
 
@@ -41,10 +42,10 @@ EUDI_generic | EUDI_optional
 ## Expected results
 
 1. The Provider issues the credential (HTTP 200) in SD-JWT VC format (`dc+sd-jwt`). Every credential passes format, `issuer-trust` to `PP-T` on `TL-PID`, `issuer-signature`, `disclosures`, `validity`, `holder-binding` (bound to a proof key the KA attests) and `status-reference`, and the Status List Token it references passes the status list checks.
-2. A cache that follows the response headers never serves the token longer than `ttl` or past `exp`. The named checks pass: `sl-cache` (`Cache-Control` or `Expires` present; `max-age` no longer than `ttl` and not beyond `exp`, `Expires` not after `exp`, or `no-cache`/`no-store`).
+2. A cache that follows the response headers never serves the token longer than `ttl` or past `exp`; a response without caching-related headers passes. The named checks pass: `sl-cache` (if `Cache-Control` or `Expires` is present: `max-age` no longer than `ttl` and not beyond `exp`, `Expires` not after `exp`, or `no-cache`/`no-store`; no header at all passes).
 
 ## Comments
 
-EUDI_optional: Token Status List section 13.7 recommends, not requires, cache headers consistent with `ttl`.
+EUDI_optional. Token Status List has no cache-header rule for the Status Provider: section 8.2 says only that "If caching-related HTTP headers are present in the HTTP response, Relying Parties MUST prioritize the exp and ttl claims", and section 13.7 describes how Relying Parties use `ttl` and `exp`. A response without such headers therefore passes; headers that are present are checked because an HTTP cache between the Provider and a Relying Party does not read the token (spec review 2026-11-20, issuer catalogue section 8.3).
 
 Variant `SD+PA` (`P-PID`, `P-SD`, `P-PA`, `P-REV`) (issuer catalogue section 2.3); it applies when the Provider's ICS puts it in these profiles.

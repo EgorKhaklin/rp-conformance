@@ -2,12 +2,13 @@
 
 ## Objective
 
-Verify that the Relying Party does not use a list of the wrong type as the PID Provider list.
+Record whether the Relying Party uses a list whose `LoTEType` is not that of a PID Providers list as the PID Provider list.
 
 ## References
 
 - [ETSI TS 119 602]
 - [ARF] Annex 2, OIA_15a, OIA_15b
+- [ETSI TS 119 602] clause 6.3.3, Annexes D and E
 - [ARF] Annex 2, OIA_15
 
 ## Profile applicability
@@ -32,11 +33,13 @@ EUDI_specific | EUDI_required
 ## Expected results
 
 1. The Test Trust Infrastructure logs a retrieval of the new version of `TL-PID` by the Relying Party.
-2. The Relying Party rejects the presentation: its verification result reports a failure and releases no attribute value from the presentation, and the endpoint receiving the Authorization Response does not answer with HTTP status 5xx.
+2. Whether the Relying Party accepts or rejects the PID of `PP-C` is recorded; HTTP 5xx fails.
 
 ## Comments
 
-A Relying Party keeps using the last valid version of a list until its `NextUpdate` plus the grace period `G`. The new version adds an entity, so a Relying Party that used it would accept that entity's credential.
+The new version adds an entity, so a Relying Party that used it would accept that entity's credential. Whether the last valid version then stays in use (until its `NextUpdate` plus the grace period `G`) is the policy the Relying Party declares in RP.T.4.
+
+Informational since the spec review of 2026-11-20 (catalogue section 8.3). The version is itself not a conforming list of either type: its `LoTEType` is that of a Wallet Providers list (ETSI TS 119 602 Annex E, Table E.1), while it carries PID Providers with PID/Issuance services (Annex D). The `LoTEType` "permits a parser to determine the form of any following field to expect" (clause 6.3.3); no clause requires a Relying Party to refuse a list fetched from the PID list location because of it. Nor does the type alone turn the entries into PID Providers: `PP-C` carries a PID/Issuance service in either case.
 
 Restore the previous version of `TL-PID` after the test case.
 

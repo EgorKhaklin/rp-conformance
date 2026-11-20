@@ -34,7 +34,7 @@ EUDI_generic | EUDI_required
 
 ## Expected results
 
-1. The request uses the protocol `openid4vp-v1-signed` or `openid4vp-v1-multisigned`, carries `response_mode` `dc_api.jwt` and `expected_origins`, and carries no `response_uri`.
+1. The request uses the protocol `openid4vp-v1-signed` or `openid4vp-v1-multisigned`, and carries `response_mode` `dc_api.jwt` and `expected_origins`. A `response_uri` is recorded in the check detail, not failed: OpenID4VP 1.0 Appendix A.2 allows additional parameters, which the Wallet MUST ignore (spec review 2026-11-20, catalogue section 8.3).
 
 ## Comments
 

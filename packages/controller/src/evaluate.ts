@@ -19,8 +19,11 @@ export interface Evaluation {
 /** Technical claims of an SD-JWT VC that are not attributes of the subject (RFC 7519, SD-JWT VC, Token Status List). */
 const TECHNICAL_CLAIMS = new Set(['iss', 'sub', 'iat', 'nbf', 'exp', 'jti', 'vct', 'vct#integrity', 'cnf', 'status', '_sd', '_sd_alg']);
 
+// An empty object is a value of its own, not nothing: an RP that releases an mdoc CBOR map as `{}` must show up as a
+// wrong or extra attribute, not vanish (RP_WS_DM_IdentifyingData_001b, spec review 2026-11-20).
 const flatten = (value: unknown, prefix = ''): Record<string, unknown> => {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) return prefix ? { [prefix]: value } : {};
+  if (prefix && Object.keys(value as Record<string, unknown>).length === 0) return { [prefix]: value };
   return Object.fromEntries(
     Object.entries(value as Record<string, unknown>).flatMap(([k, v]) => Object.entries(flatten(v, prefix ? `${prefix}.${k}` : k))),
   );
@@ -28,7 +31,10 @@ const flatten = (value: unknown, prefix = ''): Record<string, unknown> => {
 
 /**
  * `ACC` (harness design section 5): the verification result reports success and releases exactly the requested
- * attributes with the values of the presented credential. Technical claims an RP passes along are not attributes.
+ * attributes with the values of the presented credential. Technical claims an RP passes along are not attributes, and
+ * neither are claims the credential discloses with every presentation (`alwaysDisclosed`, the plain claims of an
+ * SD-JWT VC's issuer-signed JWT): the wallet cannot withhold them (OpenID4VP 1.0 section 6.4), so an RP that passes
+ * one along is not judged on it (RP_WS_DM_IdentifyingData_007a, spec review 2026-11-20).
  */
 export function evaluateAccept(
   result: RelyingPartyResult,
@@ -36,13 +42,16 @@ export function evaluateAccept(
   issuedClaims: Record<string, unknown>,
   responseStatus: number | undefined,
   delivered = responseStatus !== undefined,
+  alwaysDisclosed: readonly string[] = [],
 ): Evaluation {
   if (!delivered) return { verdict: 'FAIL', reason: 'the Authorization Response was not delivered' };
   if (responseStatus !== undefined && responseStatus >= 400) return { verdict: 'FAIL', reason: `the Relying Party answered the Authorization Response with HTTP ${responseStatus}` };
   if (result.outcome !== 'success') return { verdict: 'FAIL', reason: `verification result is ${result.outcome}` };
   const requested = query.credentials.flatMap((c) => (c.claims ?? []).map((claim) => claim.path.map(String)));
+  const requestedTop = new Set(requested.map((path) => path[0]));
+  const plain = new Set(alwaysDisclosed.filter((claim) => !requestedTop.has(claim)));
   const released = Object.fromEntries(
-    Object.entries(flatten(result.releasedAttributes ?? {})).filter(([key]) => !TECHNICAL_CLAIMS.has(key.split('.')[0])),
+    Object.entries(flatten(result.releasedAttributes ?? {})).filter(([key]) => !TECHNICAL_CLAIMS.has(key.split('.')[0]) && !plain.has(key.split('.')[0])),
   );
   const expected: Record<string, unknown> = {};
   for (const path of requested) {
@@ -92,7 +101,7 @@ export function evaluateRejectOrAccept(args: EvaluationInput): Evaluation {
   const rejected = args.result.outcome === 'failure' || (args.responseStatus !== undefined && args.responseStatus >= 400 && args.responseStatus < 500);
   return rejected
     ? withPrefix('rejected', evaluateReject(args.result, args.responseStatus, args.delivered))
-    : withPrefix('not rejected', evaluateAccept(args.result, args.query, args.issuedClaims, args.responseStatus, args.delivered));
+    : withPrefix('not rejected', evaluateAccept(args.result, args.query, args.issuedClaims, args.responseStatus, args.delivered, args.alwaysDisclosed));
 }
 
 /**
@@ -104,7 +113,7 @@ export function evaluateNoStatus(args: EvaluationInput): Evaluation {
   const policy = icsAnswer(args.ics, 'RP.R.2') ?? '';
   if (/^reject/i.test(policy)) return withPrefix(`RP.R.2 ${policy}`, evaluateReject(args.result, args.responseStatus, args.delivered));
   if (/^accept/i.test(policy)) {
-    const accepted = evaluateAccept(args.result, args.query, args.issuedClaims, args.responseStatus, args.delivered);
+    const accepted = evaluateAccept(args.result, args.query, args.issuedClaims, args.responseStatus, args.delivered, args.alwaysDisclosed);
     if (accepted.verdict !== 'PASS') return withPrefix(`RP.R.2 ${policy}`, accepted);
     if (!args.result.flags?.includes('status-unknown')) return { verdict: 'FAIL', reason: `RP.R.2 ${policy}: accepted without the flag status-unknown` };
     return { verdict: 'PASS', reason: `RP.R.2 ${policy}: accepted and flagged status-unknown` };
@@ -121,7 +130,7 @@ export function evaluatePolicy(expectation: Expectation, args: EvaluationInput):
   const meaning = statusMeanings(args.ics).get(policy.status);
   if (meaning === undefined) return withPrefix(`${policy.item} declares no meaning for ${hex}`, evaluateReject(args.result, args.responseStatus, args.delivered));
   if (meaning === 'invalid') return withPrefix(`${policy.item} declares ${hex} invalid`, evaluateReject(args.result, args.responseStatus, args.delivered));
-  if (meaning === 'valid') return withPrefix(`${policy.item} declares ${hex} valid`, evaluateAccept(args.result, args.query, args.issuedClaims, args.responseStatus, args.delivered));
+  if (meaning === 'valid') return withPrefix(`${policy.item} declares ${hex} valid`, evaluateAccept(args.result, args.query, args.issuedClaims, args.responseStatus, args.delivered, args.alwaysDisclosed));
   return { verdict: 'REVIEW', reason: `${policy.item} declares ${hex} as "${meaning}"; compare the verification result (${args.result.outcome}) by hand` };
 }
 
@@ -146,6 +155,8 @@ export interface EvaluationInput {
   result: RelyingPartyResult;
   query: DcqlQuery;
   issuedClaims: Record<string, unknown>;
+  /** Top-level claims the presented credentials disclose with every presentation (not selectively disclosable). */
+  alwaysDisclosed?: string[];
   /** HTTP status with which the Relying Party answered the Authorization Response, if the harness saw it. */
   responseStatus?: number;
   /** Whether the Authorization Response reached the Relying Party; default: a status was seen. */
@@ -158,6 +169,8 @@ export interface EvaluationInput {
   responseEndpoint?: 'response_uri' | 'dc-api-forward';
   /** The body of the answer to the Authorization Response, if the harness saw it. */
   responseBody?: string;
+  /** Via the DC API: the network error with which the page's request forwarding the response failed, if it did. */
+  forwardError?: string;
   /** The requests the Test Status Provider logged for the step's status list, with method, target and headers. */
   statusEntries?: { method: string; url: string; target?: string; headers: Record<string, string | string[] | undefined> }[];
   /** The Relying Party's identifier of the transaction. */
@@ -178,8 +191,11 @@ export function evaluate(expectation: Expectation, args: EvaluationInput): Evalu
   const evaluations = expectation.codes.map((code: ExpectationCode): Evaluation => {
     switch (code) {
       case 'ACC':
-        return evaluateAccept(args.result, args.query, args.issuedClaims, args.responseStatus, args.delivered);
+        return evaluateAccept(args.result, args.query, args.issuedClaims, args.responseStatus, args.delivered, args.alwaysDisclosed);
       case 'REJ':
+        if (expectation.forwardFailureRejects && args.responseEndpoint === 'dc-api-forward' && args.forwardError && !Object.keys(args.result.releasedAttributes ?? {}).length) {
+          return { verdict: 'PASS', reason: `rejected: the page's request forwarding the response failed (${args.forwardError}), and no attributes were released` };
+        }
         return evaluateReject(args.result, args.responseStatus, args.delivered);
       case 'REJ_OR_ACC':
         return evaluateRejectOrAccept(args);
@@ -291,11 +307,12 @@ export function evaluateStatusRequest(args: EvaluationInput): Evaluation {
  * `POLICY` against the ICS items of issue 32: `RP.R.7`, the maximum age of a Status List Token (a token at least that
  * old gives no reliable status, `NOSTAT`; `None` or a longer age accepts); `RP.R.8`, whether a token issued in the future
  * is refused (`Yes`: `NOSTAT`, `No`: accepted); `RP.P.12`, a PID whose administrative expiry date has passed (`Reject`
- * or `Accept`).
+ * or `Accept`); `RP.T.4`, a trust list whose new version failed its seal (`Keep` the last valid version: accepted,
+ * `Discard`: rejected).
  */
 export function evaluateDeclaredPolicy(policy: Exclude<PolicyReference, { item: 'RP.R.3' }>, args: EvaluationInput): Evaluation {
   const declared = String(icsAnswer(args.ics, policy.item) ?? '').trim();
-  const accept = (why: string) => withPrefix(`${policy.item} ${why}`, evaluateAccept(args.result, args.query, args.issuedClaims, args.responseStatus, args.delivered));
+  const accept = (why: string) => withPrefix(`${policy.item} ${why}`, evaluateAccept(args.result, args.query, args.issuedClaims, args.responseStatus, args.delivered, args.alwaysDisclosed));
   const refuse = (why: string) => withPrefix(`${policy.item} ${why}`, evaluateNoStatus(args));
   const undeclared = (): Evaluation => ({ verdict: 'INCONCLUSIVE', reason: `${policy.item} is not declared (${declared || 'missing'})` });
   switch (policy.item) {
@@ -312,6 +329,13 @@ export function evaluateDeclaredPolicy(policy: Exclude<PolicyReference, { item: 
     case 'RP.P.12':
       if (/^reject/i.test(declared)) return withPrefix(`${policy.item} ${declared}`, evaluateReject(args.result, args.responseStatus, args.delivered));
       if (/^accept/i.test(declared)) return accept(declared);
+      return undeclared();
+    case 'RP.T.4':
+      // Keep: the last valid version stays in force, the presentation is accepted. Discard: the list is unusable and a
+      // presentation that depends on it is rejected (fail-closed). No specification prescribes either (spec review
+      // 2026-11-20).
+      if (/^keep/i.test(declared)) return accept(declared);
+      if (/^discard/i.test(declared)) return withPrefix(`${policy.item} ${declared}`, evaluateReject(args.result, args.responseStatus, args.delivered));
       return undeclared();
   }
 }

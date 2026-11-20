@@ -46,8 +46,10 @@ export const ISSUER_FAULTS = {
   'wia.signer-pp-a': wia('wia-trust', "its WIA is signed by a certificate under `PP-A`'s issuance CA in `TL-PID`", `${CA}_004_UF`),
   'wia.signer-ac-a': wia('wia-trust', 'its WIA is signed by a certificate under the anchor of `AC-A` in `TL-AC`', `${CA}_004_UF`),
   'wia.signer-wp-w': wia('wia-trust', 'its WIA is signed by a certificate under the issuance anchor of the withdrawn Wallet Provider `WP-W`', `${CA}_005_UF`),
+  // Not a fault since the spec review of 2026-11-20: TS3 sections 2.2.1.2 and 2.2.2.2 bind the anchor to the Trusted
+  // List for Wallet Providers, not to one service of the Wallet Provider; `null`, the catalogue expects `INFO`.
   'wia.signer-ka-ca': wia(
-    'wia-trust',
+    null,
     "its WIA is signed by a certificate under `WP-A`'s KA CA, the anchor `TL-WP` lists for `WP-A`'s key attestations (ServiceName `WP-A WSCD`), not for its Wallet Solution",
     `${CA}_006_UF`,
   ),
@@ -57,7 +59,7 @@ export const ISSUER_FAULTS = {
   'wia.es256k': wia('wia-signature', "its WIA is signed with `ES256K` by a key on curve secp256k1, whose certificate is issued under `WP-A`'s WIA anchor and carried in `x5c`", `${CA}_014_UF`),
   'wia.hs256': wia('wia-signature', 'its WIA is protected with `HS256`, keyed with the PEM encoding of the public key of the signing certificate in its `x5c` header', `${CA}_014_UF`),
   'wia.sub-other': wia('wia-client-id', 'the `sub` claim of its WIA is `other-wallet-unit`, while the token request and the PoP carry the `client_id` of the Wallet Unit', `${CA}_010_UF`),
-  'wia.maintenance-30-days': wia(null, 'the `exp` member of the `client_status` claim of its WIA, the end of the revocation maintenance period, is 30 days from now', `${CA}_015`),
+  'wia.maintenance-31-days': wia(null, 'the `exp` member of the `client_status` claim of its WIA, the end of the revocation maintenance period, is 31 days from now (the minimum TS3 section 2.4.2 guarantees a Wallet Unit can present)', `${CA}_015`),
   'wia.maintenance-tomorrow': wia(null, 'the `exp` member of the `client_status` claim of its WIA, the end of the revocation maintenance period, is one day from now', `${CA}_016_UF`),
   'wia.ca-x-status-uri': wia(
     'wia-trust',
@@ -90,7 +92,7 @@ export const ISSUER_FAULTS = {
   'ka.signer-pp-a': ka('ka-trust', "its KA is signed by a certificate under `PP-A`'s issuance CA in `TL-PID`", `${KA}_004_UF`),
   'ka.signer-wp-w': ka('ka-trust', 'its KA is signed by a certificate under the issuance anchor of the withdrawn Wallet Provider `WP-W`', `${KA}_004_UF`),
   'ka.signer-wia-ca': ka(
-    'ka-trust',
+    null,
     "its KA is signed by a certificate under `WP-A`'s WIA CA, the anchor `TL-WP` lists for `WP-A`'s Wallet Solution (ServiceName `WP-A Wallet`), not for its key attestations",
     `${KA}_004_UF`,
   ),
@@ -109,7 +111,7 @@ export const ISSUER_FAULTS = {
   'ka.user-authentication-moderate': ka('ka-levels', 'the `user_authentication` claim of its KA is `["iso_18045_moderate"]`', `${KA}_010_UF`),
   'ka.user-authentication-basic': ka('ka-levels', 'the `user_authentication` claim of its KA is `["iso_18045_basic"]`', `${KA}_010_UF`),
   'ka.user-authentication-absent': ka('ka-levels', 'its KA carries no `user_authentication` claim', `${KA}_010_UF`),
-  'ka.maintenance-30-days': ka(null, 'the `exp` member of the `key_storage_status` claim of its KA, the end of the revocation maintenance period, is 30 days from now', `${KA}_011`),
+  'ka.maintenance-31-days': ka(null, 'the `exp` member of the `key_storage_status` claim of its KA, the end of the revocation maintenance period, is 31 days from now (the minimum TS3 section 2.4.2 guarantees a Wallet Unit can present)', `${KA}_011`),
   'ka.typ-jwt': ka('ka-format', 'the `typ` header of its KA is `JWT`', `${KA}_012_UF`),
   'ka.es256k': ka('ka-signature', "its KA is signed with `ES256K` by a key on curve secp256k1, whose certificate is issued under `WP-A`'s KA anchor and carried in `x5c`", `${KA}_012_UF`),
   'ka.other-unit': ka(
@@ -217,7 +219,7 @@ export const ISSUER_REQUEST_STIMULI: IssuerStimulus[] = [
   { testCase: `${CA}_013_UF`, stimulus: "Each TSP mutation of the RP catalogue's `RP_PP_SM_Revocation`", faults: [], leftOut: STATUS_LIST },
   { testCase: `${CA}_014_UF`, stimulus: 'ES256K', faults: ['wia.es256k'] },
   { testCase: `${CA}_014_UF`, stimulus: 'HS256', faults: ['wia.hs256'] },
-  { testCase: `${CA}_015`, stimulus: 'WIA with maintenance period ending in 30 days', faults: ['wia.maintenance-30-days'] },
+  { testCase: `${CA}_015`, stimulus: 'WIA with maintenance period ending in 31 days', faults: ['wia.maintenance-31-days'] },
   { testCase: `${CA}_016_UF`, stimulus: 'Maintenance period ending tomorrow', faults: ['wia.maintenance-tomorrow'] },
 
   { testCase: `${KA}_001`, stimulus: "SCN-I; KA in the proof's `key_attestation` header", faults: [], leftOut: VALID },
@@ -244,7 +246,7 @@ export const ISSUER_REQUEST_STIMULI: IssuerStimulus[] = [
     stimulus: '`iso_18045_moderate`; `iso_18045_basic`; absent',
     faults: ['ka.key-storage-moderate', 'ka.key-storage-basic', 'ka.key-storage-absent', 'ka.user-authentication-moderate', 'ka.user-authentication-basic', 'ka.user-authentication-absent'],
   },
-  { testCase: `${KA}_011`, stimulus: 'KA maintenance period ending in 30 days', faults: ['ka.maintenance-30-days'] },
+  { testCase: `${KA}_011`, stimulus: 'KA maintenance period ending in 31 days', faults: ['ka.maintenance-31-days'] },
   { testCase: `${KA}_012_UF`, stimulus: '`typ` `JWT`', faults: ['ka.typ-jwt'] },
   { testCase: `${KA}_012_UF`, stimulus: 'ES256K', faults: ['ka.es256k'] },
   { testCase: `${KA}_013_UF`, stimulus: 'KA of `CW-2`, WIA of `CW-1`', faults: ['ka.other-unit'] },

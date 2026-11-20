@@ -154,9 +154,20 @@ export const definitions = [
       'Verify that the Relying Party rejects an Authorization Response larger than the maximum size it declares, without exhausting its resources, and stays available.',
     references: ['[OpenID4VP] section 8.3.1', '[HAIP] section 5', PRESENTATION],
     ...formatNeutral,
-    steps: [step({ ...responseFault('response.oversized'), expect: rej() }), stillAvailable(sdJwtVc)],
+    steps: [
+      step({
+        ...responseFault('response.oversized'),
+        expect: {
+          ...rej(),
+          forwardFailureRejects: true,
+          text: `${rej().text} Via the DC API, the Relying Party's page receiving HTTP 4xx, or its request forwarding the response failing with a network error, also counts as the rejection: the verification result need not report a failure.`,
+        },
+      }),
+      stillAvailable(sdJwtVc),
+    ],
     comments: [
       'The maximum response size is the value the Relying Party declares in its ICS (RP.P.11). The padding is a member of the encrypted payload, so a Relying Party without a size limit decrypts the response and accepts it.',
+      'Via the DC API the response reaches the Relying Party through its own page. A back end that refuses the oversized body (for example HTTP 413 from its body parser) may do so before setting CORS headers, so the page sees only a network error, and the transaction stays open. Either is a rejection; the step does not require a failed verification result (spec review 2026-11-20, catalogue section 8.3).',
       AVAILABLE,
       comments.encryptionFormat,
       comments.flow,

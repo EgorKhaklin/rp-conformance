@@ -530,7 +530,8 @@ export const FAULTS = {
   'request.nonce-short': request('nonce', 'its `nonce` is `abc123`'),
   'request.nonce-reused': request('nonce', 'it carries the `nonce` of an earlier request'),
   'request.state-short': request('state', 'its `state` is `1`', 'redirect'),
-  'request.dc-api-response-uri': request('dc-api-request', 'its request object carries a `response_uri`', 'dc-api'),
+  // Not `response_uri` since the spec review of 2026-11-20: OpenID4VP 1.0 Appendix A.2 allows additional parameters.
+  'request.dc-api-response-mode-unencrypted': request('dc-api-request', 'its request object asks for response mode `dc_api` (an unencrypted response)', 'dc-api'),
   'request.expected-origins-other': request('expected-origins', 'its `expected_origins` also names `https://other.example`', 'dc-api'),
   'request.enc-key-private': request('encryption-key', 'the encryption key in its `client_metadata` carries the private key member `d`'),
   'request.enc-values-one': request('enc-values', 'its `encrypted_response_enc_values_supported` lists only `A128GCM`'),

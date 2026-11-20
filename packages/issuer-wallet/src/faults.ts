@@ -192,7 +192,7 @@ const WIA_FAULTS: Partial<Record<IssuerFaultId, AttestationFault>> = {
   'wia.es256k': { signer: (v) => es256kUnder(v, 'wia') },
   'wia.hs256': { assemble: (p) => hs256(p, leafJwkOf(p)) },
   'wia.sub-other': { change: (p) => void (p.payload.sub = 'other-wallet-unit') },
-  'wia.maintenance-30-days': { change: (p, v) => void (statusObject(p.payload, 'client_status').exp = v.now + 30 * DAY) },
+  'wia.maintenance-31-days': { change: (p, v) => void (statusObject(p.payload, 'client_status').exp = v.now + 31 * DAY) },
   'wia.maintenance-tomorrow': { change: (p, v) => void (statusObject(p.payload, 'client_status').exp = v.now + DAY) },
   'wia.ca-x-status-uri': {
     change: (p) => void (statusList(p.payload, 'client_status').uri = tspUrl(p.payload, 'client_status', 'ca-x-wia-status')),
@@ -235,7 +235,7 @@ const KA_FAULTS: Partial<Record<IssuerFaultId, AttestationFault>> = {
   'ka.user-authentication-moderate': levels('user_authentication', ISO_18045.moderate),
   'ka.user-authentication-basic': levels('user_authentication', ISO_18045.basic),
   'ka.user-authentication-absent': levels('user_authentication', undefined),
-  'ka.maintenance-30-days': { change: (p, v) => void (statusObject(p.payload, 'key_storage_status').exp = v.now + 30 * DAY) },
+  'ka.maintenance-31-days': { change: (p, v) => void (statusObject(p.payload, 'key_storage_status').exp = v.now + 31 * DAY) },
   'ka.typ-jwt': { change: (p) => void (p.header.typ = 'JWT') },
   'ka.es256k': { signer: (v) => es256kUnder(v, 'ka') },
   'ka.ca-x-status-uri': {

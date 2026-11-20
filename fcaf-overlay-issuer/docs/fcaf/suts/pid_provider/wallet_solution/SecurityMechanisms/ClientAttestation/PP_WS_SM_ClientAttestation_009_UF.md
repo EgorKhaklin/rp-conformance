@@ -2,11 +2,12 @@
 
 ## Objective
 
-Verify that the PID Provider rejects a PoP with a wrong `aud`, a stale `iat`, or a `jti` it has seen before at the token endpoint in the pre-authorized code flow.
+Verify that the PID Provider rejects a PoP with a wrong `aud` or a stale `iat` at the token endpoint in the pre-authorized code flow, and record whether it detects a `jti` it has seen before.
 
 ## References
 
 - [Attestation-Based Client Auth] sections 4 and 5
+- [Attestation-Based Client Auth] section 12.1
 
 ## Profile applicability
 
@@ -44,8 +45,10 @@ EUDI_generic | EUDI_required
 1. The Provider issues the credential (HTTP 200) in SD-JWT VC format (`dc+sd-jwt`). Every credential passes format, `issuer-trust` to `PP-T` on `TL-PID`, `issuer-signature`, `disclosures`, `validity`, `holder-binding` (bound to a proof key the KA attests) and `status-reference`, and the Status List Token it references passes the status list checks.
 2. The Provider issues no credential and no token for the request and answers with HTTP 4xx and an OAuth or OpenID4VCI error object with `error` `invalid_client`; never HTTP 5xx.
 3. The Provider issues no credential and no token for the request and answers with HTTP 4xx and an OAuth or OpenID4VCI error object with `error` `invalid_client`; never HTTP 5xx.
-4. The Provider issues no credential and no token for the request and answers with HTTP 4xx and an OAuth or OpenID4VCI error object with `error` `invalid_client`; never HTTP 5xx.
+4. Whether the Provider rejects the replayed PoP is recorded; HTTP 5xx fails. draft-ietf-oauth-attestation-based-client-auth-08 section 12.1: "An Authorization Server SHOULD implement measures to detect replay attacks", with a `jti` list as one RECOMMENDED option; no MUST.
 
 ## Comments
+
+Step 4 is informational since the spec review of 2026-11-20 (issuer catalogue section 8.3): replay detection of the Client Attestation PoP is a SHOULD, and a short `iat` window (step 3) is an alternative measure. A Provider that rejects the replay is the hardened behaviour.
 
 Variant `SD+PA` (`P-PID`, `P-SD`, `P-PA`) (issuer catalogue section 2.3); it applies when the Provider's ICS puts it in these profiles.

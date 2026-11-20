@@ -36,8 +36,8 @@ const RULES: Rule[] = [
   {
     number: 2,
     objective:
-      'Verify that the PID in mdoc format carries every mandatory attribute and metadata of the PID Rulebook section 4.2 as issuer-signed items, with the CBOR types of its tables.',
-    references: ['[ARF] Annex 2, PID_08, PID_09, PID_10', '[ARF] Annex 3.01 (PID Rulebook), section 4.2'],
+      'Verify that the PID in mdoc format carries every mandatory attribute and metadata of the PID Rulebook section 3.1.2 as issuer-signed items, with the CBOR types of its table.',
+    references: ['[ARF] Annex 2, PID_08, PID_09, PID_10', '[PID Rulebook] v1.7, section 3.1.2', '[RFC 8943]'],
     relevancy: relevancy.specificRequired,
     check: 'pid-attributes',
     rule: '`family_name`, `given_name`, `birth_date`, `place_of_birth`, `nationality`, `expiry_date`, `issuing_authority` and `issuing_country` are issuer-signed items, and every attribute of the Rulebook has its CBOR type: `tstr`, `birth_date` as `full-date` (tag 1004), `expiry_date` and `issuance_date` as `tdate` or `full-date`, `place_of_birth` as a map, `nationality` as a non-empty array of ISO 3166-1 alpha-2 codes, `portrait` as `bstr`, `age_over_NN` as `bool`, `sex`, `age_in_years` and `age_birth_year` as `uint`',

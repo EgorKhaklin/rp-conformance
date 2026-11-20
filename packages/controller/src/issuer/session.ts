@@ -57,8 +57,9 @@ export const SESSION_CONF_CHECKS = [
   'reissue-new-status-index',
   'reissue-new-key',
   'reissue-new-validity',
-  // PP_WS_IA_Notification_001: the notification endpoint answers HTTP 204.
-  'notification-204',
+  // PP_WS_IA_Notification_001: the notification endpoint answers with HTTP 2xx (OpenID4VCI 1.0 section 11.2: MUST 2xx,
+  // 204 RECOMMENDED; another 2xx is recorded in the check's detail).
+  'notification-2xx',
   // PP_WS_IA_Batch_006: the whole batch after exactly one authorization request (one User authentication).
   'single-authentication',
   // PP_WS_IA_Deferred_001: HTTP 202 with `transaction_id` and `interval`, then `issuance_pending`, then the credential.
@@ -308,12 +309,15 @@ export async function runSessionStep(
       record.reason = `step ${run.ofStep} left no session to continue`;
       return;
     }
-    record.walletUnit = prior.evidence.walletUnit;
+    // `PP_WS_IA_Reissuance_002_UF`: the refresh token of `CW-1` presented by another Wallet Unit, with its own WIA, PoP
+    // and a DPoP key of its own (RFC 9449 section 5: a confidential client's refresh token is bound to the client).
+    const otherUnit = run.kind === 'token-reuse' && run.walletUnit && run.walletUnit !== prior.evidence.walletUnit ? run.walletUnit : undefined;
+    record.walletUnit = otherUnit ?? prior.evidence.walletUnit;
     const fault = run.kind === 'notification' ? run.faults[0] : run.faults?.[0];
     if (fault) record.fault = fault;
     let hooks: SessionHooks = fault ? applySessionFault(fault, { batchSize: batchSizeOf(ctx.ics) }).hooks : {};
     const session: SessionState = { ...prior.session, cNonce: undefined, notificationIds: [...prior.session.notificationIds], dpopJtis: [...prior.session.dpopJtis] };
-    const evidence = Client.newEvidence(prior.evidence.walletUnit);
+    const evidence = Client.newEvidence(record.walletUnit);
     if (prior.evidence.metadata) evidence.metadata = prior.evidence.metadata;
     if (run.kind === 'token-reuse' && run.artifact === 'dpop-proof') {
       // RFC 9449 section 11.1: the DPoP proof of the earlier credential request, sent again as it was.
@@ -325,8 +329,10 @@ export async function runSessionStep(
       }
       hooks = { request: (s, r: HttpRequestMessage) => (s === 'credential' ? { ...r, headers: { ...withoutHeader(r.headers, 'dpop'), DPoP: proof } } : r) };
     }
-    const moved = bindingOf(ctx, caseState, prior.evidence.walletUnit as WalletUnitId);
-    const client = await prior.client.with({ hooks, unit: moved.binding, keyAttestation: moved.keyAttestation });
+    const moved = bindingOf(ctx, caseState, record.walletUnit as WalletUnitId);
+    const client = otherUnit
+      ? await Client.create(moved.binding, moved.keyAttestation, { allowInsecureUrls: true, hooks })
+      : await prior.client.with({ hooks, unit: moved.binding, keyAttestation: moved.keyAttestation });
     try {
       if (run.kind === 'notification') {
         const response = await client.notify(session, evidence, run.event);
@@ -334,7 +340,7 @@ export async function runSessionStep(
       } else if (run.artifact === 'refresh-token') {
         await client.refresh(session, evidence);
         // A faulty refresh request is judged by its own answer: a token issued for it is the failure.
-        if (!fault) await client.credential(session, evidence, {});
+        if (!fault && !otherUnit) await client.credential(session, evidence, {});
         compareWith = prior;
       } else if (run.artifact === 'dpop-proof') {
         await client.credential(session, evidence, {});
@@ -606,9 +612,12 @@ function evaluateConf(
           );
           break;
         }
-        case 'notification-204':
-          record(check, extra.notification?.status === 204, `the notification endpoint answered HTTP ${String(extra.notification?.status ?? 'nothing')}`);
+        case 'notification-2xx': {
+          const status = extra.notification?.status;
+          const ok = status !== undefined && status >= 200 && status < 300;
+          record(check, ok, `the notification endpoint answered HTTP ${String(status ?? 'nothing')}${ok && status !== 204 ? ' (a 2xx other than the RECOMMENDED 204; recorded)' : ''}`);
           break;
+        }
         default:
           throw new Error(`unknown CONF check ${String(check)}`);
       }

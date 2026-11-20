@@ -27,8 +27,8 @@ const reissuance002 = (format: FormatVariant, grant: GrantVariant) =>
     id: 'PP_WS_IA_Reissuance_002_UF',
     variants: [format, grant],
     control: MAIN,
-    objective: 'Verify that the PID Provider rejects a refresh token presented with a DPoP proof of another key than the one it is bound to.',
-    references: ['[ARF] Annex 2, ISSU_65', '[RFC 9449] section 5'],
+    objective: 'Verify that the PID Provider rejects a refresh token presented by another Wallet Unit than the one it was issued to.',
+    references: ['[ARF] Annex 2, ISSU_65', '[RFC 6749] sections 6 and 10.4', '[RFC 9449] section 5'],
     profile: profileOf(format, grant, 'P-REISS'),
     relevancy: relevancy.specificRequired,
     technology: technologyOf(format),
@@ -36,12 +36,14 @@ const reissuance002 = (format: FormatVariant, grant: GrantVariant) =>
     steps: [
       first(format, grant),
       {
-        text: `${REFRESH} The DPoP proof of the refresh token request is signed with a newly generated P-256 key, carried in its \`jwk\` header, instead of the original DPoP key (fault \`dpop.refresh-other-key\`).`,
-        run: { kind: 'token-reuse', artifact: 'refresh-token', ofStep: 1, faults: ['dpop.refresh-other-key'] },
+        text: '`CW-2` sends a token request with `grant_type` `refresh_token` and the refresh token `CW-1` received in step 1, with its own client authentication: its `client_id`, its WIA and a fresh PoP, and a DPoP proof of a DPoP key of its own.',
+        run: { kind: 'token-reuse', artifact: 'refresh-token', ofStep: 1, walletUnit: 'CW-2' },
         expect: rej(),
       },
     ],
-    comments: ['The catalogue names the DPoP key of `CW-2`; any key other than the bound one is the same stimulus, and a fresh key keeps `CW-2` out of the step.'],
+    comments: [
+      'The Wallet Unit authenticates with its WIA (a confidential client), so RFC 9449 section 5 does not bind its refresh token to the DPoP key: "Refresh tokens issued to confidential clients ... are not bound to the DPoP proof public key", they are bound to the client (RFC 6749 sections 6 and 10.4). The test therefore presents the refresh token as another client, `CW-2`, as the catalogue words the stimulus; a refresh with the same client and a new DPoP key is not a fault (spec review 2026-11-20, issuer catalogue section 8.3).',
+    ],
   });
 
 const reissuance003 = (format: FormatVariant, grant: GrantVariant) =>
@@ -75,7 +77,7 @@ const reissuance004 = (format: FormatVariant, grant: GrantVariant) =>
     id: 'PP_WS_IA_Reissuance_004_UF',
     variants: [format, grant],
     control: MAIN,
-    objective: 'Verify that after the PID was revoked, the refresh token no longer gives a credential.',
+    objective: 'Record whether, after the PID was revoked, the refresh token still gives a credential.',
     references: ['[ARF] Annex 2, VCR_04, ISSU_65'],
     profile: profileOf(format, grant, 'P-REISS', 'P-HOOK'),
     relevancy: relevancy.specificOptional,
@@ -84,9 +86,18 @@ const reissuance004 = (format: FormatVariant, grant: GrantVariant) =>
     steps: [
       first(format, grant),
       { text: 'The adapter revokes the credential of step 1 (`setStatus` revoked).', run: { kind: 'issuer-event', event: 'set-status', status: 'revoked', ofStep: 1 }, expect: { codes: ['INFO'], text: 'The adapter reports the revocation.' } },
-      { text: REFRESH, run: { kind: 'token-reuse', artifact: 'refresh-token', ofStep: 1 }, expect: rej() },
+      {
+        text: REFRESH,
+        run: { kind: 'token-reuse', artifact: 'refresh-token', ofStep: 1 },
+        expect: {
+          codes: ['INFO'],
+          text: 'Whether the Provider refuses the refresh or issues a new credential is recorded; HTTP 5xx fails. VCR_04 forbids reversing a revocation of the PID; whether a revoked PID may be replaced through its refresh token is not specified.',
+        },
+      },
     ],
-    comments: ['The catalogue accepts REJ or the policy of the Provider; no ICS item declares such a policy, so the suite expects REJ.'],
+    comments: [
+      'Informational since the spec review of 2026-11-20 (issuer catalogue section 8.3): VCR_04 ("SHALL NOT reverse the revocation") does not cover a new credential obtained with the refresh token, and ISSU_65 is about the Wallet Unit, not the revoked PID. Refusing the refresh after a revocation is a design choice of the Provider; a later catalogue may make it a `POLICY` with an ICS item.',
+    ],
   });
 
 const reissuance005 = (format: FormatVariant, grant: GrantVariant) =>

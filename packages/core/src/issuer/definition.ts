@@ -214,6 +214,11 @@ export interface IssuerExpectation extends ExpectationOf<IssuerExpectationCode> 
   noFetch?: string;
   /** The step passes when any one of `codes` passes (catalogue "REJ or CONF", "REJ or INFO"); default all of them. */
   oneOf?: boolean;
+  /**
+   * For `REJ`: an HTTP 4xx without an OAuth or OpenID4VCI error object also passes, for a request the server refuses
+   * before OAuth processing, such as HTTP 413 for an oversized body (`PP_WS_SH_Encoding_002_UF`).
+   */
+  errorObjectOptional?: true;
 }
 
 export type IssuerStepDefinition = StepDefinitionOf<IssuerStepAction, IssuerExpectation>;

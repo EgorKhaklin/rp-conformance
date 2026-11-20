@@ -2,11 +2,12 @@
 
 ## Objective
 
-Verify that the Relying Party rejects a credential in mdoc format whose signing certificate is not a document signer certificate.
+Record whether the Relying Party accepts a credential in mdoc format whose signing certificate, under the right anchor, is not an ISO/IEC 18013-5 document signer certificate (no extended key usage `1.0.18013.5.1.2`).
 
 ## References
 
-- [ISO/IEC 18013-5] section 9.3.1, Annex B
+- [ISO/IEC 18013-5] Annex B (not verified)
+- [ETSI TS 119 412-6] clause 4
 - [CIR 2024/2982 amended] Annex II
 
 ## Profile applicability
@@ -15,7 +16,7 @@ Verify that the Relying Party rejects a credential in mdoc format whose signing 
 
 ## EUDI-wallet relevancy
 
-EUDI_generic | EUDI_required
+EUDI_generic | EUDI_optional
 
 ## Technology
 
@@ -33,8 +34,10 @@ EUDI_generic | EUDI_required
 
 ## Expected results
 
-1. The Relying Party rejects the presentation: its verification result reports a failure and releases no attribute value from the presentation, and the endpoint receiving the Authorization Response does not answer with HTTP status 5xx.
+1. Whether the Relying Party accepts or rejects the presentation is recorded; HTTP 5xx fails.
 
 ## Comments
+
+Informational since the spec review of 2026-11-20 (catalogue section 8.3): ETSI TS 119 412-6 clause 4, the certificate profile of PID Providers, requires no extended key usage (it allows key usage type C "Due to the requirements of ISO/IEC 18013-5"), and the ISO/IEC 18013-5 Annex B profile of the document signer was not available to the review. The test certificate is a plain end-entity certificate, so it differs from a document signer in more than the extended key usage.
 
 Execute this test case once for each presentation flow the Relying Party supports (redirects, W3C Digital Credentials API).

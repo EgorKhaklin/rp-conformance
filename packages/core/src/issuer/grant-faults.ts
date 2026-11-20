@@ -57,6 +57,11 @@ export interface GrantFaultInfo {
   waitsFor?: 'request-uri' | 'pre-authorized-code';
   /** The fault needs the code of a second offer, for a second configuration of the same SUT (ICS-02.second). */
   otherOffer?: true;
+  /**
+   * A mutation the receiver must ignore, not a fault: it touches what `target` covers, and that check passes (an unknown
+   * `scope` value, OpenID4VCI 1.0 section 5.1.2 "Credential Issuers MUST ignore unknown scope values in a request").
+   */
+  mustIgnore?: true;
 }
 
 const AC = 'PP_WS_IA_AuthorizationCode';
@@ -84,11 +89,14 @@ export const GRANT_FAULTS = {
     'the `credential_configuration_id` in the `authorization_details` of its pushed authorization request is `unknown-configuration`, which the Credential Issuer metadata does not offer',
     `${AC}_006_UF`,
   ),
-  'authorization.scope-unknown': authorization(
-    'authorization-details',
-    'its pushed authorization request carries no `authorization_details` but `scope` `unknown-scope`, which no credential configuration of the Credential Issuer metadata names',
-    `${AC}_006_UF`,
-  ),
+  'authorization.scope-unknown': {
+    ...authorization(
+      'authorization-details',
+      'its pushed authorization request carries, besides its `authorization_details`, the `scope` value `unknown-scope`, which no credential configuration of the Credential Issuer metadata names',
+      `${AC}_006_UF`,
+    ),
+    mustIgnore: true,
+  },
   'authorization.request-uri-expired': {
     ...authorization('request-uri', 'its authorization request is sent one hour after the `expires_in` of the `request_uri` the pushed authorization request returned', `${AC}_004_UF`),
     waitsFor: 'request-uri',

@@ -2,12 +2,12 @@
 
 ## Objective
 
-Verify that the Relying Party accepts a PID in SD-JWT VC format that carries a claim it does not know, and does not release that claim.
+Verify that the Relying Party accepts a PID in SD-JWT VC format that carries a claim it does not know.
 
 ## References
 
 - [SD-JWT VC] section 2.2.2
-- [OpenID4VP] section 8.6
+- [OpenID4VP] section 6.4, 8.6
 - [CIR 2024/2982 amended] Annex II
 
 ## Profile applicability
@@ -34,10 +34,12 @@ EUDI_generic | EUDI_required
 
 ## Expected results
 
-1. The Relying Party accepts the presentation: its verification result reports success and releases exactly the attributes requested in `default_query_pid`, with the values of the presented variant.
+1. The Relying Party accepts the presentation: its verification result reports success and releases exactly the attributes requested in `default_query_pid`, with the values of the presented variant. Whether it also passes the unknown claim along is not judged: the claim is not selectively disclosable.
 
 ## Comments
 
 The claim is not selectively disclosable, so it reaches the Relying Party with every presentation. An mdoc has no such element: the Conformance Wallet presents only requested elements, and a presentation with an element the query does not request is `RP_WS_DM_CredentialMetadata_001b_UF`.
+
+Since the spec review of 2026-11-20 (catalogue section 8.3) the step checks acceptance only: a claim that is always disclosed cannot be withheld (OpenID4VP 1.0 section 6.4 lets a presentation contain claims that "are not selectively disclosable"), so it is treated like the technical claims (`iss`, `vct`, …) when the released attributes are compared.
 
 Execute this test case once for each presentation flow the Relying Party supports (redirects, W3C Digital Credentials API).

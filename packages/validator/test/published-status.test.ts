@@ -90,7 +90,9 @@ describe('OBS-SL publication checks', () => {
       (input.perFormat[1] as FetchedVersion).headers['content-type'] = 'application/statuslist+jwt';
     }],
     ['sl-cache', (input) => {
-      delete (input.polls[0] as FetchedVersion).headers['cache-control'];
+      const headers = (input.polls[0] as FetchedVersion).headers;
+      headers['cache-control'] = 'public';
+      delete headers.expires;
     }],
     ['sl-cache', (input) => {
       (input.polls[0] as FetchedVersion).headers['cache-control'] = 'max-age=3600';

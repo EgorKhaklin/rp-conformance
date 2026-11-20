@@ -2,7 +2,7 @@
 
 ## Objective
 
-Verify that the Relying Party does not use a version of the PID Provider list whose seal is invalid, and keeps using the last valid version.
+Verify that the Relying Party does not use a version of the PID Provider list whose seal is invalid, and then acts as it declares (RP.T.4): it keeps the last valid version, or uses none.
 
 ## References
 
@@ -33,11 +33,13 @@ EUDI_specific | EUDI_required
 
 1. The Test Trust Infrastructure logs a retrieval of the new version of `TL-PID` by the Relying Party.
 2. The Relying Party rejects the presentation: its verification result reports a failure and releases no attribute value from the presentation, and the endpoint receiving the Authorization Response does not answer with HTTP status 5xx.
-3. The Relying Party accepts the presentation: its verification result reports success and releases exactly the attributes requested in `default_query_pid`, with the values of `default_credential_pid`.
+3. As the Relying Party declares in RP.T.4: `Keep` accepts the presentation and releases exactly the requested attributes (the last valid version of `TL-PID` stays in use); `Discard` rejects it (no usable `TL-PID`).
 
 ## Comments
 
-A Relying Party keeps using the last valid version of a list until its `NextUpdate` plus the grace period `G`. The new version adds an entity, so a Relying Party that used it would accept that entity's credential.
+The new version adds an entity, so a Relying Party that used it would accept that entity's credential. Whether the last valid version then stays in use (until its `NextUpdate` plus the grace period `G`) is the policy the Relying Party declares in RP.T.4.
+
+Step 3 is `POLICY` (RP.T.4) since the spec review of 2026-11-20 (catalogue section 9): ETSI TS 119 602 and the ARF require the seal of a list to be verified before it is used, but no specification requires a Relying Party to keep the last valid version, so discarding the list (fail-closed) conforms too.
 
 Restore the previous version of `TL-PID` after the test case.
 

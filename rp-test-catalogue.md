@@ -205,7 +205,7 @@ Columns: **Objective** says what is verified. **Stimulus** is the mutation or in
 | `RP_WS_MS_ProtocolMessages_002` | Request Object payload: `response_type=vp_token`, `response_mode=direct_post.jwt`, https `response_uri`, no `redirect_uri`, `client_id` equal to the outer one, `nonce`, `dcql_query`, `aud` per OID4VP §5.8. | Capture request object | CONF | HAIP 5, 5.1; OID4VP §5.2, §5.8, §8.2, §8.3.1 | RD | G/R |
 | `RP_WS_MS_ProtocolMessages_003` | `nonce` is at least 16 random bytes, base64url, and fresh per request. | 20 consecutive requests | CONF, no repeats | OID4VP §5.2, §13.3 | RD, DC | G/R |
 | `RP_WS_MS_ProtocolMessages_004` | `state`, if used, is fresh and unguessable (≥ 128 bit). | 20 requests | CONF | OID4VP §13.3, §14.3.2 | RD | G/O |
-| `RP_WS_MS_ProtocolMessages_005` | DC API request uses protocol `openid4vp-v1-signed` or `openid4vp-v1-multisigned`, `response_mode=dc_api.jwt`, `expected_origins` present, no `response_uri`. | Capture DC API request | CONF | OID4VP A.2, A.3.2; HAIP 5.2; OIA_08, OIA_08a | DC | G/R |
+| `RP_WS_MS_ProtocolMessages_005` | DC API request uses protocol `openid4vp-v1-signed` or `openid4vp-v1-multisigned`, `response_mode=dc_api.jwt`, `expected_origins` present; a `response_uri` is recorded (INFO, §8.3). | Capture DC API request | CONF | OID4VP A.2 (additional parameters MAY be used, the Wallet MUST ignore unrecognized ones), A.3.2; HAIP 5.2; OIA_08, OIA_08a | DC | G/R |
 | `RP_WS_MS_ProtocolMessages_006` | 18013-7 Annex C request: DeviceRequest with ReaderAuth and registration certificate, EncryptionInfo with a fresh recipient key. *Not executable: the harness has no ISO/IEC 18013-7 Annex C flow.* | Capture request | CONF | OIA_08b; ISO/IEC 18013-7 Annex C; ETSI TS 119 472-2 | DCI | S/R |
 
 ##### RP_WS_MS_Metadata
@@ -365,7 +365,7 @@ mdoc:
 | `RP_WS_SM_IssuerIntegrity_022_UF` | IssuerSignedItem with a `digestID` not in `valueDigests` is rejected. | Add item with unknown digestID | REJ | ISO/IEC 18013-5 §9.3.1 | MD | G/R |
 | `RP_WS_SM_IssuerIntegrity_023_UF` | MSO `docType` different from the Document `docType` is rejected. | Mismatch | REJ | ISO/IEC 18013-5 §9.3.1 | MD | G/R |
 | `RP_WS_SM_IssuerIntegrity_024_UF` | Unsupported MSO `digestAlgorithm` is rejected. | `SHA-1` | REJ | HAIP 8 | MD | G/R |
-| `RP_WS_SM_IssuerIntegrity_025_UF` | A `docType` not requested is rejected. | Other doctype | REJ | OID4VP §8.6, B.2.3 | MD | G/R |
+| `RP_WS_SM_IssuerIntegrity_025_UF` | A `docType` not requested is rejected. | Other doctype | REJ | OID4VP §8.6, §14.9, B.2.3 | MD | G/R |
 | `RP_WS_SM_IssuerIntegrity_026_UF` | A chain that only validates to a root embedded in `x5chain` is rejected. | Self-signed IACA `CA-X` in chain | REJ | ISO/IEC 18013-5 §9.3.1; OIA_12 | MD | G/R |
 | `RP_WS_SM_IssuerIntegrity_027_UF` | A document signer certificate without the mdoc DS extended key usage is rejected. | Remove EKU | REJ | ISO/IEC 18013-5 Annex B | MD | G/R |
 | `RP_WS_SM_IssuerIntegrity_028_UF` | MSO `validityInfo.signed` outside the DS certificate validity is rejected. | `signed` after DS `notAfter` | REJ | ISO/IEC 18013-5 §9.3.1 | MD | G/R |
@@ -378,10 +378,10 @@ Certificate path, both formats:
 | `RP_WS_SM_IssuerIntegrity_031_UF` | Not yet valid issuer signing certificate is rejected. | `notBefore` in the future | REJ | RFC 5280 §6.1.3 | SD, MD | G/R |
 | `RP_WS_SM_IssuerIntegrity_032_UF` | Expired intermediate CA certificate is rejected. | Intermediate `notAfter` in the past | REJ | RFC 5280 §6.1.3 | SD, MD | G/R |
 | `RP_WS_SM_IssuerIntegrity_033_UF` | Incomplete chain is rejected. | Intermediate missing | REJ | RFC 5280 §6.1 | SD, MD | G/R |
-| `RP_WS_SM_IssuerIntegrity_034_UF` | Signing certificate issued by a non-CA certificate is rejected. | Issuer cert with `cA=false` | REJ | RFC 5280 §6.1.4 | SD, MD | G/R |
+| `RP_WS_SM_IssuerIntegrity_034_UF` | Signing certificate issued by a non-CA certificate is rejected. | Issuer cert with `cA=false` (and `keyCertSign`) | REJ | RFC 5280 §6.1.4, §4.2.1.9; RFC 7515 §4.1.6 (SD); ISO/IEC 18013-5 §9.3.1 not verified (MD) | SD, MD | G/R |
 | `RP_WS_SM_IssuerIntegrity_035_UF` | Revoked issuer signing certificate is rejected. *Not executable: optional check, the harness serves no CRLs.* | CRL marks DS / signing cert revoked | REJ | RFC 5280 §6.3; ICS-16 | SD, MD | G/O |
 | `RP_WS_SM_IssuerIntegrity_036_UF` | Key type or size outside ECCG ACM is rejected. | P-192, RSA-1024 | REJ | OIA_03 | SD, MD | S/R |
-| `RP_WS_SM_IssuerIntegrity_037_UF` | Unknown critical extension in the signing certificate is rejected. | Critical private extension | REJ | RFC 5280 §4.2 | SD, MD | G/R |
+| `RP_WS_SM_IssuerIntegrity_037_UF` | Unknown critical extension in the signing certificate is rejected. | Critical private extension | REJ | RFC 5280 §4.2, §6.1.5 (f); RFC 7515 §4.1.6 (SD); ISO/IEC 18013-5 §9.3.1 not verified (MD) | SD, MD | G/R |
 
 ##### RP_WS_SM_Validity (validity period of the credential)
 
@@ -391,7 +391,7 @@ Certificate path, both formats:
 | `RP_WS_SM_Validity_002` | `exp` inside the clock tolerance is accepted. | `exp` = now − `T_skew`/2 | ACC | RFC 7519 §4.1.4; ICS-09 | SD | G/R |
 | `RP_WS_SM_Validity_003_UF` | Not yet valid SD-JWT VC is rejected. | `nbf` = now + `T_skew` + 1 h | REJ | RFC 9901 §7.1 step 6; RFC 7519 §4.1.5 | SD | G/R |
 | `RP_WS_SM_Validity_004` | Handling of an SD-JWT VC issued in the future is recorded. | `iat` = now + `T_skew` + 1 h | INFO | RFC 7519 §4.1.6 (no MUST, §8) | SD | G/U |
-| `RP_WS_SM_Validity_005_UF` | Expired credential whose status is VALID is rejected, and the status list is not fetched. | Expired `CRED-PID`, status 0x00 | REJ, NOFETCH | Token Status List §7.1, §8.3 | SD, MD | G/R |
+| `RP_WS_SM_Validity_005_UF` | Expired credential whose status is VALID is rejected, and the status list is not fetched. | Expired `CRED-PID`, status 0x00 | REJ, NOFETCH | Token Status List §7.1, §8.3 (the no-fetch rule from draft-17, as "MUST NOT" from draft-19; HAIP's draft-14 has only "MUST precede", §8.3) | SD, MD | G/R |
 | `RP_WS_SM_Validity_006_UF` | A credential with an invalid issuer signature causes no status list fetch. | `IssuerIntegrity_001_UF` stimulus | REJ, NOFETCH | Token Status List §8.3 | SD, MD | G/R |
 | `RP_WS_SM_Validity_010_UF` | Expired mdoc is rejected. | `validUntil` = now − `T_skew` − 1 h | REJ | ISO/IEC 18013-5 §9.3.1 | MD | G/R |
 | `RP_WS_SM_Validity_011_UF` | Not yet valid mdoc is rejected. | `validFrom` = now + `T_skew` + 1 h | REJ | ISO/IEC 18013-5 §9.3.1 | MD | G/R |
@@ -487,7 +487,7 @@ Certificate path, both formats:
 | `RP_WS_SH_Encoding_001_UF` | Malformed `response` is rejected cleanly. | Wrong segment count; invalid base64url | REJ; via redirects 4xx without internal details (via the DC API the answer goes to the RP's own page, see `_007`) | RFC 7516 §7.1, §9 | RD, DC | G/R |
 | `RP_WS_SH_Encoding_002_UF` | Malformed SD-JWT, or a KB-JWT whose payload is not valid JSON, is rejected. | No `~` between the last disclosure and the KB-JWT; empty segment; invalid JSON in a disclosure; `NaN` in the KB-JWT payload | REJ | RFC 9901 §4; RFC 8259 §6 | SD | G/R |
 | `RP_WS_SH_Encoding_003_UF` | Malformed CBOR DeviceResponse is rejected. | Truncated; wrong major type; deep nesting; indefinite-length map without its `break` | REJ | RFC 8949 §3.2.1; ISO/IEC 18013-5 §8.3.2.1.2.2 | MD | G/R |
-| `RP_WS_SH_Encoding_004_UF` | Oversized response is rejected without exhausting resources. | Response above ICS-17 limit | REJ, RP stays available | ICS-17 | RD, DC | G/R |
+| `RP_WS_SH_Encoding_004_UF` | Oversized response is rejected without exhausting resources. | Response above ICS-17 limit | REJ (via the DC API also a 4xx or network error at the RP's page, without a failed verification result, §8.3), RP stays available | ICS-17 | RD, DC | G/R |
 | `RP_WS_SH_Encoding_005_UF` | Duplicate member names in JOSE headers or JWT claims are rejected. | Duplicate `alg` in the KB-JWT header; duplicate `nonce` in the KB-JWT payload; the last value is the wrong one | REJ | RFC 7515 §4; RFC 7519 §4; FCAF Shared_JSON | SD, RD, DC | G/R |
 | `RP_WS_SH_Encoding_006_UF` | Excessive `x5c` / `x5chain` length is bounded. | 50 certificates | REJ, RP stays available | RFC 5280 §6.1 | SD, MD | G/R |
 | `RP_WS_SH_Encoding_007` | Error responses to the wallet reveal no internal details. | Any `_UF` above | CONF | OID4VP §15.9 | RD | G/O |

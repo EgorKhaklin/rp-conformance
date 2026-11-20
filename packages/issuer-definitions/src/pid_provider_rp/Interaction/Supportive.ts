@@ -28,11 +28,13 @@ const supportive002 = (format: FormatVariant) =>
     id: 'PP_RP_IA_Supportive_002',
     ...base(format),
     variants: [format, 'PA'],
-    objective: "Verify that the Provider's status list response sets HTTP cache headers consistent with the token's `ttl` and `exp`.",
-    references: ['[TokenStatusList] sections 8.1 and 13.7'],
+    objective: "Verify that HTTP cache headers of the Provider's status list response, if it sets any, are consistent with the token's `ttl` and `exp`.",
+    references: ['[TokenStatusList] sections 8.2 and 13.7', '[RFC 9111] section 4.2'],
     relevancy: relevancy.genericOptional,
-    steps: [issueStep(format), fetchStep(format, [1], published(['sl-cache'], 'A cache that follows the response headers never serves the token longer than `ttl` or past `exp`.'))],
-    comments: ['EUDI_optional: Token Status List section 13.7 recommends, not requires, cache headers consistent with `ttl`.'],
+    steps: [issueStep(format), fetchStep(format, [1], published(['sl-cache'], 'A cache that follows the response headers never serves the token longer than `ttl` or past `exp`; a response without caching-related headers passes.'))],
+    comments: [
+      'EUDI_optional. Token Status List has no cache-header rule for the Status Provider: section 8.2 says only that "If caching-related HTTP headers are present in the HTTP response, Relying Parties MUST prioritize the exp and ttl claims", and section 13.7 describes how Relying Parties use `ttl` and `exp`. A response without such headers therefore passes; headers that are present are checked because an HTTP cache between the Provider and a Relying Party does not read the token (spec review 2026-11-20, issuer catalogue section 8.3).',
+    ],
   });
 
 /** Number of credentials whose status URIs `PP_RP_IA_Supportive_003` compares (issuer catalogue section 5.2). */

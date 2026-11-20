@@ -26,18 +26,28 @@ const encoding002 = (format: FormatVariant, grant: GrantVariant) =>
     id: 'PP_WS_SH_Encoding_002_UF',
     variants: [format, grant],
     control: MAIN,
-    objective: 'Verify that the PID Provider rejects oversized requests and deeply nested JSON, and stays available.',
-    references: ['[OWASP API Security Top 10] API4:2023'],
+    objective: 'Verify that the PID Provider rejects an oversized request, records how it handles deeply nested JSON, and stays available.',
+    references: ['[OWASP API Security Top 10] API4:2023', '[OpenID4VCI] section 8.2', '[RFC 8259] section 9'],
     profile: profileOf(format, grant),
     relevancy: relevancy.genericRequired,
     technology: technologyOf(format),
     preconditions: ufPreconditions(),
     steps: [
-      faultStep(format, grant, 'encoding.oversized', rej()),
-      faultStep(format, grant, 'encoding.deep-nesting', rej()),
+      faultStep(format, grant, 'encoding.oversized', {
+        ...rej(),
+        errorObjectOptional: true,
+        text: 'The Provider issues no credential and answers with HTTP 4xx (an OAuth error object is not required: a server may refuse an oversized body before OAuth processing, for example with HTTP 413); never HTTP 5xx.',
+      }),
+      faultStep(format, grant, 'encoding.deep-nesting', {
+        codes: ['INFO'],
+        text: 'The outcome is recorded; HTTP 5xx fails. The nested member is unknown, which OpenID4VCI 1.0 section 8.2 says "The Credential Issuer MUST ignore", and RFC 8259 section 9 only allows a parser to limit the nesting depth ("may set limits"), so both rejecting and issuing conform.',
+      }),
       { text: '`CW-1` runs `SCN-I` for `SUBJ-1` without mutation.', run: issuance(format, grant), expect: iss(format) },
     ],
-    comments: ['Step 3 shows that the Provider is still available after the two requests.'],
+    comments: [
+      'Step 3 shows that the Provider is still available after the two requests.',
+      'Spec review 2026-11-20 (issuer catalogue section 8.3): a 413 without an error object is a valid rejection of step 1, and step 2 is informational.',
+    ],
   });
 
 const encoding003 = (format: FormatVariant, grant: GrantVariant) =>
@@ -45,15 +55,18 @@ const encoding003 = (format: FormatVariant, grant: GrantVariant) =>
     id: 'PP_WS_SH_Encoding_003_UF',
     variants: [format, grant],
     control: MAIN,
-    objective: 'Verify that the PID Provider does not dereference a `jku`, `x5u` or `kid` URL in the header of a proof, WIA or KA, and rejects the request.',
+    objective: 'Verify that the PID Provider does not dereference a `jku`, `x5u` or `kid` URL in the header of a proof, WIA or KA.',
     references: ['[RFC 8725] section 3.10'],
     profile: profileOf(format, grant),
     relevancy: relevancy.genericRequired,
     technology: technologyOf(format),
     preconditions: ufPreconditions(),
     steps: (['wia.jku-header', 'wia.x5u-header', 'ka.jku-header', 'ka.x5u-header', 'proof.jku-header', 'proof.kid-url'] as const).map((fault) =>
-      faultStep(format, grant, fault, both(rej(), noFetch)),
+      faultStep(format, grant, fault, both(noFetch, { codes: ['INFO'], text: 'Whether the Provider rejects the request or issues the PID (ignoring the header) is recorded; both conform.' })),
     ),
+    comments: [
+      'RFC 8725 section 3.10 warns against "blindly following a "jku" (JWK set URL) or "x5u" (X.509 URL) header" and says applications "SHOULD protect against such attacks"; it does not require rejecting a JWS that carries one. The verdict is therefore NOFETCH alone (spec review 2026-11-20, issuer catalogue section 8.3).',
+    ],
   });
 
 const encoding004 = (format: FormatVariant, grant: GrantVariant) =>

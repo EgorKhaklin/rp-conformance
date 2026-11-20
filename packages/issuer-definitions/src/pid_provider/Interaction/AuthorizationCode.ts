@@ -123,12 +123,21 @@ const authorizationCode006 = (format: FormatVariant) =>
   defineIssuerTestCase({
     id: 'PP_WS_IA_AuthorizationCode_006_UF',
     ...base(format),
-    objective: 'Verify that the PID Provider rejects an authorization request for an unknown `credential_configuration_id` in `authorization_details`, and one for an unknown `scope`.',
+    objective:
+      'Verify that the PID Provider rejects an authorization request for an unknown `credential_configuration_id` in `authorization_details`, and ignores an unknown `scope` value next to a valid request.',
     references: ['[OpenID4VCI] sections 5.1.1 and 5.1.2'],
     relevancy: relevancy.genericRequired,
-    steps: [faultStep(format, 'authorization.authorization-details-unknown'), faultStep(format, 'authorization.scope-unknown')],
+    steps: [
+      faultStep(format, 'authorization.authorization-details-unknown'),
+      {
+        text: `${OFFER(format)} \`CW-1\` runs \`SCN-I\` as in \`${CONTROL}\`, except that ${GRANT_FAULTS['authorization.scope-unknown'].text} (mutation \`authorization.scope-unknown\`).`,
+        run: issuance(format, 'AC', { faults: ['authorization.scope-unknown'] }),
+        expect: { ...iss(format), text: 'The unknown `scope` value is ignored (OpenID4VCI 1.0 section 5.1.2: "Credential Issuers MUST ignore unknown scope values in a request"): the PID is issued as requested by the `authorization_details`.' },
+      },
+    ],
     comments: [
-      'The rejection may come at PAR, at the authorization endpoint or at the token endpoint; the step passes when the request at which the flow ends is rejected and no credential is issued. Each step uses a new offer.',
+      'The rejection of step 1 may come at PAR, at the authorization endpoint or at the token endpoint; the step passes when the request at which the flow ends is rejected and no credential is issued. Each step uses a new offer.',
+      'Step 2 does not expect a rejection: OpenID4VCI 1.0 section 5.1.2 requires a Credential Issuer to ignore unknown scope values, so the request is valid apart from a value the Provider must disregard (decision in the catalogue section 5.1.2, spec review 2026-11-20).',
     ],
   });
 

@@ -77,18 +77,27 @@ export const definitions = [
     id: 'PP_WS_SM_IssuerIntegrity_005',
     formats: ['SD'],
     objective: () => 'Verify that every claim the PID Rulebook allows is individually selectively disclosable in the SD-JWT VC PID (top level, nested members, array elements), and that `_sd_alg` is `sha-256`.',
-    references: ['[ARF] Annex 2, PID_21', '[ARF] Annex 2, ARB_30', '[RFC9901] section 4'],
+    references: ['[ARF] Annex 2, PID_21', '[RFC9901] section 4.2.2'],
     checks: () => ['selective-disclosure'],
     what: () => 'Each PID claim, each member of a structured claim and each element of an array claim can be disclosed on its own.',
   }),
   ...integrity({
     id: 'PP_WS_SM_IssuerIntegrity_006',
     formats: ['SD', 'MD'],
-    objective: (f) => (f === 'SD' ? 'Verify that every disclosure salt of the SD-JWT VC PID has at least 128 bits and is unique within the credential.' : 'Verify that the `random` of every IssuerSignedItem of the mdoc PID has at least 16 bytes and is unique within the credential.'),
-    references: ['[ARF] Annex 2, ISSU_35 (a)', '[RFC9901] section 9.3', '[ISO/IEC 18013-5] section 9.1.2.5'],
+    objective: (f) =>
+      f === 'SD'
+        ? 'Verify that every disclosure salt of the SD-JWT VC PID is unique within the credential, and record whether it reaches the RECOMMENDED 128 bits.'
+        : 'Verify that the `random` of every IssuerSignedItem of the mdoc PID has at least 16 bytes and is unique within the credential.',
+    references: ['[ARF] Annex 2, ISSU_35 (a)', '[RFC9901] section 9.3', '[ISO/IEC 18013-5] section 9.1.2.5 (not verified)'],
     checks: () => ['salt-entropy'],
-    what: (f) => (f === 'SD' ? 'The salts are long and unique enough that no disclosure can be guessed.' : 'The `random` values are long and unique enough that no element can be guessed from its digest.'),
-    comments: ['OIDF `happy-flow` and `batch-issuance` cover this objective partly (issuer catalogue section 7).'],
+    what: (f) =>
+      f === 'SD'
+        ? 'No salt repeats (RFC 9901 section 9.3: "A new salt MUST be chosen for each claim"); a salt below "The RECOMMENDED minimum length ... 128 bits" is recorded in the check detail, not failed.'
+        : 'The `random` values are long and unique enough that no element can be guessed from its digest.',
+    comments: [
+      'OIDF `happy-flow` and `batch-issuance` cover this objective partly (issuer catalogue section 7).',
+      'Spec review 2026-11-20 (issuer catalogue section 8.3): 128 bits is RECOMMENDED by RFC 9901 section 9.3, and ARF ISSU_35 is about uniqueness, so a shorter SD-JWT VC salt is no conformance failure. The ISO/IEC 18013-5 clause for the mdoc `random` was not available to the review.',
+    ],
   }),
   ...integrity({
     id: 'PP_WS_SM_IssuerIntegrity_007',

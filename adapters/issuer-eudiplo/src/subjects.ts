@@ -45,7 +45,7 @@ export const PID_FIELDS = [
       { path: ['country'], type: 'string', disclosable: true },
     ],
   },
-  { path: ['nationalities'], type: 'array', mandatory: true, disclosable: true, children: [{ path: [null], type: 'string' }] },
+  { path: ['nationalities'], type: 'array', mandatory: true, disclosable: true, children: [{ path: [null], type: 'string', disclosable: true }] },
   { path: ['issuing_authority'], type: 'string', mandatory: true, disclosable: true },
   { path: ['issuing_country'], type: 'string', mandatory: true, disclosable: true },
 ];

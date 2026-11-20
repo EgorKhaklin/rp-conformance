@@ -32,21 +32,21 @@ const unrequested = (format: FormatWording) =>
   defineTestCase({
     id: testCaseId('WS', 'DM', 'CredentialMetadata', 1, format.letter, true),
     ...base(format),
-    objective: `Verify that the Relying Party does not release attributes of a PID in ${format.name} format that were disclosed without being requested.`,
-    references: ['[ARF] Annex 2, OIA_16', '[OpenID4VP] section 15.4.2', CIR_PRESENTATION],
+    objective: `Record whether the Relying Party releases attributes of a PID in ${format.name} format that were disclosed without being requested.`,
+    references: ['[OpenID4VP] section 6.4', '[GDPR] Art. 5(1)(c)', CIR_PRESENTATION],
     relevancy: relevancy.specificOptional,
     preconditions: [...preconditions.base, preconditions.control(positiveControlOf(format))],
     steps: [
       step({
         ...presentationStep.presentationFault('presentation.unrequested-disclosed', { format: format.credentialFormat }),
-        expect: rejOrAcc({
-          credential: PID,
-          extra: `In neither case does its verification result release \`place_of_birth\` or \`${format === sdJwtVc ? 'nationalities' : 'nationality'}\`.`,
-        }),
+        expect: {
+          codes: ['INFO'],
+          text: `Whether the Relying Party rejects the presentation, or accepts it and releases \`place_of_birth\` or \`${format === sdJwtVc ? 'nationalities' : 'nationality'}\` besides the requested attributes, is recorded; HTTP 5xx fails.`,
+        },
       }),
     ],
     comments: [
-      'OpenID4VP leaves it to the Relying Party whether to reject a presentation with claims it did not request or to ignore them; either passes, as long as the extra attributes are not released.',
+      'Informational since the spec review of 2026-11-20 (catalogue section 8.3): OpenID4VP 1.0 section 6.4 ("Wallets MUST NOT send selectively disclosable claims that have not been selected") binds the wallet, not the Relying Party. ARF OIA_16 is about discarding unique elements and timestamps, and OpenID4VP section 15.4.2 about which claims a Verifier requests; neither says what a Relying Party does with claims it did not request. Not releasing them is the data-minimising behaviour (GDPR Art. 5(1)(c)).',
       'Whether the Relying Party retains the extra attributes cannot be observed at its interfaces; the test book item `RP_TB_001` covers retention.',
       comments.flow,
     ],

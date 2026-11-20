@@ -572,6 +572,8 @@ async function runPresentation(
   let evidence: PresentationEvidence;
   /** Whether the Authorization Response reached the Relying Party: posted to `response_uri`, or returned to its page. */
   let delivered: boolean;
+  /** Via the DC API: the network error of the page's request that forwarded the response, if it failed without an answer. */
+  let forwardError: string | undefined;
   if (flow === 'dc-api') {
     let walletEvidence: PresentationEvidence | undefined;
     let answer: DcApiAnswer | undefined;
@@ -587,6 +589,7 @@ async function runPresentation(
     delivered = Boolean(answer) && run.calls.length > 0;
     if (run.delivery) {
       record.rpResponse = { endpoint: 'dc-api-forward', url: run.delivery.url, status: run.delivery.status, body: run.delivery.body };
+      forwardError = run.delivery.status === undefined ? run.delivery.error : undefined;
     }
     if (delivered && run.error) evidence.error = evidence.error ?? run.error;
   } else {
@@ -622,6 +625,7 @@ async function runPresentation(
   const answered = credentials.map(({ forged: credential, answers }) => credentialQueryOf(query, { format: credential.format, query: answers }).id);
   const presentedQuery = { ...query, credentials: query.credentials.filter((c) => answered.includes(c.id)) };
   const issuedClaims = Object.assign({}, ...credentials.map(({ forged: credential }) => credential.claims)) as Record<string, unknown>;
+  const alwaysDisclosed = credentials.flatMap(({ forged: credential }) => plainClaimsOf(credential));
   const trace: TransactionTrace = {
     transactionId,
     query: action.query,
@@ -639,10 +643,12 @@ async function runPresentation(
     result: record.rpResult,
     query: presentedQuery,
     issuedClaims,
+    alwaysDisclosed,
     delivered,
     responseStatus: record.rpResponse?.status,
     responseEndpoint: record.rpResponse?.endpoint,
     responseBody: record.rpResponse?.body,
+    forwardError,
     ics: ctx.ics,
     category: categoryOfQuery(action.query),
     statusRequests: record.statusLog.length,
@@ -788,5 +794,20 @@ async function checkPendingRetrieval(state: TestCaseState, ctx: Context, final: 
     pending.record.verdict = 'FAIL';
     pending.record.reason += '; the Relying Party did not retrieve it';
     state.pendingRetrieval = undefined;
+  }
+}
+
+/**
+ * The plain top-level claims of an SD-JWT VC's issuer-signed JWT: disclosed with every presentation, since they are not
+ * selectively disclosable. An mdoc has none (the wallet presents only the elements it selects).
+ */
+function plainClaimsOf(credential: { format: string; credential: string | Uint8Array }): string[] {
+  if (credential.format !== 'dc+sd-jwt' || typeof credential.credential !== 'string') return [];
+  try {
+    const payload = credential.credential.split('~')[0]?.split('.')[1];
+    if (!payload) return [];
+    return Object.keys(JSON.parse(Buffer.from(payload, 'base64url').toString('utf8')) as Record<string, unknown>).filter((claim) => claim !== '_sd' && claim !== '_sd_alg');
+  } catch {
+    return [];
   }
 }

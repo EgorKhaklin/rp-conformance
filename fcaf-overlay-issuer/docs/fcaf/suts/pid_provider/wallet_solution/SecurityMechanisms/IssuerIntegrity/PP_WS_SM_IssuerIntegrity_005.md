@@ -7,8 +7,7 @@ Verify that every claim the PID Rulebook allows is individually selectively disc
 ## References
 
 - [ARF] Annex 2, PID_21
-- [ARF] Annex 2, ARB_30
-- [RFC9901] section 4
+- [RFC9901] section 4.2.2
 
 ## Profile applicability
 
