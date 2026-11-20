@@ -3,6 +3,7 @@
 // the evaluators and the issuer faults come later.
 import type { CredentialFormat, ExpectationOf, StepDefinitionOf, TestCaseDefinitionOf } from '../definition';
 import type { FaultId } from '../faults';
+import type { CredentialRequestFaultId } from './credential-request-faults';
 import type { IssuerIcsCondition, IssuerPolicyItem, IssuerProfile } from './ics';
 
 /** Variant codes of the issuer catalogue section 2.3: the credential format. */
@@ -51,7 +52,7 @@ export interface IssuanceAction {
   /** Number of proofs; default 1. */
   batchSize?: number;
   /** Named faults (at most one); empty for a valid issuance. */
-  faults: FaultId[];
+  faults: (FaultId | CredentialRequestFaultId)[];
   /** Stop after the token response, without a credential request. */
   stopAfterToken?: boolean;
   /** Expect and follow a deferred credential response. */
