@@ -224,6 +224,9 @@ importers:
       '@openid4vc/openid4vci':
         specifier: ^0.9.2
         version: 0.9.2
+      '@rp-conformance/core':
+        specifier: workspace:*
+        version: link:../core
       '@rp-conformance/forge':
         specifier: workspace:*
         version: link:../forge
@@ -234,15 +237,15 @@ importers:
       '@owf/x509':
         specifier: ^0.7.0
         version: 0.7.0
-      '@rp-conformance/core':
-        specifier: workspace:*
-        version: link:../core
       '@rp-conformance/status-provider':
         specifier: workspace:*
         version: link:../status-provider
       '@rp-conformance/trust-infrastructure':
         specifier: workspace:*
         version: link:../trust-infrastructure
+      '@rp-conformance/validator':
+        specifier: workspace:*
+        version: link:../validator
 
   packages/reference-rp:
     dependencies:
