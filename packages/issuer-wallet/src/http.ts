@@ -3,7 +3,7 @@
 // change it after its valid build.
 
 /** The steps of `SCN-M` and `SCN-I` the client runs, as recorded in the evidence. */
-export type IssuanceStep = 'offer' | 'metadata' | 'metadata-jwt' | 'token' | 'nonce' | 'credential';
+export type IssuanceStep = 'offer' | 'metadata' | 'metadata-jwt' | 'par' | 'authorization' | 'token' | 'nonce' | 'credential';
 
 /** A request before it is sent. */
 export interface HttpRequestMessage {

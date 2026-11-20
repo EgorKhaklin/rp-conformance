@@ -1,9 +1,9 @@
 // Issue 26: building blocks of the test cases of `PP_WS_SM_IssuerIntegrity`, `PP_WS_SM_Unlinkability`,
 // `PP_WS_SM_Revocation_004` to `_010` and `PP_Inf_SM_TrustMechanisms`: the `inspect` step with the wording of its
 // checks, issuance steps of a Wallet Unit, the `trust-list` step, and the status steps of chaining and suspension.
-import type { FormatVariant, IssuanceAction, IssuerExpectation, IssuerInspectionCheck, IssuerStepDefinition, IssuerTrustListAction, WalletUnit } from '@rp-conformance/core';
+import type { FormatVariant, GrantVariant, IssuanceAction, IssuerExpectation, IssuerInspectionCheck, IssuerStepDefinition, IssuerTrustListAction, WalletUnit } from '@rp-conformance/core';
 import { faultInfo } from '@rp-conformance/core';
-import { FORMAT_NAMES, iss, issuance } from './wording';
+import { FORMAT_NAMES, GRANT_NAMES, iss, issuance } from './wording';
 
 /** What each check of an `inspect` step establishes, as the FCAF text names it. */
 export const INSPECTION_CHECK_TEXT: Record<IssuerInspectionCheck, string> = {
@@ -40,12 +40,12 @@ export function inspected(checks: IssuerInspectionCheck[], what: string): Issuer
 export const inspectStep = (ofSteps: number[], text: string, expect: IssuerExpectation): IssuerStepDefinition => ({ text, run: { kind: 'inspect', ofSteps }, expect });
 
 /** Valid `SCN-I` of a Wallet Unit in the pre-authorized code flow, `ISS`. */
-export function unitIssuance(format: FormatVariant, unit: WalletUnit = 'CW-1', options: Partial<Omit<IssuanceAction, 'kind' | 'grant'>> & { why?: string } = {}): IssuerStepDefinition {
-  const { why, ...action } = options;
+export function unitIssuance(format: FormatVariant, unit: WalletUnit = 'CW-1', options: Partial<Omit<IssuanceAction, 'kind' | 'grant'>> & { why?: string; grant?: GrantVariant } = {}): IssuerStepDefinition {
+  const { why, grant = 'PA', ...action } = options;
   const batch = action.batchSize && action.batchSize > 1 ? `, with ${action.batchSize} proofs over the keys of one KA (a batch of one logical PID)` : '';
   return {
-    text: `The adapter creates a credential offer for \`${action.subject ?? 'SUBJ-1'}\` and the PID configuration in ${FORMAT_NAMES[format]} format, pre-authorized code. \`${unit}\` runs \`SCN-I\` without mutation${batch}${why ? ` (${why})` : ''}.`,
-    run: issuance(format, 'PA', { walletUnit: unit, ...action }),
+    text: `The adapter creates a credential offer for \`${action.subject ?? 'SUBJ-1'}\` and the PID configuration in ${FORMAT_NAMES[format]} format, ${grant === 'PA' ? 'pre-authorized code' : GRANT_NAMES[grant]}. \`${unit}\` runs \`SCN-I\` without mutation${batch}${why ? ` (${why})` : ''}.`,
+    run: issuance(format, grant, { walletUnit: unit, ...action }),
     expect: iss(format),
   };
 }

@@ -22,3 +22,5 @@ export * from './issuer/credential-request-faults';
 export * from './issuer/pid';
 // Issue 26: issuer integrity, unlinkability and trust infrastructure checks
 export * from './issuer/integrity-checks';
+// Issue 20: grant checks and faults
+export * from './issuer/grant-faults';

@@ -21,6 +21,9 @@ import { definitions as issuerIntegrity } from './pid_provider/SecurityMechanism
 import { definitions as revocationLifecycle } from './pid_provider/SecurityMechanisms/RevocationLifecycle';
 import { definitions as unlinkability } from './pid_provider/SecurityMechanisms/Unlinkability';
 import { definitions as trustMechanisms } from './pid_provider_inf/SecurityMechanisms/TrustMechanisms';
+// Issue 20: authorization code and pre-authorized code
+import { definitions as authorizationCode } from './pid_provider/Interaction/AuthorizationCode';
+import { definitions as preAuthorized } from './pid_provider/Interaction/PreAuthorized';
 
 export * from './wording';
 export * from './status';
@@ -55,6 +58,9 @@ export const issuerDefinitions: IssuerTestCaseDefinition[] = [
   ...issuerIntegrity,
   ...unlinkability,
   ...trustMechanisms,
+  // Issue 20
+  ...preAuthorized,
+  ...authorizationCode,
 ];
 
 /** The issuer definitions the harness can execute. */

@@ -5,6 +5,7 @@ import type { CredentialFormat, ExpectationOf, StepDefinitionOf, TestCaseDefinit
 import type { FaultId } from '../faults';
 import type { IssuerFaultId } from './faults';
 import type { CredentialRequestFaultId } from './credential-request-faults';
+import type { GrantFaultId } from './grant-faults';
 import type { IssuerIcsCondition, IssuerPolicyItem, IssuerProfile } from './ics';
 
 /** Variant codes of the issuer catalogue section 2.3: the credential format. */
@@ -60,9 +61,11 @@ export interface IssuanceAction {
   /** Number of proofs; default 1. */
   batchSize?: number;
   /** Named faults (at most one); empty for a valid issuance. */
-  faults: (FaultId | IssuerFaultId | CredentialRequestFaultId)[];
+  faults: (FaultId | IssuerFaultId | CredentialRequestFaultId | GrantFaultId)[];
   /** Stop after the token response, without a credential request. */
   stopAfterToken?: boolean;
+  /** Authorization code flow: stop after the authorization response, before the token request (its code is left for a `token-reuse` step). */
+  stopAfterAuthorization?: boolean;
   /** Expect and follow a deferred credential response. */
   deferred?: boolean;
   /** Encrypt the credential request and ask for an encrypted response. */
@@ -81,7 +84,7 @@ export interface IssuanceAction {
 }
 
 /** An artifact of an earlier step that a `token-reuse` step sends again. */
-export type ReusedArtifact = 'authorization-code' | 'par-request-uri' | 'refresh-token' | 'transaction-id' | 'dpop-proof' | 'proof';
+export type ReusedArtifact = 'authorization-code' | 'pre-authorized-code' | 'par-request-uri' | 'refresh-token' | 'transaction-id' | 'dpop-proof' | 'proof';
 
 /** Repeat a request of an earlier step with one of its artifacts. */
 export interface TokenReuseAction {
@@ -89,6 +92,8 @@ export interface TokenReuseAction {
   artifact: ReusedArtifact;
   /** The step (1-based) whose artifact is reused. */
   ofStep: number;
+  /** The Wallet Unit that sends it; default the one of that step (`CW-2` for a code redeemed by another client). */
+  walletUnit?: WalletUnit;
 }
 
 /** The Test Wallet Provider revokes a Wallet Instance or a WSCD, or changes one of its status lists `SL-WP-*`. */

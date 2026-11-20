@@ -15,7 +15,7 @@ one. Otherwise anyone who can corrupt the published list in transit stops all is
 
 Effect, shown by the issuer suite (cre8/rp-conformance issue 26, `PP_Inf_SM_TrustMechanisms_004_UF`, SD+PA and MD+PA):
 after a refresh, a version of `TL-WP` with a broken seal (and with `WP-A` removed in it) makes the token request of
-`CW-1` of `WP-A` fail with HTTP 401 `invalid_client` instead of the previous list applying; the same for a version
-sealed under `CA-X`.
+`CW-1` of `WP-A` fail with HTTP 401 `invalid_client` instead of the previous list applying, and in the authorization
+code flow its pushed authorization request with HTTP 400 `invalid_client`; the same for a version sealed under `CA-X`.
 
 Expected: keep the last list whose seal verified (until its `NextUpdate`) when a new version cannot be verified.
