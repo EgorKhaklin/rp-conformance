@@ -1,5 +1,5 @@
 # Known findings of EUDIPLO as PID Provider: FAILs of the issuer suite that are reported upstream with evidence. The
-# reference run against the pinned EUDIPLO release (issuer harness design section 5.5) reports these FAILs as known
+# reference run against the pinned EUDIPLO image (issuer harness design section 5.5) reports these FAILs as known
 # findings and marks their test cases "not validated" until EUDIPLO is fixed; any other FAIL, an INCONCLUSIVE or REVIEW
 # result, or a harness error fails it. Each entry names the test case, the finding and the upstream reference:
 #
@@ -10,7 +10,8 @@
 #   reference: EUDIPLO/eudiplo#<n>
 #
 # Remove an entry once EUDIPLO fixes it; the run names a known finding whose test case passed. The README lists the FAILs
-# expected against 9.1.0. Entries not yet reported upstream name the issue text prepared in upstream-findings/.
+# expected against the pinned reference image (reference.env). Entries not yet reported upstream name the issue text
+# prepared in upstream-findings/.
 
 # SM_Validity and DM_* (issue 21). Upstream issue text: upstream-findings/mdoc-full-date.md
 - testCase: PP_WS_DM_PidMdoc_002
