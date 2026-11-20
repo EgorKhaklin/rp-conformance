@@ -1,4 +1,7 @@
 import { isExecutable, type IssuerTestCaseDefinition } from '@rp-conformance/core';
+import { definitions as pidMdoc } from './pid_provider/DataModel/PidMdoc';
+import { definitions as pidSdJwt } from './pid_provider/DataModel/PidSdJwt';
+import { definitions as portrait } from './pid_provider/DataModel/Portrait';
 import { definitions as mainInteraction } from './pid_provider/Interaction/MainInteraction';
 // Issue 24: message structure
 import { definitions as credentialEndpoint } from './pid_provider/MessageStructure/CredentialEndpoint';
@@ -12,6 +15,7 @@ import { definitions as proofOfPossession } from './pid_provider/SecurityMechani
 import { definitions as revocation } from './pid_provider/SecurityMechanisms/Revocation';
 import { definitions as rpSupportive } from './pid_provider_rp/Interaction/Supportive';
 import { definitions as rpRevocation } from './pid_provider_rp/SecurityMechanisms/Revocation';
+import { definitions as validity } from './pid_provider/SecurityMechanisms/Validity';
 
 export * from './wording';
 export * from './status';
@@ -34,6 +38,11 @@ export const issuerDefinitions: IssuerTestCaseDefinition[] = [
   ...revocation,
   ...rpSupportive,
   ...rpRevocation,
+  // Issue 21: SM_Validity and the PID Rulebook (DM_*).
+  ...validity,
+  ...pidSdJwt,
+  ...pidMdoc,
+  ...portrait,
 ];
 
 /** The issuer definitions the harness can execute. */

@@ -69,6 +69,8 @@ export interface IssuanceAction {
   keyAttestationNonce?: boolean;
   /** After the faulty credential request, fetch a fresh `c_nonce` and send the request again without the fault. */
   retryWithFreshNonce?: boolean;
+  /** The User opts out of the portrait (PID_03); the step applies only where the ICS declares the opt-out (ICS-17). */
+  portraitOptOut?: boolean;
 }
 
 /** An artifact of an earlier step that a `token-reuse` step sends again. */

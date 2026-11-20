@@ -1,7 +1,7 @@
 // The harness services of an issuer run (issuer harness design sections 3 and 5.3): the test PKI, the Test Status
 // Provider (`SL-WP-A`, `SL-WP-B`), the Test Trust Infrastructure (`TL-WP`, `TL-PID`, `TL-AC`, `TL-RC`), the Test Wallet
 // Provider with its Wallet Units, and the enrolment of the Provider under test by the Test Registrar.
-import type { IssuerAdapter, IssuerIcs, IssuerTestEnvironment, PublishedTrustList } from '@rp-conformance/core';
+import type { CredentialSigningProfile, IssuerAdapter, IssuerIcs, IssuerTestEnvironment, PublishedTrustList } from '@rp-conformance/core';
 import { buildSealedLote, createTestPki, type Enrolment, enrolSut, LIST_PROFILES, type LoteListId, PID_DOCTYPE, PID_VCT, type TestPki, toEnrolledCertificate } from '@rp-conformance/forge';
 import { StatusProvider } from '@rp-conformance/status-provider';
 import { TrustInfrastructure } from '@rp-conformance/trust-infrastructure';
@@ -88,12 +88,15 @@ export async function startIssuerHarness(options: IssuerHarnessOptions): Promise
     fetch: localFetch,
     async enrol(adapter) {
       const csrs = await adapter.enrol(options.namespace);
+      const signingProfiles: CredentialSigningProfile[] = csrs
+        ? (csrs.credentialSigningProfiles ?? csrs.credentialSigning.map(() => 'sd-jwt-vc' as const))
+        : ['sd-jwt-vc', ...(options.ics.profiles.includes('P-MD') ? (['mdoc'] as const) : [])];
       const enrolment = await enrolSut(pki, {
         entity: 'PP-T',
         ...(csrs ? { csrs } : {}),
-        // EnrolmentRequest does not say which key signs which format: with CSRs every key signs SD-JWT VCs until mdoc
-        // is implemented; without, the Registrar generates one SD-JWT VC signer.
-        credentialSigningProfiles: csrs ? csrs.credentialSigning.map(() => 'sd-jwt-vc' as const) : ['sd-jwt-vc'],
+        // With CSRs the adapter names the format of each key (default SD-JWT VC); without, the Registrar generates an
+        // SD-JWT VC signer, and an mdoc document signer when the ICS declares mdoc (P-MD).
+        credentialSigningProfiles: signingProfiles,
         statusListWithIssuanceKey: csrs ? !csrs.statusListSigning : false,
         access: PROVIDER_ACCESS,
         registration: { providesAttestations: providedAttestations(options.ics) },
@@ -108,6 +111,7 @@ export async function startIssuerHarness(options: IssuerHarnessOptions): Promise
         runId: options.runId,
         trustLists: lists,
         credentialSigningCertificates: enrolment.credentialSigners.map(toEnrolledCertificate),
+        credentialSigningProfiles: enrolment.credentialSigners.map((signer) => signer.profile),
         ...(enrolment.statusListSigner ? { statusListSigningCertificate: toEnrolledCertificate(enrolment.statusListSigner) } : {}),
         accessCertificate: toEnrolledCertificate(enrolment.access),
         registrationCertificate: enrolment.registrationCertificate,

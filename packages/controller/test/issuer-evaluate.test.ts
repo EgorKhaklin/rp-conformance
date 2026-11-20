@@ -104,3 +104,23 @@ describe('observationOf', () => {
     expect(observation.tokenIssued).toBe(true);
   });
 });
+
+describe('CONF on an issuance step with output checks', () => {
+  const named = (status: CheckResult['status'], detail = 'detail'): CheckResult => ({ check: 'pid-attributes', status, detail });
+
+  it('passes when every check and the named check pass, and fails naming the named check', () => {
+    expect(evaluateIssuance({ codes: ['CONF'], text: '', checks: ['pid-attributes'] }, issued([...passing, named('pass')])).verdict).toBe('PASS');
+    expect(evaluateIssuance({ codes: ['CONF'], text: '', checks: ['pid-attributes'] }, issued([...passing, named('fail', 'birth_date is a text string')]))).toMatchObject({
+      verdict: 'FAIL',
+      reason: expect.stringContaining('pid-attributes failed (birth_date is a text string)'),
+    });
+  });
+
+  it('judges a step check (pid-formats) on the step, not on each credential', () => {
+    const both: IssuanceObservation = { ...issued(), credentials: [{ checks: passing }, { checks: passing }] };
+    expect(evaluateIssuance({ codes: ['CONF'], text: '', checks: ['pid-formats'] }, { ...both, stepChecks: [{ check: 'pid-formats', status: 'pass' }] }).verdict).toBe('PASS');
+    expect(
+      evaluateIssuance({ codes: ['CONF'], text: '', checks: ['pid-formats'] }, { ...both, stepChecks: [{ check: 'pid-formats', status: 'fail', detail: 'given_name differs' }] }),
+    ).toMatchObject({ verdict: 'FAIL', reason: expect.stringContaining('pid-formats failed on the step (given_name differs)') });
+  });
+});

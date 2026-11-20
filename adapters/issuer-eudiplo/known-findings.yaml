@@ -12,17 +12,6 @@
 # Remove an entry once EUDIPLO fixes it; the run names a known finding whose test case passed. The README lists the FAILs
 # expected against the pinned reference image (reference.env).
 
-# Issue 24: a gap of the adapter's configuration, not a defect of EUDIPLO (which issues mso_mdoc). Remove this entry when
-# issue 21 adds the mdoc PID configuration to the adapter: PP_WS_MS_Metadata_006 then passes without further change.
-- testCase: PP_WS_MS_Metadata_006
-  variants: [default]
-  finding: >-
-    The adapter configures the PID in SD-JWT VC only (pid-sd-jwt-vc, pid-sd-jwt-vc-2; ics.yaml ICS-02 SD-JWT VC), so the
-    Credential Issuer metadata offers no mso_mdoc configuration with doctype eu.europa.ec.eudi.pid.1 and PID_02 is not met
-    by this configuration. Evidence (run against 9.1.0-main.ae0792a on 2026-11-20): metadata-pid-configurations failed
-    "no PID configuration mso_mdoc with doctype eu.europa.ec.eudi.pid.1".
-  reference: cre8/rp-conformance#21 (mdoc PID configuration of the EUDIPLO issuer adapter)
-
 # Not yet reported upstream: the issue text prepared for each finding below is named in the comment above it,
 # in upstream-findings/.
 
@@ -111,3 +100,11 @@
   finding: >-
     The status list endpoint sets neither Cache-Control nor Expires, so caches are not bound to the token's ttl and exp
     (Token Status List section 13.7)
+
+# SM_Validity and DM_* (issue 21). Upstream issue text: upstream-findings/mdoc-full-date.md
+- testCase: PP_WS_DM_PidMdoc_002
+  variants: [MD+PA, MD+AC]
+  finding: >-
+    EUDIPLO issues the mdoc PID's birth_date, issuance_date and expiry_date as CBOR text strings, not as full-date
+    (tag 1004) or tdate (tag 0) as the PID Rulebook section 4.2 requires: its claim field types have no date type
+  reference: adapters/issuer-eudiplo/upstream-findings/mdoc-full-date.md (not yet reported upstream)

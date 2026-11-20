@@ -12,7 +12,15 @@ export interface EnrolmentRequest {
   statusListSigning?: string;
   /** The key of the access certificate from `AC-A`. */
   access: string;
+  /**
+   * The format each credential signing key signs, in the order of `credentialSigning`: `sd-jwt-vc` (issuance signer) or
+   * `mdoc` (document signer, ISO/IEC 18013-5 Annex B). Default `sd-jwt-vc` for every key.
+   */
+  credentialSigningProfiles?: CredentialSigningProfile[];
 }
+
+/** The certificate profile of a credential signing key: SD-JWT VC issuance signer, or mdoc document signer. */
+export type CredentialSigningProfile = 'sd-jwt-vc' | 'mdoc';
 
 /** A certificate the Test Registrar issued; with its key only when the Registrar generated the key (no CSR). */
 export type EnrolledCertificate = Omit<KeyedCertificate, 'privateJwk' | 'privateKeyPem'> &
@@ -28,6 +36,8 @@ export interface IssuerTestEnvironment {
   trustLists: PublishedTrustList[];
   /** Credential signing certificate(s) under the SUT's issuance CA. */
   credentialSigningCertificates: EnrolledCertificate[];
+  /** The profile of each credential signing certificate, in the same order; default `sd-jwt-vc` for each. */
+  credentialSigningProfiles?: CredentialSigningProfile[];
   /** Status list signing certificate under the SUT's revocation CA; left out when it signs with its issuance key. */
   statusListSigningCertificate?: EnrolledCertificate;
   /** Access certificate issued by `AC-A`. */
@@ -44,6 +54,8 @@ export interface CreateOfferRequest {
   byReference: boolean;
   /** Pre-authorized code grant: protect the code with a transaction code (`tx_code`), returned in `CreatedOffer.txCode`. */
   txCode?: boolean;
+  /** The User opts out of the portrait (PID_03, `DM_Portrait_001`); only where the ICS declares the opt-out (ICS-17). */
+  portraitOptOut?: boolean;
 }
 
 export interface CreatedOffer {
