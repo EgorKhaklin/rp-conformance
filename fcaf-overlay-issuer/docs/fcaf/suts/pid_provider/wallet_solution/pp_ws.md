@@ -1,0 +1,3 @@
+# PID Provider - Wallet Solution interface
+
+The `(pp_ws)` test class covers the interface between the PID Provider and Wallet Units: the Credential Issuer and Authorization Server metadata, the credential offer, both grants (pre-authorized code, authorization code with PAR and PKCE), the token, nonce and credential endpoints, batch, deferred and re-issuance and the notification endpoint, the validation of the Wallet Instance Attestation, the key attestation, the proofs and DPoP, the PID the Provider issues, checked against the PID Rulebook, and its robustness against malformed and wrongly encrypted requests.

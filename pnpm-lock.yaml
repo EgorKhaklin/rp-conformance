@@ -145,6 +145,9 @@ importers:
       '@rp-conformance/definitions':
         specifier: workspace:*
         version: link:../definitions
+      '@rp-conformance/issuer-definitions':
+        specifier: workspace:*
+        version: link:../issuer-definitions
 
   packages/forge:
     dependencies:
