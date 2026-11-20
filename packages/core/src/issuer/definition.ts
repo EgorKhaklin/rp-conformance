@@ -153,7 +153,9 @@ export type IssuerExpectationCode =
   | 'UNCHANGED'
   | 'NOFETCH'
   | 'POLICY'
-  | 'INFO';
+  | 'INFO'
+  // A `present` step (`PP_RP_SM_Revocation_008`): the reference Relying Party accepts the presentation.
+  | 'ACC';
 
 export interface IssuerExpectation extends ExpectationOf<IssuerExpectationCode> {
   /** For `POLICY`: the ICS item that decides the outcome. */

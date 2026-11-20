@@ -79,8 +79,21 @@ of the reference's own features run only when it is the reference version.
 
 `setStatus` cannot be shown without an issued credential: for a session that has issued none, EUDIPLO answers
 `409 No status mapping found for session ... and credential configuration undefined`, and
-`GET /api/session/{id}/credential-status` answers `[]`. The test asserts exactly that; revocation of an issued PID comes
-with the issuance client and the first issuer test cases (issue 17).
+`GET /api/session/{id}/credential-status` answers `[]`. The test asserts exactly that. Revocation of an issued PID is
+exercised by the revocation test cases (issue 22): `PP_WS_SM_Revocation_003` and `PP_RP_SM_Revocation_008` revoke
+through `setStatus` and see the published list change within `T_rev`.
+
+## Status lists (issue 22)
+
+The status list test cases (`PP_WS_SM_Revocation_001` to `_003`, `PP_RP_IA_Supportive_*`, `PP_RP_SM_Revocation_*`)
+fetch the lists EUDIPLO publishes under `/issuers/{tenant}/status-management/status-list/{id}` anonymously, as a
+Relying Party does. EUDIPLO answers `Accept: application/statuslist+cwt` with a CWT and anything else with a JWT
+(`ICS-05.token_formats`). It re-signs a list on every change (`immediateUpdate`) and when a fetch finds it expired, so
+every fetch returns a token that has not expired (`PP_RP_SM_Revocation_005`). It sets no cache headers on the status
+list response, a known finding of `PP_RP_IA_Supportive_002` (issue text in
+[`upstream-findings/status-list-cache-headers.md`](upstream-findings/status-list-cache-headers.md)). It publishes no
+identifier lists and the adapter configures no mdoc PID, so `PP_WS_SM_Revocation_002` and the `MD` variants of
+`PP_RP_SM_Revocation_001` and `_007` are NOT APPLICABLE.
 
 ## What the pinned image still lacks, and the test cases it leaves not validated
 
@@ -94,7 +107,7 @@ Checked against the running image and EUDIPLO's source at `ae0792a`.
 | A proof's `iat` is checked only against the future in the source; its age is bounded only by the `c_nonce`, which lives 10 minutes | `ICS-14.T_proof` "not bounded"; the test cases take the 5 minute cap | none: `PP_WS_SM_ProofOfPossession_006_UF` passes, the pinned image refuses `iat` − 1 h with `invalid_proof` (issue 19 run) |
 | No subject record to change: the claims travel with each offer | No `changeSubject` | `PP_WS_SM_Revocation_008` (NOT APPLICABLE) |
 | With `walletAttestationRequired`, the authorization server metadata still lists `none` next to `attest_jwt_client_auth` in `token_endpoint_auth_methods_supported` | A token request without WIA, or without PoP, is still refused with `invalid_client` | none: `PP_WS_SM_ClientAttestation_002_UF` passes |
-| Shortest status list lifetime 60 s (`ttl` minimum, live) | `T_rev` PT1M with `immediateUpdate` | none: `REVOKED(T_rev)` test cases poll for a minute |
+| Shortest status list lifetime 60 s (`ttl` minimum, live) | `T_rev` PT1M with `immediateUpdate` | none: `REVOKED(T_rev)` test cases (`PP_WS_SM_Revocation_003`, `PP_RP_SM_Revocation_008`) poll for a minute, `PP_RP_SM_Revocation_005` across one `exp` |
 | Revocation chaining is a poll, and a suspended wallet unit changes nothing | `T_chain` PT7M; a suspended WIA or KA is still rejected at issuance (strict), but suspension does not chain | none (the catalogue chains revocation only) |
 
 Known findings of the security mechanism test cases (issue 19), each with its prepared upstream issue text in

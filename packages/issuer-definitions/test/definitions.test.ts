@@ -27,8 +27,10 @@ describe('issuer definitions', () => {
     expect(() => defineIssuerTestCase({ ...definition, id: 'RP_WS_IA_MainInteraction_001a' })).toThrow(/not an issuer test case ID/);
   });
 
-  it('names only configurations the reference ICS declares', () => {
-    for (const definition of issuerDefinitions.filter(isExecutable)) {
+  it('names only configurations the reference ICS declares, in the test cases that apply to it', () => {
+    const profiles = new Set((eudiploIcs as { profiles?: string[] }).profiles ?? []);
+    // A variant whose profile the ICS does not declare (`MD` without `P-MD`) is NOT APPLICABLE, so its configuration is never resolved.
+    for (const definition of issuerDefinitions.filter((d) => isExecutable(d) && d.profile.every((c) => profiles.has(c.equals)))) {
       for (const step of definition.steps) {
         if (step.run?.kind !== 'issuance') continue;
         for (const configuration of step.run.configurations) expect(eudiploIcs.items[configuration], configuration).toEqual(expect.any(String));

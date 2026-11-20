@@ -87,9 +87,18 @@ interface DecodedToken {
   sub: unknown;
   iat: unknown;
   exp: unknown;
+  /** `ttl` (Token Status List section 5.1), as published. */
+  ttl?: unknown;
   list: unknown;
   verify: (jwk: JsonWebKey) => Promise<boolean>;
 }
+
+/** Decodes a Status List Token in either format without verifying it, for the issuer side's `OBS-SL` (published-status.ts). */
+export function decodeStatusListToken(format: 'jwt' | 'cwt', body: string | Uint8Array): DecodedToken {
+  return format === 'jwt' ? decodeJwt(asText(body).trim()) : decodeCwt(asBytes(body));
+}
+
+export type { DecodedToken as DecodedStatusListToken };
 
 /**
  * Runs the status list checks for a credential's status reference, in the order of Token Status List section 8.
@@ -238,6 +247,7 @@ function decodeJwt(compact: string): DecodedToken {
     sub: payload.sub,
     iat: payload.iat,
     exp: payload.exp,
+    ttl: payload.ttl,
     list: payload.status_list,
     verify: (jwk) => verifyEs256(jwk, `${parts[0]}.${parts[1]}`, base64url.decode(parts[2] ?? '')),
   };
@@ -273,6 +283,7 @@ function decodeCwt(bytes: Uint8Array): DecodedToken {
     sub: claims.get(CWT.sub),
     iat: claims.get(CWT.iat),
     exp: claims.get(CWT.exp),
+    ttl: claims.get(CWT.ttl),
     list: claims.get(CWT.statusList),
     verify: (jwk) => verifyCoseSign1(structure, jwk),
   };

@@ -8,8 +8,13 @@ import { definitions as offer } from './pid_provider/MessageStructure/Offer';
 import { definitions as clientAttestation } from './pid_provider/SecurityMechanisms/ClientAttestation';
 import { definitions as keyAttestation } from './pid_provider/SecurityMechanisms/KeyAttestation';
 import { definitions as proofOfPossession } from './pid_provider/SecurityMechanisms/ProofOfPossession';
+// Issue 22: revocation and published status lists.
+import { definitions as revocation } from './pid_provider/SecurityMechanisms/Revocation';
+import { definitions as rpSupportive } from './pid_provider_rp/Interaction/Supportive';
+import { definitions as rpRevocation } from './pid_provider_rp/SecurityMechanisms/Revocation';
 
 export * from './wording';
+export * from './status';
 
 /**
  * Every issuer test definition (issuer harness design section 6.1), one per test case and variant: the source of truth
@@ -25,6 +30,10 @@ export const issuerDefinitions: IssuerTestCaseDefinition[] = [
   ...clientAttestation,
   ...keyAttestation,
   ...proofOfPossession,
+  // Issue 22: revocation and published status lists.
+  ...revocation,
+  ...rpSupportive,
+  ...rpRevocation,
 ];
 
 /** The issuer definitions the harness can execute. */

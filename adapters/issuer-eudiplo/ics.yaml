@@ -30,6 +30,7 @@ items:
   ICS-04.key_storage: [iso_18045_high]       # live: keyAttestationsRequired, published as key_attestations_required
   ICS-04.user_authentication: [iso_18045_high]
   ICS-05: Token Status List                  # live: statusManagement true. JWT, and CWT for Accept application/statuslist+cwt (docs issuance/revocation.md; a token exists only once a credential is issued)
+  ICS-05.token_formats: [jwt, cwt]           # source: status-list.controller.ts answers Accept application/statuslist+cwt with a CWT, anything else with a JWT (issue 22, sl-media-type)
   ICS-05.short_lived: "No"                   # lifeTime 30 days
   ICS-05.identifier_list: "No"               # source: EUDIPLO reads identifier lists as verifier (trust/status-list-verifier.service.ts) but publishes none
   ICS-05.suspension: "Yes"                   # live: status list bits 2 (PUT /api/status-list-config); status 2 = suspended
