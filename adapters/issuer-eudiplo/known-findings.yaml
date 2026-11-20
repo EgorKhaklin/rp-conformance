@@ -9,7 +9,83 @@
 #     ...
 #   reference: EUDIPLO/eudiplo#<n>
 #
-# Remove an entry once EUDIPLO fixes it; the run names a known finding whose test case passed. The one executable test
-# case, PP_WS_IA_MainInteraction_001 [SD+PA], passes, so the list is empty. The README lists the FAILs expected against
-# the pinned reference image (reference.env).
-[]
+# Remove an entry once EUDIPLO fixes it; the run names a known finding whose test case passed. The README lists the
+# FAILs expected against the pinned reference image (reference.env).
+#
+# Not yet reported upstream: the issue text prepared for each finding is named in the comment above it, in
+# upstream-findings/.
+
+# Issue 19: PP_WS_SM_ClientAttestation, _KeyAttestation, _ProofOfPossession (found 2026-11-20 against 9.1.0-main.ae0792a)
+
+# Upstream issue text: upstream-findings/attestation-service-anchor.md
+- testCase: PP_WS_SM_ClientAttestation_006_UF
+  variants: [SD+PA]
+  finding: >-
+    EUDIPLO accepts a WIA signed under WP-A's KA CA (TL-WP service "WP-A WSCD"): it matches the signer against every
+    Wallet Solution issuance service of the entity, not the one named by the WIA's wallet_name (TS3 section 3.2)
+# Upstream issue text: upstream-findings/client-attestation-pop-jti-replay.md
+- testCase: PP_WS_SM_ClientAttestation_009_UF
+  variants: [SD+PA]
+  finding: >-
+    EUDIPLO accepts a client attestation PoP whose jti it accepted in an earlier token request of the same Wallet Unit
+    (step 4); it keeps a jti store for DPoP proofs only
+# Upstream issue text: upstream-findings/wallet-attestation-status-claim.md
+- testCase: PP_WS_SM_ClientAttestation_012_UF
+  variants: [SD+PA]
+  finding: >-
+    EUDIPLO issues a PID for a revoked Wallet Instance: it reads a WIA's status only from a top-level status claim, not
+    from TS3's client_status.status, and skips the check ("Wallet attestation does not contain status claim")
+# Upstream issue text: upstream-findings/wallet-attestation-status-claim.md
+- testCase: PP_WS_SM_ClientAttestation_013_UF
+  variants: [SD+PA]
+  finding: >-
+    EUDIPLO issues a PID when the WIA's status list is unreachable or a bad Status List Token (every stimulus): it
+    never fetches the list of a TS3 WIA (client_status.status is not read)
+# Upstream issue text: upstream-findings/maintenance-period.md
+- testCase: PP_WS_SM_ClientAttestation_015
+  variants: [SD+PA]
+  finding: >-
+    The PID's exp (30 days, rounded up to the hour) is after the end of the WIA's revocation maintenance period
+    (client_status.exp, 30 days): EUDIPLO does not bound the PID by it (ISSU_12c, TS3 section 2.4)
+# Upstream issue text: upstream-findings/maintenance-period.md
+- testCase: PP_WS_SM_ClientAttestation_016_UF
+  variants: [SD+PA]
+  finding: >-
+    A WIA whose maintenance period ends tomorrow is neither rejected nor does it shorten the PID, which expires in
+    30 days
+# Upstream issue text: upstream-findings/attestation-service-anchor.md
+- testCase: PP_WS_SM_KeyAttestation_004_UF
+  variants: [SD+PA]
+  finding: >-
+    EUDIPLO accepts a KA signed under WP-A's WIA CA (TL-WP service "WP-A Wallet"), stimulus (d); the stimuli CA-X,
+    PP-A and WP-W are rejected
+# Upstream issue text: upstream-findings/key-attestation-nonce.md
+- testCase: PP_WS_SM_KeyAttestation_007_UF
+  variants: [SD+PA]
+  finding: >-
+    In a jwt proof, EUDIPLO accepts a KA whose nonce is the c_nonce of another session, or which has no nonce
+    (OpenID4VCI 1.0 Appendix F.1, F.4); as the attestation proof type a KA without nonce is rejected
+# Upstream issue text: upstream-findings/wallet-attestation-status-claim.md
+- testCase: PP_WS_SM_KeyAttestation_008_UF
+  variants: [SD+PA]
+  finding: >-
+    EUDIPLO issues a PID for a revoked WSCD: it reads a KA's status only from a top-level status claim, not from TS3's
+    key_storage_status.status, and skips the check ("Key attestation does not contain status claim")
+# Upstream issue text: upstream-findings/wallet-attestation-status-claim.md
+- testCase: PP_WS_SM_KeyAttestation_009_UF
+  variants: [SD+PA]
+  finding: >-
+    EUDIPLO issues a PID when the KA's status list is unreachable or a bad Status List Token (every stimulus): it never
+    fetches the list of a TS3 KA (key_storage_status.status is not read)
+# Upstream issue text: upstream-findings/maintenance-period.md
+- testCase: PP_WS_SM_KeyAttestation_011
+  variants: [SD+PA]
+  finding: >-
+    The PID's exp (30 days, rounded up to the hour) is after the end of the KA's revocation maintenance period
+    (key_storage_status.exp, 30 days)
+# Upstream issue text: upstream-findings/proof-alg-none-error.md
+- testCase: PP_WS_SM_ProofOfPossession_002_UF
+  variants: [SD+PA]
+  finding: >-
+    A key proof with alg none is refused with invalid_credential_request instead of invalid_proof (OpenID4VCI 1.0
+    section 8.3.1.2); HS256 and ES256K get invalid_proof

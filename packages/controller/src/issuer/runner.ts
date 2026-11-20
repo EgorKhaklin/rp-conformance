@@ -21,6 +21,16 @@ import {
 import { type HttpExchange, IssuanceClient, type IssuanceEvidence, oauthErrorOf, walletUnitOf } from '@rp-conformance/issuer-wallet';
 import { validateIssuedSdJwtVc } from '@rp-conformance/validator';
 import { worst } from '../evaluate';
+import {
+  type AttestationState,
+  applyWalletEvent,
+  isIssuerRequestFault,
+  maintenancePeriodCheck,
+  newAttestationState,
+  prepareIssuance,
+  rememberIssuance,
+  sentAttestations,
+} from './attestations';
 import { harnessInfo } from '../info';
 import { evaluateIssuance, type IssuanceObservation } from './evaluate';
 import { type IssuerHarness, PID_TRUST_RULE, startIssuerHarness } from './harness';
@@ -244,6 +254,8 @@ interface Context extends IssuerRunOptions {
 /** State shared by the steps of one test case: one issuance client (one DPoP key) per Wallet Unit (design section 5.1). */
 interface TestCaseState {
   clients: Map<string, IssuanceClient>;
+  /** Moved status references and replay values of the Wallet Units (issue 19). */
+  attestations: AttestationState;
 }
 
 async function runIssuerTestCase(definition: IssuerTestCaseDefinition, ctx: Context): Promise<IssuerTestCaseRecord> {
@@ -258,10 +270,12 @@ async function runIssuerTestCase(definition: IssuerTestCaseDefinition, ctx: Cont
   const unmet = issuerApplicability(definition, ctx.ics);
   if (unmet.length) return end('NOT APPLICABLE', `profile not met: ${unmet.join('; ')}`);
   if (control && control.verdict !== 'PASS') return end('INCONCLUSIVE', `positive control ${outcomes.map((o) => o.id).join(' or ')} did not pass in ${variant}`);
-  const state: TestCaseState = { clients: new Map() };
+  const state: TestCaseState = { clients: new Map(), attestations: newAttestationState() };
   const steps: IssuerStepRecord[] = [];
   for (const [index, step] of definition.steps.entries()) steps.push(await runIssuerStep(definition, variant, index + 1, step, ctx, state));
-  return { ...base, verdict: worst(steps.map((s) => s.verdict)), control, steps };
+  // A step that does not apply to the Provider (NOT APPLICABLE) does not count, unless no step applies.
+  const applicable = steps.filter((s) => s.verdict !== 'NOT APPLICABLE');
+  return { ...base, verdict: applicable.length ? worst(applicable.map((s) => s.verdict)) : 'NOT APPLICABLE', control, steps };
 }
 
 async function runIssuerStep(
@@ -294,6 +308,18 @@ async function runIssuerStep(
   };
   try {
     if (step.run?.kind === 'issuance') await runIssuance(step, step.run, record, save, ctx, state);
+    else if (step.run?.kind === 'wallet-event' && step.expect.codes.every((code) => code === 'INFO')) {
+      record.walletUnit = step.run.walletUnit ?? 'CW-1';
+      const served = await applyWalletEvent(step.run, {
+        twp: ctx.harness.twp,
+        statusProvider: ctx.harness.status,
+        namespace: ctx.harness.namespace,
+        state: state.attestations,
+        skewSeconds: ISSUER_SKEW_SECONDS,
+      });
+      record.verdict = 'PASS';
+      record.reason = `recorded: ${served}`;
+    }
     else record.reason = step.run ? `the step action ${step.run.kind} is not implemented yet` : 'the step is text only';
   } catch (error) {
     record.verdict = 'INCONCLUSIVE';
@@ -305,7 +331,8 @@ async function runIssuerStep(
 /** What the issuance client and the issuance action support so far; anything else leaves the step INCONCLUSIVE. */
 function unsupported(action: IssuanceAction): string | undefined {
   if (action.grant !== 'pre-authorized_code') return 'the issuance client implements the pre-authorized code flow only';
-  if (action.faults.length) return `issuer faults are not implemented yet (${action.faults.join(', ')})`;
+  const notImplemented = action.faults.filter((fault) => !isIssuerRequestFault(fault));
+  if (notImplemented.length) return `the faults ${notImplemented.join(', ')} are not implemented yet`;
   const options: string[] = (['stopAfterToken', 'deferred', 'encryption', 'credentialIdentifier'] as const).filter((option) => action[option]);
   if ((action.batchSize ?? 1) > 1) options.push('batchSize');
   return options.length ? `the issuance option(s) ${options.join(', ')} are not implemented yet` : undefined;
@@ -335,22 +362,74 @@ async function runIssuance(
   const offer = await ctx.adapter.createOffer({ subject, configurations, grant: action.grant, byReference, txCode });
   record.offer = { sessionId: offer.sessionId, offer: offer.offer, byReference, txCode: offer.txCode !== undefined, configurations };
 
-  let client = state.clients.get(unit);
+  // A plain issuance reuses the unit's client (one DPoP key per Wallet Unit); a step with a fault, a moved status
+  // reference or another proof type gets a client with its own binding and hooks (issue 19).
+  const plain = !action.faults.length && !action.proofType && !action.keyAttestationNonce && !state.attestations.status.has(unit);
+  const prepared = plain ? undefined : await prepareIssuance(action, ctx.harness.twp, state.attestations);
+  let client = plain ? state.clients.get(unit) : undefined;
   if (!client) {
-    client = await IssuanceClient.create(walletUnitOf(ctx.harness.twp, unit), { allowInsecureUrls: true });
-    state.clients.set(unit, client);
+    client = await IssuanceClient.create(prepared?.unit ?? walletUnitOf(ctx.harness.twp, unit), {
+      allowInsecureUrls: true,
+      ...(prepared ? { hooks: prepared.hooks } : {}),
+    });
+    if (plain) state.clients.set(unit, client);
   }
   const evidence = await client.issue({ offer: offer.offer, ...(offer.txCode !== undefined ? { txCode: offer.txCode } : {}), credentialConfigurationId: configurations[0] });
+  // `REJ:invalid_nonce, then ISS`: the same request again, without the fault, with a fresh `c_nonce`.
+  const firstAttempt = { exchanges: evidence.exchanges.length, credentials: evidence.credentials.length };
+  if (action.retryWithFreshNonce && prepared && evidence.error && evidence.token && evidence.metadata) {
+    prepared.withoutFault();
+    try {
+      const cNonce = await client.requestNonce(evidence.metadata.result, evidence);
+      await client.requestCredential(evidence.metadata.result, evidence.token, configurations[0], cNonce, evidence);
+      delete evidence.error;
+    } catch (error) {
+      evidence.error = `retry with a fresh c_nonce: ${(error as Error).message}`;
+    }
+  }
+  rememberIssuance(state.attestations, unit, evidence);
   record.exchanges = evidence.exchanges;
   if (evidence.token) record.token = { tokenType: evidence.token.tokenType };
   if (evidence.error) record.error = evidence.error;
   record.credentials = await validateCredentials(evidence, ctx);
+  if (step.expect.checks?.includes('maintenance-period')) {
+    const sent = sentAttestations(evidence.exchanges);
+    for (const credential of record.credentials) credential.checks.push(maintenancePeriodCheck(credential.credential, sent));
+  }
   for (const [i, credential] of record.credentials.entries()) await save(`credential-${i + 1}.txt`, credential.credential);
   await save('issuance.json', `${JSON.stringify({ offer: record.offer, offerObject: evidence.offer, metadata: evidence.metadata, exchanges: evidence.exchanges }, null, 2)}\n`);
 
-  const evaluation = evaluateIssuance(step.expect, observationOf(evidence, record.credentials));
+  // `proof.p521` applies only where the configuration does not advertise ES512 for `jwt` proofs (catalogue
+  // PP_WS_SM_ProofOfPossession_009_UF: "P-521 if not advertised").
+  const proofAlgorithms = (evidence.metadata?.result.credentialIssuer.credential_configurations_supported[configurations[0]] as
+    | { proof_types_supported?: { jwt?: { proof_signing_alg_values_supported?: string[] } } }
+    | undefined)?.proof_types_supported?.jwt?.proof_signing_alg_values_supported;
+  if (action.faults.includes('proof.p521') && proofAlgorithms?.includes('ES512')) {
+    record.verdict = 'NOT APPLICABLE';
+    record.reason = `the configuration advertises ES512 for jwt proofs (${proofAlgorithms.join(', ')}); ${record.credentials.length ? `issued ${record.credentials.length} credential(s)` : 'no credential issued'}`;
+    return;
+  }
+  const evaluation = action.retryWithFreshNonce
+    ? evaluateRetry(step, evidence, record.credentials, firstAttempt)
+    : evaluateIssuance(step.expect, observationOf(evidence, record.credentials));
   record.verdict = evaluation.verdict;
   record.reason = evaluation.reason;
+}
+
+/**
+ * A step with `retryWithFreshNonce`: its first code (`REJ:invalid_nonce`) is judged on the faulty attempt, the others
+ * (`ISS`) on the retry; the step's verdict is the worse of both.
+ */
+function evaluateRetry(step: IssuerStepDefinition, evidence: IssuanceEvidence, credentials: IssuedCredentialRecord[], first: { exchanges: number; credentials: number }) {
+  const [rejected, ...retried] = step.expect.codes;
+  const attempt = observationOf({ exchanges: evidence.exchanges.slice(0, first.exchanges), ...(evidence.error && evidence.exchanges.length === first.exchanges ? { error: evidence.error } : {}) }, credentials.slice(0, first.credentials));
+  const one = evaluateIssuance({ ...step.expect, codes: [rejected] }, attempt);
+  if (evidence.exchanges.length === first.exchanges) {
+    return { verdict: worst([one.verdict, 'FAIL']), reason: `${one.reason}; no retry was sent${evidence.error ? ` (${evidence.error})` : ''}` };
+  }
+  const retry = { exchanges: evidence.exchanges.slice(first.exchanges), ...(evidence.error ? { error: evidence.error } : {}) };
+  const two = evaluateIssuance({ ...step.expect, codes: retried }, observationOf(retry, credentials.slice(first.credentials)));
+  return { verdict: worst([one.verdict, two.verdict]), reason: `first request: ${one.reason}; retry with a fresh c_nonce: ${two.reason}` };
 }
 
 /** `OBS-CRED`: every credential the step received through the reference validator, with the suite's trust configuration. */
