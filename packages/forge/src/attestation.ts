@@ -3,7 +3,7 @@
 // and `attribute_C` (date), in SD-JWT VC and in mdoc format. The category follows from the issuer, not from the type.
 import { issueMdoc } from './mdoc';
 import { issueSdJwtVc, type SdJwtVcIssueOptions } from './pid';
-import type { MdocIssueOptions } from './mdoc';
+import { DEFAULT_PID_MDOC_CLAIMS, type MdocIssueOptions } from './mdoc';
 
 /** `vct` of `default_credential_A` in SD-JWT VC format. A URN, so a Relying Party has no type metadata to fetch. */
 export const CREDENTIAL_A_VCT = 'urn:rp-conformance:credential_a:1';
@@ -35,4 +35,34 @@ export function issueCredentialAMdoc(options: MdocIssueOptions) {
     claims: { ...DEFAULT_CREDENTIAL_A_CLAIMS },
     fullDates: new Set(['attribute_C']),
   });
+}
+
+/**
+ * The identifying attributes `default_credential_A` carries in UC_Presentation_010 and _011: those of the holder of
+ * `default_credential_pid`, or of another person. `birthdate` in SD-JWT VC format, `birth_date` (`full-date`) in mdoc
+ * format, as in the PID.
+ */
+export function identifyingClaims(of: 'holder' | 'other-person', format: 'dc+sd-jwt' | 'mso_mdoc'): Record<string, unknown> {
+  const person =
+    of === 'holder'
+      ? { family_name: DEFAULT_PID_MDOC_CLAIMS.family_name, given_name: DEFAULT_PID_MDOC_CLAIMS.given_name, birth: DEFAULT_PID_MDOC_CLAIMS.birth_date }
+      : { family_name: 'Musterfrau', given_name: 'Gabriele', birth: '1971-03-05' };
+  return { family_name: person.family_name, given_name: person.given_name, [format === 'mso_mdoc' ? 'birth_date' : 'birthdate']: person.birth };
+}
+
+/** `default_credential_A` in SD-JWT VC format with additional claims, issued like the PID. */
+export function issueCredentialASdJwtVcWith(claims: Record<string, unknown>) {
+  return (options: SdJwtVcIssueOptions) => issueSdJwtVc({ ...options, vct: CREDENTIAL_A_VCT, claims: { ...DEFAULT_CREDENTIAL_A_CLAIMS, ...claims } });
+}
+
+/** `default_credential_A` in mdoc format with additional elements (`birth_date` as `full-date`), issued like the PID. */
+export function issueCredentialAMdocWith(claims: Record<string, unknown>) {
+  return (options: MdocIssueOptions) =>
+    issueMdoc({
+      ...options,
+      docType: CREDENTIAL_A_DOCTYPE,
+      namespace: CREDENTIAL_A_NAMESPACE,
+      claims: { ...DEFAULT_CREDENTIAL_A_CLAIMS, ...claims },
+      fullDates: new Set(['attribute_C', 'birth_date']),
+    });
 }

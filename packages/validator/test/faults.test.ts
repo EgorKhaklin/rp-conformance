@@ -1,4 +1,5 @@
 import {
+  attestation,
   FAULT_IDS,
   type FaultId,
   faultInfo,
@@ -191,7 +192,7 @@ describe('fault self-validation', () => {
     },
   );
 
-  it.each(FAULT_IDS.filter((fault) => !['trust-list', 'request'].includes(faultInfo(fault).point)))('%s fails exactly its target check', async (fault) => {
+  it.each(FAULT_IDS.filter((fault) => !['trust-list', 'request', 'vp-token'].includes(faultInfo(fault).point)))('%s fails exactly its target check', async (fault) => {
     const result = await fixture.validate(actionWith(fault), { other: await otherFor(fault) });
     const target = faultInfo(fault).target;
     expect(result.failures).toEqual(target ? [target] : []);
@@ -340,5 +341,42 @@ describe('fault self-validation', () => {
       expect(result.credential?.failed).toBe(faultInfo(fault).target);
       expect(result.credential && 'statusListFetched' in result.credential && result.credential.statusListFetched).toBe(false);
     }
+  });
+});
+
+// The vp_token faults of the combined presentations (UC_Presentation): a valid PID and a valid non-qualified EAA for
+// `default_query_pid_eaa`, of which the vp_token fails exactly `vp-token`, in each format the fault applies to and in
+// both flows; the presentations in it are valid, and are not validated once the vp_token as a whole failed.
+describe('vp_token faults', () => {
+  const combined = (fault: FaultId | undefined, format: 'dc+sd-jwt' | 'mso_mdoc') =>
+    presentation({
+      query: format === 'mso_mdoc' ? 'default_query_pid_eaa_mdoc' : 'default_query_pid_eaa',
+      credential: pid.of(format),
+      answers: 'pid',
+      alongside: [{ answers: 'eaa', credential: attestation.of('eaa', format) }],
+      ...(fault ? { response: { faults: [fault] } } : {}),
+    });
+  const cases = (['dc+sd-jwt', 'mso_mdoc'] as const).flatMap((format) =>
+    (['redirect', 'dc-api'] as const).flatMap((flow) => [
+      [undefined, format, flow] as const,
+      ...FAULT_IDS.filter((fault) => faultInfo(fault).point === 'vp-token' && (!faultInfo(fault).format || faultInfo(fault).format === format)).map(
+        (fault) => [fault, format, flow] as const,
+      ),
+    ]),
+  );
+
+  it.each(cases)('%s (%s via %s) fails exactly its target check', async (fault, format, flow) => {
+    const result = await fixture.validate(combined(fault, format), { flow });
+    expect(result.failures).toEqual(fault ? [faultInfo(fault).target] : []);
+  });
+
+  it.each(['dc+sd-jwt', 'mso_mdoc'] as const)('an EAA of another person fails exactly combined-binding (%s)', async (format) => {
+    const action = presentation({
+      query: format === 'mso_mdoc' ? 'default_query_pid_eaa_identifying_mdoc' : 'default_query_pid_eaa_identifying',
+      credential: pid.of(format),
+      answers: 'pid',
+      alongside: [{ answers: 'eaa', credential: attestation.of('eaa', format, { identifying: 'other-person' }) }],
+    });
+    expect((await fixture.validate(action)).failures).toEqual(['combined-binding']);
   });
 });

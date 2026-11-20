@@ -2,8 +2,8 @@ import { parseTestCaseId, type TestCaseDefinition } from '@rp-conformance/core';
 
 export const CLASS_DIR: Record<string, string> = { WS: 'wallet_solution', PP: 'pid_provider', Inf: 'infrastructure' };
 export const CLASS_TITLE: Record<string, string> = { WS: 'Relying Party - Wallet Solution', PP: 'Relying Party - PID Provider', Inf: 'Relying Party - Trust Infrastructure' };
-export const LAYER_DIR: Record<string, string> = { IA: 'Interaction', SM: 'SecurityMechanisms', MS: 'MessageStructure', DM: 'DataModel' };
-export const LAYER_TITLE: Record<string, string> = { IA: 'Interaction', SM: 'Security Mechanisms', MS: 'Message Structure', DM: 'Data Model' };
+export const LAYER_DIR: Record<string, string> = { IA: 'Interaction', SM: 'SecurityMechanisms', MS: 'MessageStructure', DM: 'DataModel', UC: 'UseCases' };
+export const LAYER_TITLE: Record<string, string> = { IA: 'Interaction', SM: 'Security Mechanisms', MS: 'Message Structure', DM: 'Data Model', UC: 'Use Cases' };
 export const AREA_TITLE: Record<string, string> = {
   MainInteraction: 'Main Interaction',
   Validity: 'Validity',
@@ -21,6 +21,7 @@ export const AREA_TITLE: Record<string, string> = {
   ProtocolFlow: 'Protocol Flow',
   IdentifyingData: 'Identifying Data',
   CredentialMetadata: 'Credential Metadata',
+  Presentation: 'Presentation',
 };
 
 const numbered = (items: string[]) => items.map((text, i) => `${i + 1}. ${text}`).join('\n');

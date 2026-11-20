@@ -10,7 +10,7 @@ import type { Flow } from './rp/definition';
  * Where a fault is applied: the issued credential, the status list or identifier list the Test Status Provider serves,
  * the presentation the Conformance Wallet builds for the request (KB-JWT, DeviceAuth), or the Authorization Response.
  */
-export type FaultPoint = 'credential' | 'status-list' | 'identifier-list' | 'presentation' | 'response' | 'trust-list' | 'request';
+export type FaultPoint = 'credential' | 'status-list' | 'identifier-list' | 'presentation' | 'response' | 'trust-list' | 'request' | 'vp-token';
 
 /** The artifact format a fault applies to: a credential format, or the format of a status or identifier list. */
 export type FaultFormat = 'dc+sd-jwt' | 'mso_mdoc' | 'jwt' | 'cwt' | 'lote' | 'trusted-list';
@@ -51,6 +51,7 @@ const lote = (target: CheckId | null, text: string): FaultInfo => ({ point: 'tru
 const trustedList = (target: CheckId | null, text: string): FaultInfo => ({ point: 'trust-list', format: 'trusted-list', target, text });
 const request = (target: CheckId, text: string, flow?: Flow): FaultInfo => ({ point: 'request', target, text, ...(flow ? { flow } : {}) });
 const kbJwt = (target: CheckId, text: string, flow?: Flow): FaultInfo => ({ point: 'presentation', format: 'dc+sd-jwt', target, text, ...(flow ? { flow } : {}) });
+const vpToken = (target: CheckId, text: string): FaultInfo => ({ point: 'vp-token', target, text });
 const deviceAuth = (target: CheckId, text: string, flow?: Flow): FaultInfo => ({ point: 'presentation', format: 'mso_mdoc', target, text, ...(flow ? { flow } : {}) });
 
 /** Wording shared by faults of both formats. */
@@ -593,6 +594,22 @@ export const FAULTS = {
   // variants change what the Conformance Wallet discloses. Target `claims`: the disclosed claims do not satisfy the
   // query, or a PID attribute has a data type the PID rulebook does not give it.
   ...DATA_MODEL_FAULTS,
+  // vp_token (UC_Presentation): the presentations are valid, the `vp_token` that carries them is not.
+  'vp-token.entry-missing': vpToken('vp-token', 'its `vp_token` has no entry for the credential query `pid`'),
+  'vp-token.unknown-id': vpToken(
+    'vp-token',
+    'its `vp_token` additionally holds an entry with the key `x`, which is the `id` of no credential query of the request, with a valid presentation of the same PID that discloses every attribute of the PID',
+  ),
+  'vp-token.two-presentations': vpToken(
+    'vp-token',
+    'the entry of its `vp_token` for the credential query `pid`, which does not set `multiple`, holds two valid presentations of the PID',
+  ),
+  'vp-token.combined-device-response': {
+    point: 'vp-token',
+    format: 'mso_mdoc',
+    target: 'vp-token',
+    text: 'the entries of its `vp_token` for both credential queries hold one and the same DeviceResponse, which carries the documents of both credentials, each with a valid device signature',
+  },
 } as const satisfies Record<string, FaultInfo>;
 
 export type FaultId = keyof typeof FAULTS;

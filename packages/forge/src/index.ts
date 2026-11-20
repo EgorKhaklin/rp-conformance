@@ -21,3 +21,4 @@ export * from './step';
 export * from './trust-list-version';
 export * from './trusted-list';
 export * from './pid-variants';
+export * from './combined';
