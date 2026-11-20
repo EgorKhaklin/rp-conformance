@@ -25,6 +25,10 @@ Items with the ID `N/A` are surrogate ICS items that select test cases through t
 | RP.P.4 | Clock tolerance `T_skew`. | Seconds | At most 300. |
 | RP.P.5 | Relying Party applies a clock tolerance greater than zero. | Yes/No | |
 | RP.P.6 | Freshness window `T_kb` for key binding JWTs and device authentication. | Seconds | At most 300. |
+| RP.P.7 | Transaction lifetime `T_tx`. | Duration | After `T_tx` the Relying Party rejects an Authorization Response for the transaction; [OpenID4VP] section 14.1. |
+| RP.P.8 | Relying Party sets `request_uri_method` to `post`. | Yes/No | [OpenID4VP] section 5.10. |
+| RP.P.9 | Relying Party redeems the response code of a presentation via redirects at its own front end. | Yes/No | [OpenID4VP] section 13.3; [HAIP] section 5.1. No for a Relying Party that is a back end only and leaves the comparison of the response code to the relying service. |
+| RP.P.10 | Relying Party binds the credentials of a combined presentation by comparing their identifying attributes (attribute-based binding). | Yes/No | [ARF] section 6.6.3.10. |
 | RP.P.11 | Maximum size of an Authorization Response the Relying Party accepts. | Bytes | A larger response is rejected without being processed. |
 | RP.P.12 | Policy for a PID whose administrative expiry date has passed while its technical validity has not. | Reject / Accept | PID Rulebook, `expiry_date` (`date_of_expiry` in SD-JWT VC format). |
 | N/A | Presentation via redirects with response mode `direct_post.jwt`. | Yes/No | [HAIP] section 5.1. |

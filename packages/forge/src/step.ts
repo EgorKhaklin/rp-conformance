@@ -6,9 +6,17 @@ import { type CredentialFormat, holderCurveOf, type PresentationAction } from '@
 import { applyCredentialFault, applyStatusListFault, type ServedStatusList, type StatusListFaultContext } from './faults';
 import { applyIdentifierListFault, applyMdocFault, applyStatusListCwtFault, bindMdocToSecp256k1Key } from './faults-cose';
 import { buildIdentifierListCwt, IDENTIFIER_LIST_CWT_TYPE } from './identifier-list';
-import { CREDENTIAL_A_DOCTYPE, issueCredentialAMdoc, issueCredentialASdJwtVc } from './attestation';
+import {
+  CREDENTIAL_A_DOCTYPE,
+  identifyingClaims,
+  issueCredentialAMdoc,
+  issueCredentialAMdocWith,
+  issueCredentialASdJwtVc,
+  issueCredentialASdJwtVcWith,
+} from './attestation';
 import { issuePidMdoc, newMdocIdentifier, PID_DOCTYPE } from './mdoc';
 import { issuePidSdJwtVc } from './pid';
+import { isPidVariant, issuePidMdocVariant, issuePidSdJwtVcVariant } from './pid-variants';
 import { type CertifiedKey, createDocumentSigner, documentSignerValidity, type TestEntity, type TestPki } from './pki';
 import { faultySigner, isSignerFault } from './signers';
 import { buildStatusListTokenCwt, buildStatusListTokenJwt, STATUS_LIST_CWT_TYPE } from './status-list';
@@ -147,8 +155,11 @@ export async function forgePresentation(action: PresentationAction, ctx: StepFor
   // A PID whose administrative expiry date has passed (RP_WS_SM_Validity_020): seven days ago, as a full-date.
   const expiryDate = spec.expiryDatePast ? new Date(now.getTime() - 7 * 24 * 3600_000).toISOString().slice(0, 10) : undefined;
   if (expiryDate && !pid) throw new Error('only a PID carries an administrative expiry date');
+  // An attribute variant of the PID (RP_WS_DM_*) is applied at issuance, not after it.
+  const variant = pid && isPidVariant(fault);
   if (spec.format === 'mso_mdoc') {
-    const issued = await (pid ? issuePidMdoc : issueCredentialAMdoc)({
+    const issue = variant ? (options: Parameters<typeof issuePidMdoc>[0]) => issuePidMdocVariant(fault, options) : pid ? issuePidMdoc : spec.identifying ? issueCredentialAMdocWith(identifyingClaims(spec.identifying, 'mso_mdoc')) : issueCredentialAMdoc;
+    const issued = await issue({
       signer,
       holderPublicJwk: ctx.holderPublicJwk,
       status:
@@ -163,14 +174,19 @@ export async function forgePresentation(action: PresentationAction, ctx: StepFor
       ...(expiryDate ? { claims: { expiry_date: expiryDate } } : {}),
     });
     const bound = secp256k1 ? await bindMdocToSecp256k1Key(issued.issuerSigned, ctx.holderSecp256k1PublicJwk as JsonWebKey, signer) : issued.issuerSigned;
-    const credential = fault
+    const credential = fault && !variant
       ? await applyMdocFault(fault, bound, { signer, now, skewSeconds: ctx.skewSeconds, statusListEntries: statusList?.entries, issuer })
       : bound;
     const documentDocType = fault === 'mdoc.mso-doctype-other' ? (pid ? PID_DOCTYPE : CREDENTIAL_A_DOCTYPE) : undefined;
     return { format: spec.format, credential, claims: issued.claims, signer, statusList, identifierList, ...(documentDocType ? { documentDocType } : {}) };
   }
 
-  const issued = await (pid ? issuePidSdJwtVc : issueCredentialASdJwtVc)({
+  const issueSdJwtVc = variant ? (options: Parameters<typeof issuePidSdJwtVc>[0]) => issuePidSdJwtVcVariant(fault, options) : pid
+      ? issuePidSdJwtVc
+      : spec.identifying
+        ? issueCredentialASdJwtVcWith(identifyingClaims(spec.identifying, 'dc+sd-jwt'))
+        : issueCredentialASdJwtVc;
+  const issued = await issueSdJwtVc({
     signer,
     issuer: issuer.issuerUri,
     holderPublicJwk: secp256k1 ? (ctx.holderSecp256k1PublicJwk as JsonWebKey) : ctx.holderPublicJwk,
@@ -179,7 +195,7 @@ export async function forgePresentation(action: PresentationAction, ctx: StepFor
     ...(expiryDate ? { claims: { date_of_expiry: expiryDate } } : {}),
     ...(short ? { validitySeconds: SHORT_VALIDITY_SECONDS } : {}),
   });
-  const credential = fault
+  const credential = fault && !variant
     ? await applyCredentialFault(fault, issued.compact, { signer, now, skewSeconds: ctx.skewSeconds, statusListEntries: statusList?.entries, issuer })
     : issued.compact;
   return { format: spec.format, credential, claims: issued.claims, signer, statusList, identifierList };

@@ -22,3 +22,5 @@ export * from './trust-list-version';
 export * from './trusted-list';
 export * from './robustness';
 export * from './policy-faults';
+export * from './pid-variants';
+export * from './combined';

@@ -13,4 +13,8 @@ export interface CapturedRequest {
   data?: unknown;
   /** DC API: the Origin of the Relying Party's page. */
   origin?: string;
+  /** Redirects: the answer to a second GET of `request_uri` (ProtocolFlow_002). */
+  refetch?: { status?: number; contentType?: string | null; body?: string };
+  /** Redirects: the `wallet_nonce` the Conformance Wallet posted to `request_uri` (ProtocolFlow_003); `requestUri` is the answer. */
+  walletNonce?: string;
 }

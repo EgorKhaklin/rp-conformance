@@ -1,4 +1,5 @@
 import {
+  attestation,
   FAULT_IDS,
   type FaultId,
   faultInfo,
@@ -11,7 +12,7 @@ import {
   type TrustListAction,
 } from '@rp-conformance/core';
 import { createPublicKey, verify } from 'node:crypto';
-import { defaultEntitiesOf, trustedListEntitiesOf } from '@rp-conformance/forge';
+import { defaultEntitiesOf, faultySigner, isSignerFault, mdocValidity, trustedListEntitiesOf } from '@rp-conformance/forge';
 import { base64url, type CborMap, decodeCbor, decodeEmbedded, embedded, encodeCbor, jwkThumbprint as jwkThumbprintOf, readCose, sigStructure } from '@rp-conformance/forge';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { MDOC_IDENTIFIER_LIST_CHECKS, MDOC_STATUS_LIST_CHECKS, openid4vpSessionTranscript, SD_JWT_VC_CHECKS, TRUST_RULES } from '../src/index';
@@ -35,7 +36,8 @@ const actionWith = (fault?: FaultId, format: 'dc+sd-jwt' | 'mso_mdoc' = 'dc+sd-j
   const credentialFormat = info?.format === 'mso_mdoc' || info?.format === 'cwt' ? 'mso_mdoc' : format;
   const only = (point: string) => (info?.point === point ? [fault as FaultId] : []);
   return presentation({
-    query: pidQueryOf(credentialFormat),
+    // An attribute variant of the PID is presented for the query that requests the changed attributes.
+    query: info?.query ?? pidQueryOf(credentialFormat),
     credential: pid.of(credentialFormat, { faults: only('credential'), ...(info?.issuer ? { issuer: info.issuer } : {}) }),
     ...(info?.point === 'identifier-list'
       ? { identifierList: identifierListToken.cwt({ contains: false, faults: only('identifier-list') }) }
@@ -195,7 +197,7 @@ describe('fault self-validation', () => {
     },
   );
 
-  it.each(FAULT_IDS.filter((fault) => !['trust-list', 'request'].includes(faultInfo(fault).point)))('%s fails exactly its target check', async (fault) => {
+  it.each(FAULT_IDS.filter((fault) => !['trust-list', 'request', 'vp-token'].includes(faultInfo(fault).point)))('%s fails exactly its target check', async (fault) => {
     const result = await fixture.validate(actionWith(fault), { other: await otherFor(fault) });
     const target = faultInfo(fault).target;
     expect(result.failures).toEqual(target ? [target] : []);
@@ -243,8 +245,17 @@ describe('fault self-validation', () => {
       const result = await fixture.validateRequests(flow, query, { count: 3 });
       expect(result.failures, query).toEqual([]);
       const skipped = result.checks.filter((c) => c.status === 'skip').map((c) => c.check);
-      const otherFlow = flow === 'redirect' ? ['dc-api-request', 'expected-origins'] : ['request-by-reference', 'request-object', 'state'];
-      expect(skipped.sort(), query).toEqual([...otherFlow, ...(query.endsWith('_trusted_authorities') ? [] : ['trusted-authorities'])].sort());
+      const otherFlow = flow === 'redirect' ? ['dc-api-request', 'expected-origins'] : ['request-by-reference', 'request-object', 'state', 'invocation-scheme', 'request-uri-content-type'];
+      // A single GET of request_uri: the checks of a second retrieval and of a POST with wallet_nonce do not apply.
+      const retrieval = ['request-uri-refetch', 'wallet-nonce'];
+      expect(skipped.sort(), query).toEqual([...otherFlow, ...retrieval, ...(query.endsWith('_trusted_authorities') ? [] : ['trusted-authorities'])].sort());
+      if (flow === 'redirect') {
+        for (const requestUri of ['twice', 'post'] as const) {
+          const retrieved = await fixture.validateRequests(flow, query, { requestUri });
+          expect(retrieved.failures, `${query} ${requestUri}`).toEqual([]);
+          expect(retrieved.checks.find((c) => c.check === (requestUri === 'twice' ? 'request-uri-refetch' : 'wallet-nonce'))?.status).toBe('pass');
+        }
+      }
     }
   });
 
@@ -258,10 +269,36 @@ describe('fault self-validation', () => {
     expect(result.failures).toEqual([faultInfo(fault).target]);
   });
 
+  // The disclosure variants of the data model test cases apply to both formats.
+  it.each(['presentation.family-name-withheld', 'presentation.unrequested-disclosed'] as const)('%s fails exactly its target check in mdoc format too', async (fault) => {
+    const result = await fixture.validate(actionWith(fault, 'mso_mdoc'));
+    const target = faultInfo(fault).target;
+    expect(result.failures).toEqual(target ? [target] : []);
+    if (target) expect(reasonOf(result, target)).toMatch(/family_name is not disclosed/);
+  });
+
   it('every fault that fails key-binding or kb-freshness has its own expected reason', () => {
     const binding = FAULT_IDS.filter((fault) => ['key-binding', 'kb-freshness'].includes(faultInfo(fault).target ?? ''));
     expect(binding.filter((fault) => !BINDING_REASONS[fault])).toEqual([]);
   });
+
+  // A signer fault that is not about the validity of the signing certificate keeps the MSO `signed` time within that
+  // validity: the reference validator checks the signed date only once the path is valid, so a faulted path hides it,
+  // while an RP that checks the date first rejects the credential for it and passes the test case for the wrong reason.
+  const VALIDITY_FAULTS = new Set<FaultId>(['mdoc.signer-expired', 'mdoc.signer-not-yet-valid', 'mdoc.signed-after-ds-expiry']);
+  it.each(FAULT_IDS.filter((fault) => faultInfo(fault).format === 'mso_mdoc' && isSignerFault(fault) && !VALIDITY_FAULTS.has(fault)))(
+    '%s signs within the validity of its document signer certificate',
+    async (fault) => {
+      const now = new Date();
+      const signer = await faultySigner(fault, fixture.pki.entities[faultInfo(fault).issuer ?? 'PP-A'], 'mso_mdoc', fixture.pki, now);
+      const leaf = signer.certificate;
+      for (const short of [false, true]) {
+        const { signed } = mdocValidity(now, short);
+        expect(leaf.notBefore.getTime()).toBeLessThanOrEqual(signed.getTime());
+        expect(leaf.notAfter.getTime()).toBeGreaterThanOrEqual(signed.getTime());
+      }
+    },
+  );
 
   // The ES256K faults are genuine device authentication with another algorithm: the credential is bound to the
   // secp256k1 key, and the signature verifies with it.
@@ -309,5 +346,42 @@ describe('fault self-validation', () => {
       expect(result.credential?.failed).toBe(faultInfo(fault).target);
       expect(result.credential && 'statusListFetched' in result.credential && result.credential.statusListFetched).toBe(false);
     }
+  });
+});
+
+// The vp_token faults of the combined presentations (UC_Presentation): a valid PID and a valid non-qualified EAA for
+// `default_query_pid_eaa`, of which the vp_token fails exactly `vp-token`, in each format the fault applies to and in
+// both flows; the presentations in it are valid, and are not validated once the vp_token as a whole failed.
+describe('vp_token faults', () => {
+  const combined = (fault: FaultId | undefined, format: 'dc+sd-jwt' | 'mso_mdoc') =>
+    presentation({
+      query: format === 'mso_mdoc' ? 'default_query_pid_eaa_mdoc' : 'default_query_pid_eaa',
+      credential: pid.of(format),
+      answers: 'pid',
+      alongside: [{ answers: 'eaa', credential: attestation.of('eaa', format) }],
+      ...(fault ? { response: { faults: [fault] } } : {}),
+    });
+  const cases = (['dc+sd-jwt', 'mso_mdoc'] as const).flatMap((format) =>
+    (['redirect', 'dc-api'] as const).flatMap((flow) => [
+      [undefined, format, flow] as const,
+      ...FAULT_IDS.filter((fault) => faultInfo(fault).point === 'vp-token' && (!faultInfo(fault).format || faultInfo(fault).format === format)).map(
+        (fault) => [fault, format, flow] as const,
+      ),
+    ]),
+  );
+
+  it.each(cases)('%s (%s via %s) fails exactly its target check', async (fault, format, flow) => {
+    const result = await fixture.validate(combined(fault, format), { flow });
+    expect(result.failures).toEqual(fault ? [faultInfo(fault).target] : []);
+  });
+
+  it.each(['dc+sd-jwt', 'mso_mdoc'] as const)('an EAA of another person fails exactly combined-binding (%s)', async (format) => {
+    const action = presentation({
+      query: format === 'mso_mdoc' ? 'default_query_pid_eaa_identifying_mdoc' : 'default_query_pid_eaa_identifying',
+      credential: pid.of(format),
+      answers: 'pid',
+      alongside: [{ answers: 'eaa', credential: attestation.of('eaa', format, { identifying: 'other-person' }) }],
+    });
+    expect((await fixture.validate(action)).failures).toEqual(['combined-binding']);
   });
 });

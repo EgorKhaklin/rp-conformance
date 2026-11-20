@@ -11,7 +11,7 @@ import type {
   RunningServer,
   ServerOptions,
 } from '@rp-conformance/core';
-import { categoryOfQuery, sendJson, sendText, startServer } from '@rp-conformance/core';
+import { categoryOfCredentialQuery, sendJson, sendText, startServer } from '@rp-conformance/core';
 import { base64url, decodeCbor, jwkThumbprint, type Oid4vpHandover, PID_DOCTYPE, PID_VCT, readCose, signCompactJws } from '@rp-conformance/forge';
 import type { CheckResult } from '@rp-conformance/core';
 import {
@@ -24,7 +24,9 @@ import {
   TrustStore,
   validateAuthorizationResponse,
   validateMdocPresentation,
+  validateCombinedBinding,
   validateSdJwtVcPresentation,
+  validateVpToken,
 } from '@rp-conformance/validator';
 import { exportJWK, generateKeyPair, importJWK } from 'jose';
 
@@ -61,6 +63,8 @@ export interface ReferenceRpOptions extends ServerOptions {
   statusListFreshness?: StatusListFreshness;
   /** Reject a PID whose administrative expiry date has passed (ICS RP.P.12). */
   rejectPastExpiryDate?: boolean;
+  /** The transaction lifetime `T_tx` (ICS RP.P.7), milliseconds; default 300 s. */
+  transactionLifetimeMs?: number;
 }
 
 export type TransactionStatus = 'pending' | 'success' | 'failure';
@@ -84,7 +88,16 @@ interface Transaction {
   error?: string;
   response?: CheckResult[];
   validations?: (SdJwtVcValidation | MdocValidation)[];
+  /** The user session (a cookie of the user agent) that started the transaction at the front end. */
+  userSession: string;
+  /** Via redirects: the response code of the `redirect_uri`, set when the response was accepted. */
+  responseCode?: string;
+  /** Whether the front end released the result for the response code. */
+  redeemed?: boolean;
 }
+
+/** The cookie by which the reference Relying Party's front end recognises the user agent that started a transaction. */
+export const USER_SESSION_COOKIE = 'rp_session';
 
 /** The verification result the reference Relying Party exposes for a transaction (its ICS item RP.G.6: API). */
 export interface ReferenceRpResult {
@@ -167,7 +180,7 @@ export class ReferenceRelyingParty {
   async start(): Promise<this> {
     if (this.options.allowInsecureUrls) setGlobalConfig({ allowInsecureUrls: true });
     this.accessKey = (await importJWK(this.options.accessCertificate.privateJwk as never, 'ES256')) as CryptoKey;
-    this.server = await startServer(this.options, (req, res, body) => this.route(req.method ?? 'GET', req.url ?? '/', body, res));
+    this.server = await startServer(this.options, (req, res, body) => this.route(req.method ?? 'GET', req.url ?? '/', body, res, req.headers));
     this.baseUrl = (this.options.publicBaseUrl ?? this.server.localUrl).replace(/\/$/, '');
     await this.refreshTrust();
     return this;
@@ -191,8 +204,9 @@ export class ReferenceRelyingParty {
     return fetched;
   }
 
-  private async route(method: string, rawUrl: string, body: Buffer, res: import('node:http').ServerResponse) {
-    const path = new URL(rawUrl, 'http://localhost').pathname;
+  private async route(method: string, rawUrl: string, body: Buffer, res: import('node:http').ServerResponse, headers: import('node:http').IncomingHttpHeaders = {}) {
+    const url = new URL(rawUrl, 'http://localhost');
+    const path = url.pathname;
     let match: RegExpExecArray | null;
     // An Authorization Response above the declared maximum size is refused before it is parsed (RP_WS_SH_Encoding_004).
     if (method === 'POST' && this.options.maxResponseBytes && body.length > this.options.maxResponseBytes) {
@@ -223,10 +237,15 @@ export class ReferenceRelyingParty {
     if (method === 'POST' && path === '/api/trust/refresh') {
       return sendJson(res, 200, { lists: await this.refreshTrust() });
     }
-    if (method === 'GET' && (match = /^\/oid4vp\/([^/]+)\/request$/.exec(path))) {
+    if ((method === 'GET' || method === 'POST') && (match = /^\/oid4vp\/([^/]+)\/request$/.exec(path))) {
+      // OpenID4VP 1.0 section 5.10: GET, or POST with wallet_metadata and wallet_nonce (request_uri_method post). The
+      // request object of a finished or expired transaction is not served again (ProtocolFlow_004).
       const tx = this.transactions.get(match[1]);
-      if (!tx) return sendJson(res, 404, { error: 'not_found' });
-      return sendText(res, 200, tx.requestJwt, 'application/oauth-authz-req+jwt');
+      if (!tx || tx.flow !== 'redirect') return sendJson(res, 404, { error: 'not_found' });
+      if (tx.status !== 'pending' || this.expired(tx)) return sendJson(res, 400, { error: 'invalid_request_uri', error_description: 'the transaction is finished' });
+      const walletNonce = method === 'POST' ? new URLSearchParams(body.toString()).get('wallet_nonce') : null;
+      const jwt = walletNonce ? await this.signWithWalletNonce(tx, walletNonce) : tx.requestJwt;
+      return sendText(res, 200, jwt, 'application/oauth-authz-req+jwt');
     }
     if (method === 'POST' && (match = /^\/oid4vp\/([^/]+)\/response$/.exec(path))) {
       return this.handleResponse(match[1], body, res);
@@ -240,8 +259,7 @@ export class ReferenceRelyingParty {
       return this.handleDcApiResponse(match[1], body, res);
     }
     if (method === 'GET' && (match = /^\/done\/([^/]+)$/.exec(path))) {
-      const tx = this.transactions.get(match[1]);
-      return sendText(res, tx ? 200 : 404, `<!doctype html><title>Done</title><p>${tx?.status ?? 'unknown'}</p>`, 'text/html');
+      return this.frontEnd(match[1], url.searchParams.get('response_code'), cookieOf(headers.cookie, USER_SESSION_COOKIE), res);
     }
     return sendJson(res, 404, { error: 'not_found' });
   }
@@ -306,8 +324,44 @@ export class ReferenceRelyingParty {
       requestPayload: created.authorizationRequestPayload as Record<string, unknown>,
       encryptionKey: privateKey as CryptoKey,
       encryptionJwk,
+      userSession: base64url.encode(randomBytes(32)),
     });
-    return dcApi ? { transactionId: id, dcApiPage: `${this.baseUrl}/dc-api/${id}` } : { transactionId: id, uri: created.authorizationRequest };
+    const tx = this.transactions.get(id) as Transaction;
+    // The front end sets the user session as a cookie of the user agent that starts the transaction.
+    if (dcApi) return { transactionId: id, dcApiPage: `${this.baseUrl}/dc-api/${id}`, userSession: tx.userSession };
+    // The request object can be retrieved with POST and a wallet_nonce as well (ICS RP.P.8).
+    const invocation = new URL(created.authorizationRequest);
+    invocation.searchParams.set('request_uri_method', 'post');
+    return { transactionId: id, uri: invocation.href, userSession: tx.userSession };
+  }
+
+  /** Whether the transaction lifetime `T_tx` has passed since the transaction started. */
+  private expired(tx: Transaction): boolean {
+    return Date.now() - Date.parse(tx.createdAt) > (this.options.transactionLifetimeMs ?? 300_000);
+  }
+
+  /** The request object of a transaction with the `wallet_nonce` a wallet posted, signed again (OpenID4VP 1.0 section 5.10.1). */
+  private async signWithWalletNonce(tx: Transaction, walletNonce: string): Promise<string> {
+    const accessKey = this.accessKey;
+    if (!accessKey) throw new Error('not started');
+    const [header, payload] = tx.requestJwt.split('.').slice(0, 2).map((part) => base64url.decodeJson<Record<string, unknown>>(part));
+    return signCompactJws(header as Record<string, unknown>, { ...payload, wallet_nonce: walletNonce, iat: Math.floor(Date.now() / 1000) }, accessKey);
+  }
+
+  /**
+   * The front end of a transaction via redirects: the user agent that started it (its cookie) redeems the response
+   * code of the `redirect_uri` once and gets the released attributes. A user agent of another session, a response code
+   * other than the transaction's, or a second redemption gets nothing (OpenID4VP 1.0 section 13.3, HAIP section 5.1).
+   */
+  private frontEnd(id: string, responseCode: string | null, userSession: string | undefined, res: import('node:http').ServerResponse) {
+    const tx = this.transactions.get(id);
+    if (!tx || tx.flow !== 'redirect') return sendJson(res, 404, { error: 'not_found' });
+    if (userSession !== tx.userSession) return sendJson(res, 403, { error: 'other_user_session' });
+    if (tx.status !== 'success' || !tx.responseCode) return sendJson(res, 400, { error: 'no_result', status: tx.status });
+    if (!responseCode || responseCode !== tx.responseCode) return sendJson(res, 400, { error: 'invalid_response_code' });
+    if (tx.redeemed) return sendJson(res, 400, { error: 'response_code_used' });
+    tx.redeemed = true;
+    return sendJson(res, 200, { status: tx.status, attributes: tx.attributes });
   }
 
   private fail(tx: Transaction, res: import('node:http').ServerResponse, error: string) {
@@ -321,11 +375,22 @@ export class ReferenceRelyingParty {
     const tx = this.transactions.get(id);
     if (!tx || tx.flow !== 'redirect') return sendJson(res, 404, { error: 'not_found' });
     if (tx.status !== 'pending') return sendJson(res, 400, { error: 'invalid_request', error_description: 'transaction is complete' });
+    if (this.expired(tx)) return this.fail(tx, res, 'the transaction lifetime has passed');
     const form = Object.fromEntries(new URLSearchParams(body.toString()));
+    // An Authorization Error Response of the wallet (OpenID4VP 1.0 section 8.5) ends the transaction as failed; it was
+    // processed successfully, so it is answered with HTTP 200 (section 8.2).
+    if (typeof form.error === 'string' && form.response === undefined && form.vp_token === undefined) {
+      if (form.state !== tx.requestPayload.state) return this.fail(tx, res, 'the error response carries another state');
+      tx.status = 'failure';
+      tx.error = `wallet error: ${form.error}`;
+      return sendJson(res, 200, {});
+    }
     const handover: Oid4vpHandover = { flow: 'redirect', clientId: this.clientId, responseUri: tx.requestPayload.response_uri as string };
     const error = await this.verify(tx, form, { audience: this.clientId, handover, state: tx.requestPayload.state as string });
     if (error) return this.fail(tx, res, error);
-    return sendJson(res, 200, { redirect_uri: `${this.baseUrl}/done/${tx.id}` });
+    // A fresh response code of 256 bits, which the front end redeems once (OpenID4VP 1.0 section 8.2 and 13.3).
+    tx.responseCode = base64url.encode(randomBytes(32));
+    return sendJson(res, 200, { redirect_uri: `${this.baseUrl}/done/${tx.id}?response_code=${tx.responseCode}` });
   }
 
   /**
@@ -345,6 +410,14 @@ export class ReferenceRelyingParty {
     }
     if (posted.protocol !== DC_API_PROTOCOL) return this.fail(tx, res, `the response is of protocol ${String(posted.protocol)}, not ${DC_API_PROTOCOL}`);
     if (!posted.data || typeof posted.data !== 'object' || Array.isArray(posted.data)) return this.fail(tx, res, 'the response has no data object');
+    if (this.expired(tx)) return this.fail(tx, res, 'the transaction lifetime has passed');
+    // An error object of the wallet (OpenID4VP 1.0 Appendix A.4) ends the transaction as failed.
+    const walletError = (posted.data as { error?: unknown }).error;
+    if (typeof walletError === 'string') {
+      tx.status = 'failure';
+      tx.error = `wallet error: ${walletError}`;
+      return sendJson(res, 200, {});
+    }
     const error = await this.verify(tx, posted.data as Record<string, unknown>, {
       audience: `origin:${this.origin}`,
       handover: { flow: 'dc-api', origin: this.origin },
@@ -373,17 +446,22 @@ export class ReferenceRelyingParty {
     if (!response.valid || !response.payload) return `${response.failed}: ${response.checks.at(-1)?.detail}`;
     const presentations = response.payload.vp_token as Record<string, unknown>;
     const query = this.options.queries[tx.query];
+    // The vp_token as a whole first: known credential query ids, one presentation each unless `multiple`, every
+    // required credential query or credential set satisfied, one document per DeviceResponse (UC_Presentation).
+    const vpToken = await validateVpToken(presentations, query);
+    tx.response = [...response.checks, ...vpToken.checks];
+    if (!vpToken.valid) return `${vpToken.failed}: ${vpToken.checks.at(-1)?.detail}`;
     const attributes: Record<string, unknown> = {};
     const validations: (SdJwtVcValidation | MdocValidation)[] = [];
+    const disclosed: { id: string; format: string; claims: Record<string, unknown> }[] = [];
     for (const credentialQuery of query.credentials) {
-      const entries = presentations[credentialQuery.id];
-      if (!Array.isArray(entries) || entries.length !== 1 || typeof entries[0] !== 'string') {
-        return `expected one presentation for ${credentialQuery.id}`;
-      }
+      const entries = presentations[credentialQuery.id] as string[] | undefined;
+      // An optional credential query, or one of an option the Wallet did not choose (credential_sets).
+      if (!entries) continue;
       const common = {
         trust: this.trust,
-        // The root of trust of the query's category: TL-PID, TL-QEAA through the LOTL, TL-PUB or the rulebook anchor.
-        trustRule: TRUST_RULES[categoryOfQuery(tx.query)],
+        // The root of trust of the credential query's category: TL-PID, TL-QEAA through the LOTL, TL-PUB or the rulebook anchor.
+        trustRule: TRUST_RULES[categoryOfCredentialQuery(credentialQuery.id)],
         nonce: tx.requestPayload.nonce as string,
         skewSeconds: this.options.skewSeconds,
         // A PID without reliable revocation status is rejected (catalogue decision 2); for the other categories the
@@ -394,35 +472,44 @@ export class ReferenceRelyingParty {
         rejectPastExpiryDate: this.options.rejectPastExpiryDate,
         validStatuses: this.options.validStatuses,
         trustedAuthorities: credentialQuery.trusted_authorities,
+        requestedClaims: credentialQuery.claims ?? [],
       };
-      const validation =
-        credentialQuery.format === 'mso_mdoc'
-          ? await validateMdocPresentation(entries[0], {
-              ...common,
-              expectedDocType: (credentialQuery.meta?.doctype_value as string | undefined) ?? PID_DOCTYPE,
-              handover: binding.handover,
-              // OpenID4VP Appendix B.2.6: the thumbprint of the key the response was encrypted to.
-              jwkThumbprint: await jwkThumbprint(tx.encryptionJwk as JsonWebKey),
-              fetchStatusList: (uri) => this.fetchStatusList(uri, 'application/statuslist+cwt'),
-              fetchIdentifierList: (uri) => fetchList(uri, 'application/identifierlist+cwt', this.options.statusTimeoutMs),
-            })
-          : await validateSdJwtVcPresentation(entries[0], {
-              ...common,
-              expectedVct: (credentialQuery.meta?.vct_values as string[] | undefined) ?? [PID_VCT],
-              audience: binding.audience,
-              kbMaxAgeSeconds: this.options.kbMaxAgeSeconds,
-              fetchStatusList: (uri) => this.fetchStatusList(uri, 'application/statuslist+jwt'),
-            });
-      validations.push(validation);
-      tx.validations = validations;
-      if (!validation.valid) return `${credentialQuery.id}: ${validation.failed}: ${validation.checks.at(-1)?.detail}`;
-      for (const claim of credentialQuery.claims ?? []) {
-        let value: unknown = validation.claims;
-        for (const segment of claim.path) value = (value as Record<string, unknown> | undefined)?.[String(segment)];
-        if (value === undefined) return `${credentialQuery.id}: requested claim ${claim.path.join('.')} not disclosed`;
-        attributes[claim.path.join('.')] = value;
+      for (const entry of entries) {
+        const validation =
+          credentialQuery.format === 'mso_mdoc'
+            ? await validateMdocPresentation(entry, {
+                ...common,
+                expectedDocType: (credentialQuery.meta?.doctype_value as string | undefined) ?? PID_DOCTYPE,
+                handover: binding.handover,
+                // OpenID4VP Appendix B.2.6: the thumbprint of the key the response was encrypted to.
+                jwkThumbprint: await jwkThumbprint(tx.encryptionJwk as JsonWebKey),
+                fetchStatusList: (uri) => this.fetchStatusList(uri, 'application/statuslist+cwt'),
+                fetchIdentifierList: (uri) => fetchList(uri, 'application/identifierlist+cwt', this.options.statusTimeoutMs),
+              })
+            : await validateSdJwtVcPresentation(entry, {
+                ...common,
+                expectedVct: (credentialQuery.meta?.vct_values as string[] | undefined) ?? [PID_VCT],
+                audience: binding.audience,
+                kbMaxAgeSeconds: this.options.kbMaxAgeSeconds,
+                fetchStatusList: (uri) => this.fetchStatusList(uri, 'application/statuslist+jwt'),
+              });
+        validations.push(validation);
+        tx.validations = validations;
+        if (!validation.valid) return `${credentialQuery.id}: ${validation.failed}: ${validation.checks.at(-1)?.detail}`;
+        disclosed.push({ id: credentialQuery.id, format: credentialQuery.format, claims: (validation.claims ?? {}) as Record<string, unknown> });
+        for (const claim of credentialQuery.claims ?? []) {
+          let value: unknown = validation.claims;
+          for (const segment of claim.path) value = (value as Record<string, unknown> | undefined)?.[String(segment)];
+          if (value === undefined) return `${credentialQuery.id}: requested claim ${claim.path.join('.')} not disclosed`;
+          attributes[claim.path.join('.')] = value;
+        }
       }
     }
+    // Combined presentations: the reference Relying Party binds the credentials by their identifying attributes (ICS
+    // RP.P.10 attribute-based, ARF section 6.6.3.10).
+    const combined = await validateCombinedBinding(disclosed);
+    tx.response = [...tx.response, ...combined.checks];
+    if (!combined.valid) return `${combined.failed}: ${combined.checks.at(-1)?.detail}`;
     tx.status = 'success';
     tx.attributes = attributes;
     if (validations.some((v) => v.trustListStale)) tx.flags = ['trust-list-stale'];
@@ -475,4 +562,13 @@ function ttlOf(body: string | Uint8Array): number | undefined {
   } catch {
     return undefined;
   }
+}
+
+/** The value of a cookie in a `Cookie` header. */
+function cookieOf(header: string | undefined, name: string): string | undefined {
+  for (const part of (header ?? '').split(';')) {
+    const [key, ...value] = part.trim().split('=');
+    if (key === name) return value.join('=');
+  }
+  return undefined;
 }

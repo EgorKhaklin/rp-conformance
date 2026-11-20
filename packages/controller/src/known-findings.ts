@@ -15,6 +15,8 @@ export interface KnownFinding {
   finding: string;
   /** Where the finding is tracked, for example an issue or pull request. */
   reference?: string;
+  /** Where the evidence of the run that found it is, for a finding not yet reported upstream. */
+  evidence?: string;
 }
 
 /** Reads a YAML list of known findings (`testCase`, optional `flows`, `finding`, optional `reference`). */
@@ -48,7 +50,10 @@ export interface RunOutcome {
   resolved: string[];
 }
 
-/** Classifies the results of a run against the known findings of the Relying Party under test. */
+/**
+ * Classifies the results of a run against the known findings of the Relying Party under test. The test book items
+ * (`report.testBook`) are always REVIEW and never fail the run; a REVIEW result of a test case does.
+ */
 export function runOutcome(report: RunReport, findings: KnownFinding[]): RunOutcome {
   const unexpected: string[] = report.run.error ? [`run error: ${report.run.error}`] : [];
   const known: string[] = [];

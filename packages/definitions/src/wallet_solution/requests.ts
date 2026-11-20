@@ -21,7 +21,7 @@ import {
 } from '@rp-conformance/core';
 
 export interface RequestTestCase {
-  layer: 'MS' | 'SM';
+  layer: 'MS' | 'SM' | 'IA';
   area: string;
   number: number;
   /** The credential format whose query the test case requests (variant `a` or `b`), where the objective is per format. */
@@ -42,6 +42,8 @@ export interface RequestTestCase {
   /** The rule the requests must follow, as the expected result states it. */
   rule: string;
   comments?: string[];
+  /** How the Conformance Wallet retrieves each request object (ProtocolFlow_002, _003); `text` replaces the step text. */
+  requestUri?: { method: 'twice' | 'post'; text: string };
 }
 
 const NOT_ANSWERED = 'The Conformance Wallet does not answer the requests; the test case checks only what the Relying Party sends.';
@@ -60,8 +62,15 @@ export const requestTestCase = (testCase: RequestTestCase) => {
     preconditions: [...preconditions.base, ...(testCase.preconditions ?? [])],
     steps: [
       step({
-        text: `Start ${many ? `${count} presentations` : 'a presentation'} for ${QUERY_PID}${via} and capture the request${many ? 's' : ''} the Conformance Wallet receives, without answering ${many ? 'them' : 'it'}.`,
-        run: { kind: 'request', query: testCase.query ?? pidQueryOf(testCase.format?.credentialFormat ?? 'dc+sd-jwt'), ...(many ? { count } : {}) },
+        text:
+          testCase.requestUri?.text ??
+          `Start ${many ? `${count} presentations` : 'a presentation'} for ${QUERY_PID}${via} and capture the request${many ? 's' : ''} the Conformance Wallet receives, without answering ${many ? 'them' : 'it'}.`,
+        run: {
+          kind: 'request',
+          query: testCase.query ?? pidQueryOf(testCase.format?.credentialFormat ?? 'dc+sd-jwt'),
+          ...(many ? { count } : {}),
+          ...(testCase.requestUri ? { requestUri: testCase.requestUri.method } : {}),
+        },
         expect: conf(testCase.checks, testCase.rule),
       }),
     ],

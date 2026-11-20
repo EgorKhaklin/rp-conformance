@@ -1,0 +1,24 @@
+# Known findings of EUDIPLO as PID Provider: FAILs of the issuer suite that are reported upstream with evidence. The
+# reference run against the pinned EUDIPLO image (issuer harness design section 5.5) reports these FAILs as known
+# findings and marks their test cases "not validated" until EUDIPLO is fixed; any other FAIL, an INCONCLUSIVE or REVIEW
+# result, or a harness error fails it. Each entry names the test case, the finding and the upstream reference:
+#
+# - testCase: PP_WS_SM_ClientAttestation_013_UF
+#   variants: [SD+PA]   # optional, as the report names the variant; default every variant
+#   finding: >-
+#     ...
+#   reference: EUDIPLO/eudiplo#<n>
+#
+# Remove an entry once EUDIPLO fixes it; the run names a known finding whose test case passed. The README lists the FAILs
+# expected against the pinned reference image (reference.env).
+
+# Issue 24: a gap of the adapter's configuration, not a defect of EUDIPLO (which issues mso_mdoc). Remove this entry when
+# issue 21 adds the mdoc PID configuration to the adapter: PP_WS_MS_Metadata_006 then passes without further change.
+- testCase: PP_WS_MS_Metadata_006
+  variants: [default]
+  finding: >-
+    The adapter configures the PID in SD-JWT VC only (pid-sd-jwt-vc, pid-sd-jwt-vc-2; ics.yaml ICS-02 SD-JWT VC), so the
+    Credential Issuer metadata offers no mso_mdoc configuration with doctype eu.europa.ec.eudi.pid.1 and PID_02 is not met
+    by this configuration. Evidence (run against 9.1.0-main.ae0792a on 2026-11-20): metadata-pid-configurations failed
+    "no PID configuration mso_mdoc with doctype eu.europa.ec.eudi.pid.1".
+  reference: cre8/rp-conformance#21 (mdoc PID configuration of the EUDIPLO issuer adapter)

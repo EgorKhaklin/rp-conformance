@@ -3,7 +3,8 @@
 // the evaluators and the issuer faults come later.
 import type { CredentialFormat, ExpectationOf, StepDefinitionOf, TestCaseDefinitionOf } from '../definition';
 import type { FaultId } from '../faults';
-import type { IssuerIcsCondition, IssuerPolicyItem } from './ics';
+import type { CredentialRequestFaultId } from './credential-request-faults';
+import type { IssuerIcsCondition, IssuerPolicyItem, IssuerProfile } from './ics';
 
 /** Variant codes of the issuer catalogue section 2.3: the credential format. */
 export type FormatVariant = 'SD' | 'MD';
@@ -51,7 +52,7 @@ export interface IssuanceAction {
   /** Number of proofs; default 1. */
   batchSize?: number;
   /** Named faults (at most one); empty for a valid issuance. */
-  faults: FaultId[];
+  faults: (FaultId | CredentialRequestFaultId)[];
   /** Stop after the token response, without a credential request. */
   stopAfterToken?: boolean;
   /** Expect and follow a deferred credential response. */
@@ -155,6 +156,85 @@ export interface IssuerTestCaseDefinition extends TestCaseDefinitionOf<IssuerSte
   /** `<Class>_<Layer>_<Area>_<nnn>[<variant letter>][_UF]`, for example `PP_WS_SM_KeyAttestation_004_UF`. */
   id: string;
   profile: IssuerIcsCondition[];
-  /** The variant codes the test case is restricted to; every variant the ICS declares when left out. */
+  /**
+   * The variant this definition runs in, one code per dimension it depends on (format, grant, category), for example
+   * `['SD', 'PA']`. A test case has one definition per variant, expanded by a function (issuer harness design section
+   * 6.1); the report keys its results by ID and variant (`variantOf`), and a `_UF` test case is gated on its control in
+   * the same variant. Left out for a test case that depends on no variant.
+   */
   variants?: IssuerVariant[];
+}
+
+/** The parts of an issuer test case ID (issuer catalogue section 2.2). */
+export interface IssuerTestCaseId {
+  sutClass: IssuerTestClass;
+  layer: string;
+  area: string;
+  number: number;
+  variant: string;
+  unhappyFlow: boolean;
+}
+
+const ISSUER_TEST_CASE_ID = /^((?:PP|AP)_(?:WS|RP|Inf))_([A-Z]{2})_([A-Za-z]+)_(\d{3})([a-z]?)(_UF)?$/;
+
+/** Parses an issuer test case ID, `<Class>_<Layer>_<Area>_<nnn>[<variant letter>][_UF]`. */
+export function parseIssuerTestCaseId(id: string): IssuerTestCaseId {
+  const match = ISSUER_TEST_CASE_ID.exec(id);
+  if (!match) throw new Error(`${id} is not an issuer test case ID`);
+  return {
+    sutClass: match[1] as IssuerTestClass,
+    layer: match[2],
+    area: match[3],
+    number: Number(match[4]),
+    variant: match[5],
+    unhappyFlow: Boolean(match[6]),
+  };
+}
+
+/** The Provider profile each variant code needs (issuer catalogue sections 2.3 and 4). */
+export const VARIANT_PROFILES: Record<IssuerVariant, IssuerProfile> = {
+  SD: 'P-SD',
+  MD: 'P-MD',
+  PA: 'P-PA',
+  AC: 'P-AC',
+  PID: 'P-PID',
+  Q: 'P-Q',
+  PB: 'P-PB',
+  E: 'P-E',
+};
+
+/**
+ * The variant of an expanded definition as the report and the known findings name it, for example `SD+PA`: its
+ * variant codes in the order format, grant, category.
+ */
+export function variantOf(definition: { variants?: IssuerVariant[] }): string {
+  const order: IssuerVariant[] = ['SD', 'MD', 'PA', 'AC', 'PID', 'Q', 'PB', 'E'];
+  const variants = [...(definition.variants ?? [])].sort((a, b) => order.indexOf(a) - order.indexOf(b));
+  return variants.length ? variants.join('+') : 'default';
+}
+
+const ISSUER_CONTROL_MENTION = /`((?:PP|AP)_WS_IA_MainInteraction_\d{3}[a-z]?)`/g;
+
+/**
+ * Checks an issuer definition as `defineTestCase` checks an RP one: a valid ID, at least one step, at most one fault
+ * per issuance step, each variant code's profile in the profile applicability, and `control` exactly the positive
+ * controls the preconditions name.
+ */
+export function defineIssuerTestCase(definition: IssuerTestCaseDefinition): IssuerTestCaseDefinition {
+  parseIssuerTestCaseId(definition.id);
+  if (definition.steps.length === 0) throw new Error(`${definition.id}: a test case needs at least one step`);
+  for (const step of definition.steps) {
+    if (step.run?.kind === 'issuance' && step.run.faults.length > 1) throw new Error(`${definition.id}: a step applies one fault, not ${step.run.faults.join(', ')}`);
+  }
+  for (const variant of definition.variants ?? []) {
+    if (!definition.profile.some((condition) => condition.equals === VARIANT_PROFILES[variant])) {
+      throw new Error(`${definition.id}: variant ${variant} needs the profile ${VARIANT_PROFILES[variant]} in its profile applicability`);
+    }
+  }
+  const named = new Set(definition.preconditions.flatMap((p) => [...p.matchAll(ISSUER_CONTROL_MENTION)].map((m) => m[1])));
+  const gated = new Set(definition.control ? (Array.isArray(definition.control) ? definition.control : [definition.control]) : []);
+  if (named.size !== gated.size || [...named].some((id) => !gated.has(id))) {
+    throw new Error(`${definition.id}: control (${[...gated].join(', ') || 'none'}) differs from the controls the preconditions name (${[...named].join(', ') || 'none'})`);
+  }
+  return definition;
 }

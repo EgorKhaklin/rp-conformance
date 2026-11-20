@@ -532,6 +532,12 @@ async function buildEncryptedResponse(input: ResponseInput, fault?: FaultId): Pr
       };
     case 'response.extra-member':
       return encrypted(await encryptResponse({ ...input.payload, foo: 'bar' }, input.recipient, { enc: input.enc }));
+    case 'response.state-other':
+      return encrypted(await encryptResponse({ ...input.payload, state: base64url.encode(randomBytes(16)) }, input.recipient, { enc: input.enc }));
+    case 'response.state-missing': {
+      const { state: _state, ...payload } = input.payload;
+      return encrypted(await encryptResponse(payload, input.recipient, { enc: input.enc }));
+    }
     default:
       throw new Error(`fault ${fault} is not implemented`);
   }

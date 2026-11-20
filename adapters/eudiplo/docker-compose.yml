@@ -30,6 +30,9 @@ services:
       OUTBOUND_URL_ALLOW_PRIVATE_NETWORK: 'true'
       # default_query_pid carries no trusted_authorities; EUDIPLO uses them for its own trust decision only.
       VP_REMOVE_TA: 'true'
+      # Issuer suite (adapters/issuer-eudiplo): how often EUDIPLO reads the status of the wallet units its credentials
+      # follow (revokeWithWalletUnit), which bounds T_chain (ICS-07). Releases before it ignore the variable.
+      WALLET_UNIT_STATUS_CHECK_INTERVAL: ${WALLET_UNIT_STATUS_CHECK_INTERVAL:-30}
       LOG_LEVEL: debug
     extra_hosts:
       - host.docker.internal:host-gateway
