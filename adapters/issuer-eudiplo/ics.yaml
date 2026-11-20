@@ -9,6 +9,7 @@ profiles:
   - P-SD    # ICS-02
   - P-MD    # ICS-02
   - P-PA    # ICS-03
+  - P-AC    # ICS-03: built-in authorization server, PAR + PKCE S256; authenticateSubject follows its redirect (no login, ICS-03.subject_authentication)
   - P-DB    # ICS-04
   - P-REV   # ICS-05
   - P-SHORT # ICS-05: the short-lived configurations ICS-05.short.SD and ICS-05.short.MD
@@ -17,6 +18,7 @@ profiles:
   - P-CHAIN # ICS-07
   - P-BATCH # ICS-08
   - P-REISS # ICS-09
+  - P-DEF   # ICS-10
   - P-NOT   # ICS-11
   - P-ENC   # ICS-12
   - P-DPN   # ICS-13: the nonce endpoint only, no DPoP server nonce (ICS-13.dpop_nonce)
@@ -26,9 +28,12 @@ items:
   ICS-02: SD-JWT VC and mdoc                 # live: pid-sd-jwt-vc (dc+sd-jwt, vct urn:eudi:pid:1) and pid-mso-mdoc (mso_mdoc, doctype eu.europa.ec.eudi.pid.1)
   ICS-02.SD: pid-sd-jwt-vc                   # the configuration that issues the PID in SD-JWT VC, as definitions name it (ICS-02.<format variant>)
   ICS-02.MD: pid-mso-mdoc                    # the configuration that issues the PID in mdoc, signed by the document signer the Registrar issued
-  ICS-03: pre-authorized code              # live: flow pre_authorized_code at the built-in authorization server, with and without tx_code. No P-AC: no authenticateSubject (README)
+  ICS-02.second: pid-sd-jwt-vc-2               # a second SD-JWT VC configuration (issue 24's, never in a PID offer), offered on its own by PP_WS_IA_PreAuthorized_004_UF
+  ICS-03: pre-authorized code, authorization code  # live: flows pre_authorized_code (with and without tx_code) and authorization_code (issuer_state) at the built-in authorization server
   ICS-03.tx_code: with and without           # live: tx_code of 6 digits, input_mode numeric; txCodeMaxAttempts default 5
-  ICS-03.subject_authentication: none        # the built-in authorization server issues codes without a login step (docs issuance/authorization-servers.md)
+  ICS-03.subject_authentication: none        # the built-in authorization server issues codes without a login step (docs issuance/authorization-servers.md): authenticateSubject opens the authorization request and returns EUDIPLO's redirect; the subject is the one of the offer (issuer_state)
+  ICS-03.par_request_uri_lifetime: PT60S     # source: PAR_REQUEST_URI_LIFETIME_SECONDS 60 (pushed-authorization-request.ts), expires_in of the PAR response
+  ICS-03.authorization_code_lifetime: PT60S  # source: AUTHORIZATION_CODE_LIFETIME_SECONDS 60
   ICS-04: device-bound                       # live: keyBinding true, cryptographic_binding_methods_supported jwk
   ICS-04.key_storage: [iso_18045_high]       # live: keyAttestationsRequired, published as key_attestations_required
   ICS-04.user_authentication: [iso_18045_high]
@@ -51,7 +56,7 @@ items:
   ICS-08.batch_size: 2                       # live: issuance configuration batchSize 2, published as batch_credential_issuance.batch_size (a maximum: one proof still gives one credential)
   ICS-08.credential_reuse_policy: once_only, limited_time  # config.credentialReusePolicy arf_annex_ii: method A with batch_size 2, then method B (issue 24)
   ICS-09: "Yes"                              # source: built-in token.refreshTokenEnabled default true (token-grant-rules.ts), refresh tokens bound to the DPoP key
-  ICS-10: "No"                               # deferred issuance needs an attribute provider or webhook that defers; the adapter configures none
+  ICS-10: "Yes"                              # live: offers with deferred: true take their claims from the adapter's webhook, which answers {deferred: true}; EUDIPLO answers 202 with transaction_id and interval, the adapter completes it (POST /api/issuer/deferred/{id}/complete). Inline claims never defer
   ICS-11: "Yes"                              # live: notificationEndpointEnabled true, notification_endpoint in the metadata
   ICS-12: "Yes"                              # live: credential_request_encryption and credential_response_encryption advertised, encryption_required false
   ICS-13.dpop_nonce: "No"                    # source: no DPoP-Nonce / use_dpop_nonce anywhere in apps/backend/src
@@ -61,7 +66,7 @@ items:
   ICS-14.T_skew: PT5S                        # source: CRYPTO_TOLERANCE default 5 s
   ICS-14.pre_authorized_code: PT24H          # offerLifetimeSeconds not set: the code lives as long as the session, SESSION_TTL default 86400 s
   ICS-14.c_nonce: PT10M                      # source: nonce.service.ts expiresAt now + 10 min
-  ICS-14.access_token: PT5M                  # source: ACCESS_TOKEN_LIFETIME_SECONDS 300 (token-grant-rules.ts)
+  ICS-14.access_token: PT1M                  # live: the adapter sets token.lifetimeSeconds 60 (EUDIPLO's minimum) on the built-in authorization server; expires_in 60 in the token response
   ICS-15.T_refresh: PT5M                     # source: trust-store.service.ts cacheTtlMs 5 min; refreshTrust clears the cache (DELETE /api/cache/trust-list, live)
   ICS-15.next_update_grace: PT0S             # source: a list whose NextUpdate has passed is discarded at once, also as wallet provider list, and so is one with a lower LoTESequenceNumber than one accepted before (docs trust/trust-lists.md, EUDIPLO/eudiplo#1441, #1457)
   ICS-16.min_entries: 10000                  # live: status list capacity 10000 (STATUS_CAPACITY default, set explicitly)

@@ -10,6 +10,7 @@ import {
   type CheckResult,
   controlsOf,
   durationMs,
+  grantFaultInfo,
   PID_TEST_SUBJECTS,
   type IssuanceAction,
   type IssuerAdapter,
@@ -18,11 +19,13 @@ import {
   type IssuerTestCaseDefinition,
   isCredentialRequestFault,
   isExecutable,
+  isGrantFault,
+  type TokenReuseAction,
   type Verdict,
   variantOf,
 } from '@rp-conformance/core';
-import { type HttpExchange, IssuanceClient, type IssuanceEvidence, oauthErrorOf, walletUnitOf } from '@rp-conformance/issuer-wallet';
-import { comparePidFormats, type IssuedOutputOptions, validateIssuedMdoc, validateIssuedSdJwtVc } from '@rp-conformance/validator';
+import { type HttpExchange, IssuanceClient, type IssuanceEvidence, type IssueOptions, credentialIdentifierOf, oauthErrorOf, walletUnitOf } from '@rp-conformance/issuer-wallet';
+import { checkAuthorizationResponse, comparePidFormats, type IssuedOutputOptions, validateIssuedMdoc, validateIssuedSdJwtVc } from '@rp-conformance/validator';
 import { worst } from '../evaluate';
 import {
   type AttestationState,
@@ -54,6 +57,7 @@ import {
   type StatusObservation,
   waits,
 } from './status';
+import { handlesSessionStep, noteSessionStep, runSessionStep, sessionApplicability } from './session';
 
 /** The validator's clock tolerance on the issuer side: the catalogue's cap of `T_skew` (section 3.5). */
 export const ISSUER_SKEW_SECONDS = 300;
@@ -170,6 +174,11 @@ export interface IssuerRunOptions {
   harnessHost: string;
   knownFindings?: IssuerKnownFinding[];
   log?: (line: string) => void;
+  /**
+   * The longest a step may wait for an artifact to expire (a lifetime plus one hour, catalogue section 3.5), seconds;
+   * default 0. A step that would wait longer is NOT APPLICABLE in the run, and the test cases with such steps run last.
+   */
+  maxWaitSeconds?: number;
 }
 
 const matches = (id: string, pattern: string) =>
@@ -200,6 +209,8 @@ export async function runIssuerConformance(options: IssuerRunOptions): Promise<{
   const runId = `i${new Date().toISOString().replace(/[-:]/g, '').slice(0, 15)}-${randomBytes(3).toString('hex')}`;
   const runDir = join(options.reportDir, runId);
   const namespace = runId;
+  // Issue 20: a grant fault that waits past a lifetime (`--max-wait`) puts its test case with the waiting ones.
+  const grantWaits = (d: IssuerTestCaseDefinition) => d.steps.some((step) => step.run?.kind === 'issuance' && step.run.faults.some((f) => isGrantFault(f) && grantFaultInfo(f).waitsFor));
   const selected = selectIssuerTestCases(options.definitions, options.only);
   const harness = await startIssuerHarness({ runId, namespace, harnessHost: options.harnessHost, ics: options.ics });
   const report: IssuerRunReport = {
@@ -259,7 +270,7 @@ export async function runIssuerConformance(options: IssuerRunOptions): Promise<{
     };
     // Test cases whose steps wait (`REVOKED(t)`, polling across `exp`) run after the others and in parallel (design
     // section 6.3); a test case gated on a control still runs after it.
-    const waiting = selected.filter((d) => waits(d.steps) && !d.control);
+    const waiting = selected.filter((d) => (waits(d.steps) || grantWaits(d)) && !d.control);
     for (const definition of selected.filter((d) => !waiting.includes(d))) await execute(definition);
     await Promise.all(waiting.map(execute));
   } finally {
@@ -297,6 +308,18 @@ interface TestCaseState extends LifecycleState {
   attestations: AttestationState;
   /** Offers by value captured in the test case (`PP_WS_MS_Offer_002`). */
   offersByValue: Record<string, unknown>[];
+  /** The evidence of each issuance step (1-based), for `token-reuse` (issue 20). */
+  evidence: Map<number, IssuanceEvidence>;
+}
+
+/** The plain client of a Wallet Unit (one DPoP key per unit), as `token-reuse` sends with it. */
+async function clientOf(unit: string, ctx: Context, state: TestCaseState): Promise<IssuanceClient> {
+  let client = state.clients.get(unit);
+  if (!client) {
+    client = await IssuanceClient.create(walletUnitOf(ctx.harness.twp, unit as Parameters<typeof walletUnitOf>[1]), { allowInsecureUrls: true });
+    state.clients.set(unit, client);
+  }
+  return client;
 }
 
 async function runIssuerTestCase(definition: IssuerTestCaseDefinition, ctx: Context): Promise<IssuerTestCaseRecord> {
@@ -308,15 +331,16 @@ async function runIssuerTestCase(definition: IssuerTestCaseDefinition, ctx: Cont
   }));
   const control = outcomes.find((o) => o.verdict === 'PASS') ?? outcomes[0] ?? null;
   const end = (verdict: Verdict, reason: string): IssuerTestCaseRecord => ({ ...base, verdict, reason, control, steps: [] });
-  const unmet = issuerApplicability(definition, ctx.ics);
+  const unmet = [...issuerApplicability(definition, ctx.ics), ...sessionApplicability(definition, ctx.ics)];
   if (unmet.length) return end('NOT APPLICABLE', `profile not met: ${unmet.join('; ')}`);
   if (control && control.verdict !== 'PASS') return end('INCONCLUSIVE', `positive control ${outcomes.map((o) => o.id).join(' or ')} did not pass in ${variant}`);
-  const state: TestCaseState = { clients: new Map(), attestations: newAttestationState(), offersByValue: [], ...newLifecycleState() };
+  const state: TestCaseState = { clients: new Map(), attestations: newAttestationState(), offersByValue: [], evidence: new Map(), ...newLifecycleState() };
   const steps: IssuerStepRecord[] = [];
-  for (const [index, step] of definition.steps.entries()) steps.push(await runIssuerStep(definition, variant, index + 1, step, ctx, state));
+  for (const [index, step] of definition.steps.entries()) steps.push(noteSessionStep(state, await runIssuerStep(definition, variant, index + 1, step, ctx, state)));
   // A step that does not apply to the Provider (NOT APPLICABLE) does not count, unless no step applies.
   const applicable = steps.filter((s) => s.verdict !== 'NOT APPLICABLE');
-  return { ...base, verdict: applicable.length ? worst(applicable.map((s) => s.verdict)) : 'NOT APPLICABLE', control, steps };
+  const skipped = steps.filter((s) => s.verdict === 'NOT APPLICABLE').map((s) => `step ${s.step} not applicable: ${s.reason}`);
+  return { ...base, verdict: applicable.length ? worst(applicable.map((s) => s.verdict)) : 'NOT APPLICABLE', ...(skipped.length && applicable.length ? { reason: skipped.join('; ') } : {}), control, steps };
 }
 
 async function runIssuerStep(
@@ -348,8 +372,11 @@ async function runIssuerStep(
     record.artifacts.push(relative(ctx.runDir, join(dir, name)));
   };
   try {
-    if (step.run?.kind === 'metadata') await runMetadata(step.expect, record, save, ctx);
+    // Issue 25: DPoP, batch, re-issuance, deferred, notification and robustness steps run on the session client.
+    if (handlesSessionStep(definition, step)) await runSessionStep(step, index, record, save, ctx, state);
+    else if (step.run?.kind === 'metadata') await runMetadata(step.expect, record, save, ctx);
     else if (step.run?.kind === 'issuance') await runIssuance(step, step.run, record, save, ctx, state);
+    else if (step.run?.kind === 'token-reuse') await runTokenReuse(step, step.run, record, save, ctx, state);
     else if (step.run?.kind === 'wallet-event' && step.expect.codes.every((code) => code === 'INFO')) {
       record.walletUnit = step.run.walletUnit ?? 'CW-1';
       const served = await applyWalletEvent(step.run, {
@@ -373,11 +400,11 @@ async function runIssuerStep(
 }
 
 /** What the issuance client and the issuance action support so far; anything else leaves the step INCONCLUSIVE. */
-function unsupported(action: IssuanceAction): string | undefined {
-  if (action.grant !== 'pre-authorized_code') return 'the issuance client implements the pre-authorized code flow only';
-  const notImplemented = action.faults.filter((fault) => !isCredentialRequestFault(fault) && !isIssuerRequestFault(fault));
+function unsupported(action: IssuanceAction, adapter: IssuerRunOptions['adapter']): string | undefined {
+  if (action.grant === 'authorization_code' && !adapter.authenticateSubject) return 'the adapter cannot authenticate the subject (no authenticateSubject)';
+  const notImplemented = action.faults.filter((fault) => !isCredentialRequestFault(fault) && !isIssuerRequestFault(fault) && !isGrantFault(fault));
   if (notImplemented.length) return `issuer faults are not implemented yet (${notImplemented.join(', ')})`;
-  const options: string[] = (['stopAfterToken', 'deferred', 'encryption', 'credentialIdentifier'] as const).filter((option) => action[option]);
+  const options: string[] = (['stopAfterToken', 'deferred', 'encryption'] as const).filter((option) => action[option]);
   if ((action.batchSize ?? 1) > 1) options.push('batchSize');
   return options.length ? `the issuance option(s) ${options.join(', ')} are not implemented yet` : undefined;
 }
@@ -397,7 +424,7 @@ async function runIssuance(
     return;
   }
   if (isOfferCapture(step.expect)) return runOfferCapture(step.expect, action, record, save, ctx, state);
-  const missing = unsupported(action);
+  const missing = unsupported(action, ctx.adapter);
   if (missing) {
     record.reason = missing;
     return;
@@ -408,6 +435,12 @@ async function runIssuance(
   record.subject = subject;
   const configurations = resolveConfigurations(action.configurations, ctx.ics);
   const txCode = usesTxCode(ctx.ics);
+  const grantFault = action.faults.find(isGrantFault);
+  if (grantFault && grantFaultInfo(grantFault).target === 'tx-code' && !txCode) {
+    record.verdict = 'NOT APPLICABLE';
+    record.reason = 'the Provider declares offers without tx_code only (ICS-03.tx_code)';
+    return;
+  }
   const byReference = action.offerByReference ?? false;
   const offer = await ctx.adapter.createOffer({ subject, configurations, grant: action.grant, byReference, txCode, ...(action.portraitOptOut ? { portraitOptOut: true } : {}) });
   record.offer = { sessionId: offer.sessionId, offer: offer.offer, byReference, txCode: offer.txCode !== undefined, configurations };
@@ -427,16 +460,25 @@ async function runIssuance(
   const requestFault = action.faults.find(isCredentialRequestFault);
   let evidence: IssuanceEvidence;
   if (requestFault) {
-    const faulty = await issueWithFault(requestFault, offer, configurations[0] as string, unit, ctx);
+    const grant = await grantOptions(action, subject, txCode, ctx);
+    // `identifier-foreign` (issue 20 makes it executable, AC only): a `credential_identifier` of another session's token.
+    const foreignIdentifier = requestFault === 'credential-request.identifier-foreign' ? await foreignCredentialIdentifier(action, subject, configurations, txCode, ctx, state) : undefined;
+    const faulty = await issueWithFault(requestFault, offer, configurations[0] as string, unit, ctx, {
+      ...(grant.grant ? { grant: grant.grant } : {}),
+      ...(grant.authenticate ? { authenticate: grant.authenticate } : {}),
+      ...(foreignIdentifier !== undefined ? { foreignIdentifier } : {}),
+    });
     evidence = faulty.evidence;
     if (faulty.requestChecks) record.requestChecks = faulty.requestChecks;
     if (faulty.notApplicable) {
       record.exchanges = evidence.exchanges;
+      // The fault cannot be built against this Provider (nothing faulty was sent): NOT APPLICABLE, with the reason.
+      record.verdict = 'NOT APPLICABLE';
       record.reason = `the fault ${requestFault} cannot be applied: ${faulty.notApplicable}`;
       return;
     }
   } else {
-    evidence = await client.issue({ offer: offer.offer, ...(offer.txCode !== undefined ? { txCode: offer.txCode } : {}), credentialConfigurationIds: configurations });
+    evidence = await client.issue({ offer: offer.offer, ...(offer.txCode !== undefined ? { txCode: offer.txCode } : {}), credentialConfigurationIds: configurations, ...(action.credentialIdentifier ? { credentialIdentifier: true } : {}), ...(await grantOptions(action, subject, txCode, ctx)) });
   }
   // `REJ:invalid_nonce, then ISS`: the same request again, without the fault, with a fresh `c_nonce`.
   const firstAttempt = { exchanges: evidence.exchanges.length, credentials: evidence.credentials.length };
@@ -450,9 +492,16 @@ async function runIssuance(
       evidence.error = `retry with a fresh c_nonce: ${(error as Error).message}`;
     }
   }
+  state.evidence.set(record.step, evidence);
   rememberIssuance(state.attestations, unit, evidence);
   state.issued.set(record.step, { sessionId: offer.sessionId, credentials: evidence.credentials });
   record.exchanges = evidence.exchanges;
+  if (evidence.waitExceeded) {
+    record.verdict = 'NOT APPLICABLE';
+    record.reason = `${evidence.error}; run with a larger --max-wait to execute it`;
+    await save('issuance.json', `${JSON.stringify({ offer: record.offer, grant: evidence.grant, exchanges: evidence.exchanges }, null, 2)}\n`);
+    return;
+  }
   if (evidence.token) record.token = { tokenType: evidence.token.tokenType };
   if (evidence.error) record.error = evidence.error;
   const output = outputOptions(step, action, subject, ctx);
@@ -467,7 +516,7 @@ async function runIssuance(
     for (const credential of record.credentials) credential.checks.push(maintenancePeriodCheck(credential.credential, sent));
   }
   for (const [i, credential] of record.credentials.entries()) await save(`credential-${i + 1}.txt`, credential.credential);
-  await save('issuance.json', `${JSON.stringify({ offer: record.offer, offerObject: evidence.offer, metadata: evidence.metadata, exchanges: evidence.exchanges }, null, 2)}\n`);
+  await save('issuance.json', `${JSON.stringify({ offer: record.offer, offerObject: evidence.offer, metadata: evidence.metadata, grant: evidence.grant, exchanges: evidence.exchanges }, null, 2)}\n`);
 
   // `proof.p521` applies only where the configuration does not advertise ES512 for `jwt` proofs (catalogue
   // PP_WS_SM_ProofOfPossession_009_UF: "P-521 if not advertised").
@@ -481,7 +530,7 @@ async function runIssuance(
   }
   const evaluation = action.retryWithFreshNonce
     ? evaluateRetry(step, evidence, record.credentials, firstAttempt)
-    : evaluateIssuance(step.expect, observationOf(evidence, record.credentials, record.stepChecks));
+    : evaluateIssuance(step.expect, { ...observationOf(evidence, record.credentials, record.stepChecks), ...conformanceOf(evidence) });
   record.verdict = evaluation.verdict;
   record.reason = evaluation.reason;
 }
@@ -554,6 +603,108 @@ function evaluateRetry(step: IssuerStepDefinition, evidence: IssuanceEvidence, c
   const retry = { exchanges: evidence.exchanges.slice(first.exchanges), ...(evidence.error ? { error: evidence.error } : {}) };
   const two = evaluateIssuance({ ...step.expect, codes: retried }, observationOf(retry, credentials.slice(first.credentials)));
   return { verdict: worst([one.verdict, two.verdict]), reason: `first request: ${one.reason}; retry with a fresh c_nonce: ${two.reason}` };
+}
+
+/**
+ * The issuance options of the grant (issue 20): the adapter's `authenticateSubject` for the authorization code flow,
+ * the grant fault, the second offer `token-request.pre-authorized-code-other-offer` needs (for `ICS-02.second`), the
+ * declared lifetime of a pre-authorized code, and the run's wait limit.
+ */
+async function grantOptions(action: IssuanceAction, subject: IssuanceAction['subject'] & string, txCode: boolean, ctx: Context): Promise<Partial<IssueOptions>> {
+  const fault = action.faults.find(isGrantFault);
+  const lifetime = durationMs(issuerIcsValue(ctx.ics, 'ICS-14.pre_authorized_code'));
+  const options: Partial<IssueOptions> = {
+    grant: action.grant,
+    ...(action.stopAfterAuthorization ? { stopAfterAuthorization: true } : {}),
+    ...(fault ? { grantFault: fault } : {}),
+    ...(lifetime !== undefined ? { preAuthorizedCodeLifetimeSeconds: lifetime / 1000 } : {}),
+    maxWaitSeconds: ctx.maxWaitSeconds ?? 0,
+  };
+  const authenticate = ctx.adapter.authenticateSubject?.bind(ctx.adapter);
+  if (action.grant === 'authorization_code' && authenticate) options.authenticate = (url) => authenticate(url, subject);
+  if (fault && grantFaultInfo(fault).otherOffer) {
+    const [second] = resolveConfigurations(['ICS-02.second'], ctx.ics);
+    const other = await ctx.adapter.createOffer({ subject, configurations: [second], grant: 'pre-authorized_code', byReference: false, txCode });
+    options.otherOffer = { offer: other.offer, ...(other.txCode !== undefined ? { txCode: other.txCode } : {}) };
+  }
+  return options;
+}
+
+/**
+ * A `credential_identifier` another session's token response issued for the step's configuration: a valid issuance of a
+ * second offer for the same subject and grant with `CW-2`, whose token response is read (`identifier-foreign`).
+ */
+async function foreignCredentialIdentifier(action: IssuanceAction, subject: IssuanceAction['subject'] & string, configurations: string[], txCode: boolean, ctx: Context, state: TestCaseState): Promise<string | undefined> {
+  const other = await ctx.adapter.createOffer({ subject, configurations, grant: action.grant, byReference: false, txCode });
+  const client = await clientOf('CW-2', ctx, state);
+  const evidence = await client.issue({
+    offer: other.offer,
+    ...(other.txCode !== undefined ? { txCode: other.txCode } : {}),
+    credentialConfigurationIds: configurations,
+    ...(await grantOptions({ ...action, faults: [] }, subject, txCode, ctx)),
+  });
+  if (!evidence.token) return undefined;
+  try {
+    return credentialIdentifierOf(evidence.token, configurations[0] as string);
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * `token-reuse` (issuer harness design section 6.1): sends the request of an earlier issuance step again with one of its
+ * artifacts, as the Wallet Unit the action names (default that of the step): its pre-authorized or authorization code
+ * at the token endpoint, or its PAR `request_uri` at the authorization endpoint through the adapter.
+ */
+async function runTokenReuse(
+  step: IssuerStepDefinition,
+  action: TokenReuseAction,
+  record: IssuerStepRecord,
+  save: (name: string, content: string) => Promise<void>,
+  ctx: Context,
+  state: TestCaseState,
+): Promise<void> {
+  const earlier = state.evidence.get(action.ofStep);
+  if (!earlier?.grant || !earlier.metadata) {
+    record.reason = `step ${action.ofStep} obtained no ${action.artifact} to reuse${earlier?.error ? ` (${earlier.error})` : ''}`;
+    return;
+  }
+  const unit = action.walletUnit ?? earlier.walletUnit;
+  record.walletUnit = unit;
+  const client = await clientOf(unit, ctx, state);
+  let evidence: IssuanceEvidence;
+  if (action.artifact === 'par-request-uri') {
+    const authenticate = ctx.adapter.authenticateSubject?.bind(ctx.adapter);
+    if (!authenticate) {
+      record.reason = 'the adapter cannot authenticate the subject (no authenticateSubject)';
+      return;
+    }
+    evidence = await client.reuseRequestUri(earlier.metadata, earlier.grant, (url) => authenticate(url, 'SUBJ-1'));
+  } else if (action.artifact === 'authorization-code' || action.artifact === 'pre-authorized-code') {
+    const expected = action.artifact === 'authorization-code' ? 'authorization_code' : 'pre-authorized_code';
+    if (earlier.grant.grant !== expected) {
+      record.reason = `step ${action.ofStep} ran the ${earlier.grant.grant} grant, not ${expected}`;
+      return;
+    }
+    evidence = await client.redeemAgain(earlier.metadata, earlier.grant);
+  } else {
+    record.reason = `token-reuse of ${action.artifact} is not implemented yet`;
+    return;
+  }
+  record.exchanges = evidence.exchanges;
+  if (evidence.token) record.token = { tokenType: evidence.token.tokenType };
+  if (evidence.error) record.error = evidence.error;
+  await save('token-reuse.json', `${JSON.stringify({ artifact: action.artifact, ofStep: action.ofStep, walletUnit: unit, grant: evidence.grant, exchanges: evidence.exchanges }, null, 2)}\n`);
+  const evaluation = evaluateIssuance(step.expect, { ...observationOf(evidence, []), ...conformanceOf(evidence) });
+  record.verdict = evaluation.verdict;
+  record.reason = evaluation.reason;
+}
+
+/** The `CONF` checks of an issuance step: the authorization response, when the flow had one (`IA_AuthorizationCode_007`). */
+function conformanceOf(evidence: IssuanceEvidence): Pick<IssuanceObservation, 'conformance'> {
+  const authorization = evidence.grant?.authorization;
+  if (!authorization) return {};
+  return { conformance: checkAuthorizationResponse(authorization.response, { state: authorization.state, issuer: authorization.authorizationServer }) };
 }
 
 /** `OBS-CRED`: every credential the step received through the reference validator, with the suite's trust configuration. */
@@ -630,7 +781,10 @@ async function validateCredentials(evidence: IssuanceEvidence, ctx: Context, out
 export function observationOf(evidence: Pick<IssuanceEvidence, 'exchanges' | 'token' | 'error'>, credentials: { checks: CheckResult[] }[], stepChecks?: CheckResult[]): IssuanceObservation {
   return {
     exchanges: evidence.exchanges.map((exchange) => {
-      const error = exchange.response && exchange.response.status >= 400 ? oauthErrorOf(exchange.response) : undefined;
+      // The authorization endpoint answers with a redirect to the wallet; an error travels in its query (RFC 6749 section 4.1.2.1).
+      const redirect = exchange.step === 'authorization' && exchange.response?.headers.location;
+      const redirectError = redirect ? (new URL(redirect).searchParams.get('error') ?? undefined) : undefined;
+      const error = redirectError ?? (exchange.response && exchange.response.status >= 400 ? oauthErrorOf(exchange.response) : undefined);
       return {
         step: exchange.step,
         ...(exchange.response ? { status: exchange.response.status } : {}),

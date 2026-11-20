@@ -4,6 +4,8 @@
 
 - `SD+PA`: Verify that the PID Provider issues the PID in SD-JWT VC format to the Wallet Unit `CW-1` in the pre-authorized code flow, and that the credential passes every check of the reference validator.
 - `MD+PA`: Verify that the PID Provider issues the PID in mdoc format to the Wallet Unit `CW-1` in the pre-authorized code flow, and that the credential passes every check of the reference validator.
+- `SD+AC`: Verify that the PID Provider issues the PID in SD-JWT VC format to the Wallet Unit `CW-1` in the authorization code flow with PAR and PKCE, and that the credential passes every check of the reference validator.
+- `MD+AC`: Verify that the PID Provider issues the PID in mdoc format to the Wallet Unit `CW-1` in the authorization code flow with PAR and PKCE, and that the credential passes every check of the reference validator.
 
 ## References
 
@@ -39,12 +41,14 @@ EUDI_specific | EUDI_required
 1. Per variant:
     - `SD+PA`: The adapter creates a credential offer for `SUBJ-1` and the PID configuration in SD-JWT VC format, pre-authorized code with `tx_code` unless the ICS declares offers without one. `CW-1` runs `SCN-I` without mutation: metadata, token request with WIA, PoP and DPoP proof, nonce request, credential request with one `openid4vci-proof+jwt` that carries the KA.
     - `MD+PA`: The adapter creates a credential offer for `SUBJ-1` and the PID configuration in mdoc format, pre-authorized code with `tx_code` unless the ICS declares offers without one. `CW-1` runs `SCN-I` without mutation: metadata, token request with WIA, PoP and DPoP proof, nonce request, credential request with one `openid4vci-proof+jwt` that carries the KA.
+    - `SD+AC`: The adapter creates a credential offer for `SUBJ-1` and the PID configuration in SD-JWT VC format, authorization code with `issuer_state`. `CW-1` runs `SCN-I` without mutation: metadata, pushed authorization request with PKCE `S256`, `authorization_details`, WIA, PoP and DPoP proof, the authorization request through the adapter (`authenticateSubject`), token request with WIA, PoP and DPoP proof and the `code_verifier`, nonce request, credential request with one `openid4vci-proof+jwt` that carries the KA.
+    - `MD+AC`: The adapter creates a credential offer for `SUBJ-1` and the PID configuration in mdoc format, authorization code with `issuer_state`. `CW-1` runs `SCN-I` without mutation: metadata, pushed authorization request with PKCE `S256`, `authorization_details`, WIA, PoP and DPoP proof, the authorization request through the adapter (`authenticateSubject`), token request with WIA, PoP and DPoP proof and the `code_verifier`, nonce request, credential request with one `openid4vci-proof+jwt` that carries the KA.
 
 ## Expected results
 
 1. Per variant:
-    - `SD+PA`: The Provider issues the credential (HTTP 200) in SD-JWT VC format (`dc+sd-jwt`). Every credential passes format, `issuer-trust` to `PP-T` on `TL-PID`, `issuer-signature`, `disclosures`, `validity`, `holder-binding` (bound to a proof key the KA attests) and `status-reference`, and the Status List Token it references passes the status list checks.
-    - `MD+PA`: The Provider issues the credential (HTTP 200) in mdoc format (`mso_mdoc`). Every credential passes format, `issuer-trust` to `PP-T` on `TL-PID`, `issuer-signature`, `disclosures`, `validity`, `holder-binding` (bound to a proof key the KA attests) and `status-reference`, and the Status List Token it references passes the status list checks.
+    - `SD+PA`, `SD+AC`: The Provider issues the credential (HTTP 200) in SD-JWT VC format (`dc+sd-jwt`). Every credential passes format, `issuer-trust` to `PP-T` on `TL-PID`, `issuer-signature`, `disclosures`, `validity`, `holder-binding` (bound to a proof key the KA attests) and `status-reference`, and the Status List Token it references passes the status list checks.
+    - `MD+PA`, `MD+AC`: The Provider issues the credential (HTTP 200) in mdoc format (`mso_mdoc`). Every credential passes format, `issuer-trust` to `PP-T` on `TL-PID`, `issuer-signature`, `disclosures`, `validity`, `holder-binding` (bound to a proof key the KA attests) and `status-reference`, and the Status List Token it references passes the status list checks.
 
 ## Comments
 
@@ -52,4 +56,4 @@ Positive control of every `_UF` test case of the same variant (issuer catalogue 
 
 Execute this test case once for each format and grant the Provider declares in its ICS (ICS-02, ICS-03).
 
-Variants (issuer catalogue section 2.3), each executed when the Provider's ICS puts it in the profiles named: `SD+PA` (`P-PID`, `P-SD`, `P-PA`), `MD+PA` (`P-PID`, `P-MD`, `P-PA`).
+Variants (issuer catalogue section 2.3), each executed when the Provider's ICS puts it in the profiles named: `SD+PA` (`P-PID`, `P-SD`, `P-PA`), `MD+PA` (`P-PID`, `P-MD`, `P-PA`), `SD+AC` (`P-PID`, `P-SD`, `P-AC`), `MD+AC` (`P-PID`, `P-MD`, `P-AC`).

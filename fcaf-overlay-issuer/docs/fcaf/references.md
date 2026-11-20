@@ -61,8 +61,14 @@ The syntax follows that used for the EUDI Wallet Architecture and Reference Fram
 | [Issuer catalogue] | draft 0.2 | [PID Provider and Attestation Provider functional conformance tests: test catalogue](https://github.com/cre8/rp-conformance/blob/main/issuer-test-catalogue.md) of the rp-conformance project, with its decisions. |
 | [RP catalogue] | draft | [Relying Party functional conformance tests: test catalogue](https://github.com/cre8/rp-conformance/blob/main/rp-test-catalogue.md) of the rp-conformance project, with its decisions. |
 | [RFC 5280] | - | Same as [RFC5280]. |
+| [OWASP] | - | [OWASP Top 10](https://owasp.org/www-project-top-ten/): the most critical security risks to web applications. |
+| [OWASP API Security Top 10] | 2023 | [OWASP API Security Top 10](https://owasp.org/API-Security/): the most critical security risks to APIs. |
+| [RFC 6749] | - | Same as [RFC6749]: The OAuth 2.0 Authorization Framework. |
+| [RFC 6750] | - | [RFC 6750](https://datatracker.ietf.org/doc/html/rfc6750): The OAuth 2.0 Authorization Framework: Bearer Token Usage. |
 | [RFC 7636] | - | [RFC 7636](https://datatracker.ietf.org/doc/html/rfc7636): Proof Key for Code Exchange by OAuth Public Clients (PKCE). |
 | [RFC 9126] | - | Same as [RFC9126]: OAuth 2.0 Pushed Authorization Requests. |
+| [RFC 8725] | - | Same as [RFC8725]: JSON Web Token Best Current Practices. |
+| [RFC 9207] | - | [RFC 9207](https://datatracker.ietf.org/doc/html/rfc9207): OAuth 2.0 Authorization Server Issuer Identification. |
 | [RFC 9449] | - | [RFC 9449](https://datatracker.ietf.org/doc/html/rfc9449): OAuth 2.0 Demonstrating Proof of Possession (DPoP). |
 | [RFC7517] | - | [RFC 7517](https://datatracker.ietf.org/doc/html/rfc7517): JSON Web Key (JWK). |
 | [TokenStatusList] | - | Same as [Token Status List]. |

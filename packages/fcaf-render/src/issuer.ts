@@ -30,6 +30,8 @@ const ISSUER_AREA_TITLE: Record<string, string> = {
   PidSdJwt: 'PID in SD-JWT VC format',
   PidMdoc: 'PID in mdoc format',
   Portrait: 'PID portrait',
+  PreAuthorized: 'Pre-Authorized Code',
+  ProofOfPossession: 'Proof of Possession',
 };
 
 /** The title of an area: `ClientAttestation` is "Client Attestation", unless `ISSUER_AREA_TITLE` names it. */

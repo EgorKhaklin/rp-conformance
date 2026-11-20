@@ -108,3 +108,119 @@
     EUDIPLO issues the mdoc PID's birth_date, issuance_date and expiry_date as CBOR text strings, not as full-date
     (tag 1004) or tdate (tag 0) as the PID Rulebook section 4.2 requires: its claim field types have no date type
   reference: adapters/issuer-eudiplo/upstream-findings/mdoc-full-date.md (not yet reported upstream)
+
+# Issue 20: authorization code and pre-authorized code.
+- testCase: PP_WS_IA_AuthorizationCode_006_UF
+  variants: [SD+AC]
+  finding: >-
+    An unknown scope is not rejected. Step 2 pushes an authorization request with scope=unknown-scope (no
+    authorization_details) and the offer's issuer_state: PAR answers 201 with a request_uri, the authorization endpoint
+    redirects with a code, the token response carries authorization_details for pid-sd-jwt-vc that the wallet never
+    requested, and the credential endpoint issues the PID (HTTP 200). EUDIPLO validates no scope at PAR
+    (assertValidPushedAuthorizationRequest) and grants the offer's configurations when the request names none it knows
+    (authorizationDetailsForToken falls back to the offer, domain/token-grant-rules.ts at ae0792a). RFC 6749 section 3.3
+    lets an Authorization Server ignore part of a scope, but then the token response must carry the granted scope; the
+    catalogue requires the rejection (OpenID4VCI 1.0 section 5.1.2). Step 1 (unknown credential_configuration_id in
+    authorization_details) passes: the token covers only the unknown configuration and the credential request for the
+    PID is rejected with invalid_credential_request.
+  reference: >-
+    not reported upstream; evidence in the reference run's artifacts
+    PP_WS_IA_AuthorizationCode_006_UF/SD+AC/step-2/issuance.json
+# Issue 20 makes the AC variants of other areas executable (P-AC).
+- testCase: PP_WS_SM_ProofOfPossession_007_UF
+  variants: [SD+AC]
+  finding: >-
+    In the authorization code flow EUDIPLO issues the PID for a key proof whose iss is other-wallet-unit while the
+    token was issued to client_id wallet-unit-cw-1 (credential endpoint HTTP 200). OpenID4VCI 1.0 Appendix F.1: iss
+    MUST be the client_id of the Client making the Credential Request. EUDIPLO calls verifyCredentialRequestJwtProof
+    without clientId (adapters/openid-credential-proof-verifier.ts at ae0792a), so the library never compares iss.
+  reference: >-
+    not reported upstream; evidence in the reference run's artifacts
+    PP_WS_SM_ProofOfPossession_007_UF/SD+AC/step-1/issuance.json
+
+
+# None of these is reported upstream by this suite (no issues in EUDIPLO/eudiplo from here); `reference` names the
+# evidence instead: the observed answer, and the place in EUDIPLO's source (apps/backend/src, revision ae0792a).
+
+# Issue 25: DPoP, batch, re-issuance, deferred, notification and robustness (observed 2026-11-20, 9.1.0-main.ae0792a).
+- testCase: PP_WS_IA_Batch_003_UF
+  variants: [SD+PA]
+  finding: >-
+    batch_size is not enforced: with batch_size 2 advertised, a credential request with 3 key proofs (one KA attesting
+    3 keys) is answered HTTP 200 with 3 credentials. EUDIPLO counts attested_keys only for the attestation proof type.
+  reference: issuer/issuance/oid4vci/application/issue-credentials-from-proofs.ts (line 58)
+- testCase: PP_WS_IA_Reissuance_002_UF
+  variants: [SD+PA]
+  finding: >-
+    A refresh token is accepted with a DPoP proof of another key: the refresh token request with a fresh DPoP key is
+    answered HTTP 200 with a new access token bound to that key (RFC 9449 section 5). With a WIA, EUDIPLO does not
+    compare the proof's key with the refresh token's binding.
+  reference: issuer/issuance/oid4vci/authorization/application/exchange-access-token.ts (lines 371-373)
+- testCase: PP_WS_IA_Reissuance_004_UF
+  variants: [SD+PA]
+  finding: >-
+    After the adapter revoked the PID (POST /api/session/revoke, confirmed by GET /api/session/{id}/credential-status),
+    the refresh token still gives an access token, and the credential request issues a new, valid PID. Revocation does
+    not touch the session's refresh token.
+  reference: session/adapters/typeorm-session.repository.ts (line 187, refresh token looked up by hash only)
+- testCase: PP_WS_IA_Deferred_002_UF
+  variants: [SD+PA]
+  finding: >-
+    A deferred credential request with an unknown transaction_id that is not a UUID (16 random bytes, base64url) is
+    answered HTTP 500: the value reaches PostgreSQL as a UUID ("QueryFailedError: invalid input syntax for type uuid").
+    An already redeemed transaction_id is rejected correctly with invalid_transaction_id.
+  reference: issuer/issuance/oid4vci/deferred-credential.service.ts (lookup of the transaction by id)
+- testCase: PP_WS_IA_Notification_001
+  variants: [SD+PA]
+  finding: >-
+    The notification endpoint answers a valid notification (credential_accepted, credential_failure,
+    credential_deleted) with HTTP 201 and an empty body; OpenID4VCI 1.0 section 11.2 requires HTTP 204.
+  reference: issuer/issuance/oid4vci/oid4vci.controller.ts (line 244, POST without @HttpCode(204))
+- testCase: PP_WS_IA_Notification_002_UF
+  variants: [SD+PA]
+  finding: >-
+    A notification with an unknown event (foo) is answered HTTP 400 with Nest's validation body ({statusCode, message:
+    "Validation failed", errors}), not an OAuth error object with invalid_notification_request (OpenID4VCI 1.0 section
+    11.3). An unknown notification_id is rejected correctly with invalid_notification_id.
+  reference: issuer/issuance/oid4vci/dto/notification-request.dto.ts (zod pipe before the controller)
+- testCase: PP_WS_SH_Encoding_002_UF
+  variants: [SD+PA]
+  finding: >-
+    A credential request of 10 MiB is answered HTTP 413 without an OAuth or OpenID4VCI error object (body parser limit
+    10 MB, Nest error body). A credential request with an extra member nested 10 000 levels deep is accepted and the PID
+    issued: the member is parsed and ignored. EUDIPLO stays available (step 3 passes).
+  reference: main.helpers.ts (lines 20-28, json limit 10mb); all-exceptions.filter.ts (lines 44-50)
+- testCase: PP_WS_SH_Encoding_003_UF
+  variants: [SD+PA]
+  finding: >-
+    A jku or x5u header in the WIA or KA, or a jku header in the key proof, is ignored and the PID issued; the URLs are
+    not fetched (NOFETCH passes in every step), and a kid URL in the proof is rejected (invalid_proof). The catalogue
+    expects such a request to be rejected (RFC 8725 section 3.10).
+  reference: crypto/crypto.service.ts (lines 124-127, only jwk and x5c signers)
+- testCase: PP_WS_SH_Encoding_004_UF
+  variants: [SD+PA]
+  finding: >-
+    A WIA or KA whose validly signed status reference points to http://169.254.169.254/... is accepted and the PID
+    issued. EUDIPLO reads the status reference from the claim status.status_list only, while TS3 (and the Test Wallet
+    Provider) carry it in client_status and key_storage_status: its log says "Wallet attestation does not contain status
+    claim - skipping status check" for every issuance, so no WIA or KA status is checked at all. The CA-X cases (steps 1
+    and 2) are rejected without fetching.
+  reference: trust/wallet-attestation.service.ts (lines 306-485 at HEAD 0aefcb2, unchanged since ae0792a)
+- testCase: PP_WS_IA_Reissuance_005_UF
+  variants: [SD+PA]
+  finding: >-
+    After the Test Wallet Provider revoked the Wallet Instance of CW-1 (its entry in a version of SL-WP-A served under a
+    URL of the test case, referenced by the WIA's client_status), the refresh grant with that WIA still gives an access
+    token and a new PID; EUDIPLO did not request the list once during the step. Same cause as Encoding_004_UF: EUDIPLO
+    reads the status reference from status.status_list only, not from TS3's client_status and key_storage_status
+    ("Wallet attestation does not contain status claim - skipping status check"), so no WIA status is checked at the
+    refresh grant either.
+  reference: trust/status-list-verifier.service.ts getStatusEntryFromJwt (decodeJwt(jwt).status); issue 19 records the same cause for ClientAttestation_012_UF
+- testCase: PP_WS_SH_Encoding_005_UF
+  variants: [SD+PA]
+  finding: >-
+    With SL-WP-A served as a Status List Token whose lst inflates to 1 GiB (status-list.decompression-bomb), EUDIPLO
+    issues the PID without requesting the list (0 requests during the step): it never reads the WIA or KA status (see
+    Encoding_004_UF), so how it handles a decompression bomb cannot be observed. The test case stays a FAIL until EUDIPLO
+    checks the status of a TS3 WIA and KA; EUDIPLO stays available (the later test cases of the run pass).
+  reference: trust/status-list-verifier.service.ts getStatusEntryFromJwt; trust/wallet-attestation.service.ts ("does not contain status claim - skipping status check")
