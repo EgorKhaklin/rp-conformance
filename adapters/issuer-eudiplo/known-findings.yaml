@@ -1,14 +1,15 @@
 # Known findings of EUDIPLO as PID Provider: FAILs of the issuer suite that are reported upstream with evidence. The
-# reference run against the pinned EUDIPLO release (issuer harness design section 5.5) reports these FAILs as known
+# reference run against the pinned EUDIPLO image (issuer harness design section 5.5) reports these FAILs as known
 # findings and marks their test cases "not validated" until EUDIPLO is fixed; any other FAIL, an INCONCLUSIVE or REVIEW
 # result, or a harness error fails it. Each entry names the test case, the finding and the upstream reference:
 #
 # - testCase: PP_WS_SM_ClientAttestation_013_UF
+#   variants: [SD+PA]   # optional, as the report names the variant; default every variant
 #   finding: >-
 #     ...
 #   reference: EUDIPLO/eudiplo#<n>
 #
-# Remove an entry once EUDIPLO fixes it; the run names a known finding whose test case passed. No issuer test case is
-# executable yet (issue 17 adds the first), so the list is empty. The README lists the FAILs expected against the pinned
-# reference image (reference.env).
+# Remove an entry once EUDIPLO fixes it; the run names a known finding whose test case passed. The one executable test
+# case, PP_WS_IA_MainInteraction_001 [SD+PA], passes, so the list is empty. The README lists the FAILs expected against
+# the pinned reference image (reference.env).
 []

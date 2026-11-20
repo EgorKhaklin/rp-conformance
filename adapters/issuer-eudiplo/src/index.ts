@@ -35,6 +35,8 @@ export interface IssuerEudiploAdapterOptions {
   /** Root client of EUDIPLO (`AUTH_CLIENT_ID` / `AUTH_CLIENT_SECRET`). */
   clientId?: string;
   clientSecret?: string;
+  /** Host under which EUDIPLO reaches the harness services; default `HARNESS_HOST`, or `host.docker.internal` (Compose). */
+  harnessHost?: string;
 }
 
 /**
@@ -105,6 +107,7 @@ const tenantIdOf = (namespace: string) => namespace.toLowerCase().replace(/[^a-z
 export class IssuerEudiploAdapter implements IssuerAdapter {
   readonly name = 'issuer-eudiplo';
   readonly baseUrl: string;
+  readonly harnessHost: string;
   private rootToken?: string;
   private token?: string;
   private tenantId?: string;
@@ -115,6 +118,7 @@ export class IssuerEudiploAdapter implements IssuerAdapter {
 
   constructor(private readonly options: IssuerEudiploAdapterOptions = {}) {
     this.baseUrl = (options.baseUrl ?? process.env.EUDIPLO_URL ?? `http://127.0.0.1:${process.env.EUDIPLO_PORT ?? 3000}`).replace(/\/$/, '');
+    this.harnessHost = options.harnessHost ?? process.env.HARNESS_HOST ?? 'host.docker.internal';
   }
 
   /** The tenant's Credential Issuer identifier, `{PUBLIC_URL}/issuers/{tenant}`, as the harness reaches it. */

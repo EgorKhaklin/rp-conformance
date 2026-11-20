@@ -60,6 +60,8 @@ export interface CreatedOffer {
  */
 export interface IssuerAdapter {
   name: string;
+  /** Host name under which the Provider reaches the harness services (`TL-WP`, `SL-WP-*`), for example from a container. */
+  harnessHost?: string;
   /** Configure the SUT: trust in TL-WP, its certificates from the Test Registrar, its configurations per the ICS. */
   setUp(env: IssuerTestEnvironment, namespace: string): Promise<void>;
   /**

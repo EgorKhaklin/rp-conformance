@@ -8,11 +8,9 @@
 The suite is validated against a digest of EUDIPLO's main image, pinned in [`reference.env`](reference.env) (read by
 `docker compose --env-file` and by `REFERENCE_EUDIPLO` in [`src/reference.ts`](src/reference.ts); change it there only):
 
-| | |
-| --- | --- |
-| Image | `ghcr.io/eudiplo/eudiplo@sha256:1a1f53b77b69cfeaf573f6950de6a70947b909181654a6de252f8207e1b138a7` |
-| Version (`GET /api/version`) | `9.1.0-main.ae0792a` |
-| Revision | `ae0792a98991c28607879c2291d26b26b9ee9817` |
+`EUDIPLO_IMAGE` (the digest), `EUDIPLO_EXPECT_VERSION` (what `GET /api/version` reports, `9.1.0-main.ae0792a` when
+this was written) and `EUDIPLO_REVISION` (the source revision, which the CI job `eudiplo` compares with the image's
+`org.opencontainers.image.revision` label).
 
 It stays a digest of the main image until a release of EUDIPLO has the features below (decision of 2026-11-20). The
 release 9.1.0 lacks too much of what the catalogue tests:

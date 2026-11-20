@@ -22,6 +22,7 @@ profiles:
 items:
   ICS-01: PID Provider                       # entity PP-T on TL-PID; PID Rulebook
   ICS-02: SD-JWT VC                          # live: pid-sd-jwt-vc, format dc+sd-jwt, vct urn:eudi:pid:1. EUDIPLO issues mso_mdoc too; the adapter configures no mdoc PID (PID_02 not met, README)
+  ICS-02.SD: pid-sd-jwt-vc                   # the configuration that issues the PID in SD-JWT VC, as definitions name it (ICS-02.<format variant>)
   ICS-03: pre-authorized code              # live: flow pre_authorized_code at the built-in authorization server, with and without tx_code. No P-AC: no authenticateSubject (README)
   ICS-03.tx_code: with and without           # live: tx_code of 6 digits, input_mode numeric; txCodeMaxAttempts default 5
   ICS-03.subject_authentication: none        # the built-in authorization server issues codes without a login step (docs issuance/authorization-servers.md)

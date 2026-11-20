@@ -13,10 +13,10 @@ Status: specification, design, and Phases 1 to 4 of the harness: all 121 baselin
 | Path | Content |
 | --- | --- |
 | [rp-test-catalogue.md](rp-test-catalogue.md) | All test objectives (222), traced to the ARF high-level requirements, with the decisions taken on the open questions (§8) |
-| [issuer-test-catalogue.md](issuer-test-catalogue.md) | Draft: test objectives (182) for PID Providers and Attestation Providers as SUT, traced to the ARF high-level requirements, with the decisions taken on the open questions (§8). Not executable yet |
+| [issuer-test-catalogue.md](issuer-test-catalogue.md) | Draft: test objectives (182) for PID Providers and Attestation Providers as SUT, traced to the ARF high-level requirements, with the decisions taken on the open questions (§8). One test case executable (see Issuer suite) |
 | [fcaf-overlay/](fcaf-overlay/README.md) | 121 baseline test cases and 97 further ones in the FCAF test case format, with the defaults, the Relying Party ICS and the navigation, as an overlay on the FCAF content branch `submitted` |
 | [harness-design.md](harness-design.md) | Design of the test harness: conformance wallet, status and trust list servers, artifact forge with fault injection, RP adapters, verdicts, delivery phases |
-| [issuer-harness-design.md](issuer-harness-design.md) | Draft addendum to the harness design for the issuer suite: what it reuses, the issuance client, Test Wallet Provider, Test Registrar, issuer adapter with EUDIPLO as the reference issuer, faults, expected results, delivery phases and the decisions taken (§12). Not implemented yet |
+| [issuer-harness-design.md](issuer-harness-design.md) | Draft addendum to the harness design for the issuer suite: what it reuses, the issuance client, Test Wallet Provider, Test Registrar, issuer adapter with EUDIPLO as the reference issuer, faults, expected results, delivery phases and the decisions taken (§12). Phase I0 implemented |
 | [packages/](packages/) | The harness (TypeScript, pnpm workspace): `core` (adapter interface, test definition format, shared FCAF wording), `forge` (test PKI with IACA anchors and mdoc document signers, PID and `default_credential_A` in SD-JWT VC and mdoc format, Status List Tokens in JWT and CWT format, identifier lists, JAdES-sealed LoTE, the test LOTL and `TL-QEAA` as ETSI TS 119 612 Trusted Lists with XAdES signatures, registration certificate, and the fault layer), `wallet` (Conformance Wallet: KB-JWT, mdoc DeviceResponse with the OpenID4VP handover, via redirects and the DC API, with the presentation faults of the forge), `dc-api-shim` (Playwright replaces `navigator.credentials.get` on the Relying Party's page and hands the request to the Conformance Wallet), `status-provider`, `trust-infrastructure`, `validator` (reference validator with one named check per property, including the request-side and trust list checks, and the self-validation of every fault), `reference-rp`, `definitions` (the 218 test definitions, the source of the FCAF test cases), `fcaf-render` (renders the overlay from the definitions and the shared pages), `controller` (CLI, selection, gating, report, JUnit XML, known findings) |
 | [scripts/fcaf-lint.sh](scripts/fcaf-lint.sh) | Runs the patched FCAF lint on the rendered test cases, as CI does |
 | [adapters/](adapters/) | RP adapters with their ICS: `reference` (the reference RP, in-process) and `eudiplo` (with a Docker Compose file for EUDIPLO and PostgreSQL, and its known findings) |
@@ -85,6 +85,26 @@ EUDIPLO_PORT=3100 pnpm rp-conformance run --adapter eudiplo
 ```
 
 Decisions on the open points of [harness-design.md](harness-design.md) §12: the executable TypeScript definitions in `packages/definitions` are the source of truth, and `packages/fcaf-render` produces the FCAF markdown from them (§4.2); the reference RP is built on the reference validator; the OIDF bridge is optional and not implemented.
+
+## Issuer suite
+
+Status: phase I0 of [issuer-harness-design.md](issuer-harness-design.md) §10. One test case is executable, the positive control `PP_WS_IA_MainInteraction_001` in the variant `SD` × `PA` (the PID in SD-JWT VC format, pre-authorized code flow); it passes against EUDIPLO. Faults and `_UF` test cases, the authorization code flow, mdoc and the rendering of the issuer test cases follow in the issues of the I1 phase.
+
+```bash
+pnpm rp-conformance issuer --list
+```
+
+```bash
+docker compose --env-file adapters/issuer-eudiplo/reference.env -f adapters/eudiplo/docker-compose.yml up -d --wait
+```
+
+```bash
+pnpm rp-conformance issuer run --adapter eudiplo --ics adapters/issuer-eudiplo/ics.yaml --known-findings adapters/issuer-eudiplo/known-findings.yaml
+```
+
+Per run the controller starts the Test Trust Infrastructure (`TL-WP`, `TL-PID`, `TL-AC`, `TL-RC`) and the Test Status Provider (`SL-WP-A`, `SL-WP-B`), creates the Test Wallet Provider with its Wallet Units, enrols the Provider through the Test Registrar (from its CSRs where the adapter returns them, otherwise with keys the Registrar generates) and sets the adapter up once. Each step of action `issuance` creates an offer through the adapter and runs the pre-authorized code flow with the issuance client of `packages/issuer-wallet` (WIA and PoP, DPoP, nonce, a proof that carries the KA). Every credential the Provider issues goes through the reference validator with the suite's trust configuration (`OBS-CRED`): format, `issuer-trust` to the enrolled `PP-T` on `TL-PID`, `issuer-signature`, `disclosures`, `validity`, `holder-binding` (bound to a proof key the KA attests, in place of `key-binding`) and `status-reference`, then the status list checks. `ISS` passes when every credential passes every check, `REJ` when the request at which the flow ended got a 4xx with an OAuth error object and nothing was issued; no answer may be a 5xx. The definitions are in `packages/issuer-definitions`, one per test case and variant; a step names its credential configuration by reference to the ICS (`ICS-02.SD`), which the adapter's `ics.yaml` maps to the Provider's configuration ID.
+
+The report goes to `reports/<run>/` as for the RP suite (`report.json` with every request and response and the check results, `summary.md`, `junit.xml`, the credentials). `EUDIPLO_PORT` and `HARNESS_HOST` work as above. The CI job `Issuer reference run` runs the same command against the pinned image (`adapters/issuer-eudiplo/reference.env`, the one place that names it; see [adapters/issuer-eudiplo/README.md](adapters/issuer-eudiplo/README.md)) on every pull request that touches the issuer suite and uploads the report.
 
 ## Rendering the baseline
 
