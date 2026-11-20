@@ -14,6 +14,7 @@ RP.P.6: 300     # T_kb, seconds
 RP.P.7: PT30S   # T_tx: transaction lifetime
 RP.P.8: "Yes"   # request_uri_method post, wallet_nonce echoed
 RP.P.9: "Yes"   # front end /done/<id> redeems the response code once, for the user session that started the transaction
+RP.P.10: "Yes"  # attribute-based binding of combined presentations: family name, given name, birth date
 RP.R.1: "Yes"   # checks the revocation status of PIDs
 RP.R.2: Reject
 RP.R.3: None

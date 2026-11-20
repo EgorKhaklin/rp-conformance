@@ -15,6 +15,7 @@ RP.P.6: 300     # T_kb: KB-JWT iat at most 300 s old
 RP.P.7: PT60S   # T_tx: lifeTime of the presentation configurations, set by the adapter
 RP.P.8: "No"    # request_uri_method is always get
 RP.P.9: "No"    # EUDIPLO is a back end: the relying service compares the response_code with the session's responseCode
+RP.P.10: "No"   # no attribute-based binding of combined presentations
 RP.R.1: "Yes"   # statusCheckMode strict
 RP.R.2: Reject
 RP.R.3: None

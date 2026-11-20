@@ -38,6 +38,11 @@ export const ics = {
     text: 'Relying Party redeems the response code of a presentation via redirects at its own front end.',
     equals: 'Yes',
   },
+  bindsByAttributes: {
+    item: 'RP.P.10',
+    text: 'Relying Party binds the credentials of a combined presentation by comparing their identifying attributes (attribute-based binding).',
+    equals: 'Yes',
+  },
 } as const satisfies Record<string, IcsCondition>;
 
 /** The ICS items that declare support for a flow. */
@@ -85,6 +90,12 @@ export interface CredentialSpec {
   signedUnder?: 'issuance' | 'revocation';
   /** Named faults (at most one); empty for a valid credential. */
   faults: FaultId[];
+  /**
+   * `default_credential_A` only (UC_Presentation_010, _011): the credential additionally carries the identifying
+   * attributes family name, given name and birth date, of the holder of `default_credential_pid` (`holder`) or of
+   * another person (`other-person`).
+   */
+  identifying?: 'holder' | 'other-person';
 }
 
 /** A Status List Token the Test Status Provider serves for the step's credential: JWT for SD-JWT VC, CWT for mdoc. */
@@ -143,6 +154,25 @@ export interface PresentationAction {
   response: ResponseSpec;
   /** How the Conformance Wallet deviates from the plain flow (catalogue scenario SCN-F); left out for the plain flow. */
   wallet?: WalletBehaviour;
+  /**
+   * The `id` of the credential query `credential` answers; default the first credential query of the query in its
+   * format. Named by the steps of a combined presentation (UC_Presentation).
+   */
+  answers?: string;
+  /**
+   * Further credentials the Conformance Wallet presents in the same Authorization Response, each for its own
+   * credential query (UC_Presentation). Faults of the response or presentation apply to `credential`.
+   */
+  alongside?: AlongsideCredential[];
+}
+
+/** A credential presented in a combined presentation besides the step's `credential`. */
+export interface AlongsideCredential {
+  /** The `id` of the credential query it answers. */
+  answers: string;
+  credential: CredentialSpec;
+  /** Its Status List Token; `null` when it has no status list reference. */
+  statusList: StatusListSpec | null;
 }
 
 /** Start a presentation and fetch its request, but send no response (SessionEncryption_005, transaction T1). */
@@ -196,7 +226,8 @@ export type StepAction = PresentationAction | StartAction | TrustListAction | Re
  * `client_metadata`. `REJ_OR_ACC`: the Relying Party rejects the presentation, or accepts it and releases exactly the
  * requested attributes with their issuer-signed values (DeviceBinding_011: a device-signed element is ignored).
  * `STALE`: the verification result signals that a trust list it depends on is stale (`trust-list-stale`). `CONF`: the
- * captured requests pass the request checks the expectation names.
+ * captured requests pass the request checks the expectation names. `REJ_OR_INVALID`: the Relying Party rejects the
+ * presentation, or accepts it and flags an attribute as invalid (`attribute-invalid`, IdentifyingData_004).
  */
 export type ExpectationCode =
   | 'ACC'
@@ -210,7 +241,8 @@ export type ExpectationCode =
   | 'ENC_KEY'
   | 'STALE'
   | 'CONF'
-  | FlowExpectationCode;
+  | FlowExpectationCode
+  | 'REJ_OR_INVALID';
 
 /** The ICS declaration a `POLICY` expectation is compared with. */
 export interface PolicyReference {
@@ -271,7 +303,7 @@ export function flowsOf(definition: TestCaseDefinition): Flow[] {
   return named.length ? named : FLOWS;
 }
 
-const CONTROL_MENTION = /`(RP_WS_IA_MainInteraction_\d{3}[a-z]?)`/g;
+const CONTROL_MENTION = /`(RP_WS_(?:IA_MainInteraction|UC_Presentation)_\d{3}[a-z]?)`/g;
 
 /**
  * Checks a definition so the rendered test case and the executed one cannot disagree: a valid ID, at least one step,
@@ -303,13 +335,39 @@ export const statusListFormatOf = (format: CredentialFormat): StatusListSpec['fo
  * Refuses more than one fault, a fault at another point, and a fault or list in another format.
  */
 export function presentation(
-  action: Omit<PresentationAction, 'kind' | 'statusList' | 'response'> & { statusList?: StatusListSpec | null; response?: ResponseSpec },
+  action: Omit<PresentationAction, 'kind' | 'statusList' | 'response' | 'alongside'> & {
+    statusList?: StatusListSpec | null;
+    response?: ResponseSpec;
+    alongside?: (Omit<AlongsideCredential, 'statusList'> & { statusList?: StatusListSpec | null })[];
+  },
 ): PresentationAction {
   const { credential } = action;
   const withoutStatus = credential.defaultCredential === 'default_credential_pid_short' || Boolean(action.identifierList);
   const statusList =
     action.statusList === undefined ? (withoutStatus ? null : statusListToken.of(statusListFormatOf(credential.format))) : action.statusList;
-  const result: PresentationAction = { kind: 'presentation', ...action, statusList, response: action.response ?? { faults: [] } };
+  const alongside = action.alongside?.map(
+    (other): AlongsideCredential => ({
+      ...other,
+      statusList: other.statusList === undefined ? statusListToken.of(statusListFormatOf(other.credential.format)) : other.statusList,
+    }),
+  );
+  const { alongside: _alongside, ...rest } = action;
+  const result: PresentationAction = {
+    kind: 'presentation',
+    ...rest,
+    statusList,
+    response: action.response ?? { faults: [] },
+    ...(alongside ? { alongside } : {}),
+  };
+  for (const other of alongside ?? []) {
+    if (other.statusList && other.statusList.format !== statusListFormatOf(other.credential.format)) {
+      throw new Error(`a ${other.credential.format} credential references a Status List Token in ${statusListFormatOf(other.credential.format)} format`);
+    }
+    for (const fault of [...other.credential.faults, ...(other.statusList?.faults ?? [])]) {
+      const info = faultInfo(fault);
+      if (info.point !== 'credential' && info.point !== 'status-list') throw new Error(`fault ${fault} does not apply to the credential or its status list`);
+    }
+  }
   const faults = faultsOf(result);
   if (faults.length > 1) throw new Error(`a step applies one fault, not ${faults.join(', ')}`);
   if (result.statusList && result.statusList.format !== statusListFormatOf(credential.format)) {
@@ -321,12 +379,15 @@ export function presentation(
     ...(result.statusList?.faults ?? []).map((f) => [f, ['status-list'], result.statusList?.format] as const),
     ...(result.identifierList?.faults ?? []).map((f) => [f, ['identifier-list'], 'cwt'] as const),
     // The presentation travels in the response; a presentation fault applies to the credential's format.
-    ...result.response.faults.map((f) => [f, ['response', 'presentation'], faultInfo(f).point === 'presentation' ? credential.format : undefined] as const),
+    ...result.response.faults.map(
+      (f) => [f, ['response', 'presentation', 'vp-token'], faultInfo(f).point === 'response' ? undefined : credential.format] as const,
+    ),
   ]) {
     const info = faultInfo(fault);
     if (!(points as readonly string[]).includes(info.point)) throw new Error(`fault ${fault} does not apply to the ${points.join(' or ')}`);
     if (info.format && info.format !== format) throw new Error(`fault ${fault} applies to ${info.format}, not ${format}`);
     if (info.issuer && info.issuer !== credential.issuer) throw new Error(`fault ${fault} needs a credential issued by ${info.issuer}`);
+    if (info.query && info.query !== result.query) throw new Error(`fault ${fault} is presented for ${info.query}, not ${result.query}`);
   }
   const replays = result.response.faults.includes('presentation.replay');
   if (replays !== (result.response.presentationOfStep !== undefined)) {
@@ -349,6 +410,7 @@ export function faultsOf(action: StepAction): FaultId[] {
     ...(action.statusList?.faults ?? []),
     ...(action.identifierList?.faults ?? []),
     ...action.response.faults,
+    ...(action.alongside ?? []).flatMap((other) => [...other.credential.faults, ...(other.statusList?.faults ?? [])]),
   ];
 }
 
@@ -414,6 +476,8 @@ export interface AttestationOptions {
   /** Default: the entity that issues the category's default credential (`QP-A`, `PB-A`, `EP-A`). */
   issuer?: string;
   faults?: FaultId[];
+  /** UC_Presentation_010, _011: the credential also carries identifying attributes (`CredentialSpec.identifying`). */
+  identifying?: CredentialSpec['identifying'];
 }
 
 /**
@@ -423,7 +487,13 @@ export interface AttestationOptions {
 export const attestation = {
   of(category: Exclude<CredentialCategory, 'pid'>, format: CredentialFormat, options: AttestationOptions = {}): CredentialSpec {
     const { credential, issuer } = DEFAULT_CREDENTIALS[category];
-    return { defaultCredential: credential, format, issuer: options.issuer ?? issuer, faults: options.faults ?? [] };
+    return {
+      defaultCredential: credential,
+      format,
+      issuer: options.issuer ?? issuer,
+      faults: options.faults ?? [],
+      ...(options.identifying ? { identifying: options.identifying } : {}),
+    };
   },
 };
 

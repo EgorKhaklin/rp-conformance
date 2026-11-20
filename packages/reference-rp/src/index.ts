@@ -11,7 +11,7 @@ import type {
   RunningServer,
   ServerOptions,
 } from '@rp-conformance/core';
-import { categoryOfQuery, sendJson, sendText, startServer } from '@rp-conformance/core';
+import { categoryOfCredentialQuery, sendJson, sendText, startServer } from '@rp-conformance/core';
 import { base64url, jwkThumbprint, type Oid4vpHandover, PID_DOCTYPE, PID_VCT, signCompactJws } from '@rp-conformance/forge';
 import type { CheckResult } from '@rp-conformance/core';
 import {
@@ -23,7 +23,9 @@ import {
   TrustStore,
   validateAuthorizationResponse,
   validateMdocPresentation,
+  validateCombinedBinding,
   validateSdJwtVcPresentation,
+  validateVpToken,
 } from '@rp-conformance/validator';
 import { exportJWK, generateKeyPair, importJWK } from 'jose';
 
@@ -399,17 +401,22 @@ export class ReferenceRelyingParty {
     if (!response.valid || !response.payload) return `${response.failed}: ${response.checks.at(-1)?.detail}`;
     const presentations = response.payload.vp_token as Record<string, unknown>;
     const query = this.options.queries[tx.query];
+    // The vp_token as a whole first: known credential query ids, one presentation each unless `multiple`, every
+    // required credential query or credential set satisfied, one document per DeviceResponse (UC_Presentation).
+    const vpToken = await validateVpToken(presentations, query);
+    tx.response = [...response.checks, ...vpToken.checks];
+    if (!vpToken.valid) return `${vpToken.failed}: ${vpToken.checks.at(-1)?.detail}`;
     const attributes: Record<string, unknown> = {};
     const validations: (SdJwtVcValidation | MdocValidation)[] = [];
+    const disclosed: { id: string; format: string; claims: Record<string, unknown> }[] = [];
     for (const credentialQuery of query.credentials) {
-      const entries = presentations[credentialQuery.id];
-      if (!Array.isArray(entries) || entries.length !== 1 || typeof entries[0] !== 'string') {
-        return `expected one presentation for ${credentialQuery.id}`;
-      }
+      const entries = presentations[credentialQuery.id] as string[] | undefined;
+      // An optional credential query, or one of an option the Wallet did not choose (credential_sets).
+      if (!entries) continue;
       const common = {
         trust: this.trust,
-        // The root of trust of the query's category: TL-PID, TL-QEAA through the LOTL, TL-PUB or the rulebook anchor.
-        trustRule: TRUST_RULES[categoryOfQuery(tx.query)],
+        // The root of trust of the credential query's category: TL-PID, TL-QEAA through the LOTL, TL-PUB or the rulebook anchor.
+        trustRule: TRUST_RULES[categoryOfCredentialQuery(credentialQuery.id)],
         nonce: tx.requestPayload.nonce as string,
         skewSeconds: this.options.skewSeconds,
         // A PID without reliable revocation status is rejected (catalogue decision 2); for the other categories the
@@ -418,35 +425,44 @@ export class ReferenceRelyingParty {
         maxStatusListBytes: this.options.maxStatusListBytes,
         validStatuses: this.options.validStatuses,
         trustedAuthorities: credentialQuery.trusted_authorities,
+        requestedClaims: credentialQuery.claims ?? [],
       };
-      const validation =
-        credentialQuery.format === 'mso_mdoc'
-          ? await validateMdocPresentation(entries[0], {
-              ...common,
-              expectedDocType: (credentialQuery.meta?.doctype_value as string | undefined) ?? PID_DOCTYPE,
-              handover: binding.handover,
-              // OpenID4VP Appendix B.2.6: the thumbprint of the key the response was encrypted to.
-              jwkThumbprint: await jwkThumbprint(tx.encryptionJwk as JsonWebKey),
-              fetchStatusList: (uri) => fetchList(uri, 'application/statuslist+cwt'),
-              fetchIdentifierList: (uri) => fetchList(uri, 'application/identifierlist+cwt'),
-            })
-          : await validateSdJwtVcPresentation(entries[0], {
-              ...common,
-              expectedVct: (credentialQuery.meta?.vct_values as string[] | undefined) ?? [PID_VCT],
-              audience: binding.audience,
-              kbMaxAgeSeconds: this.options.kbMaxAgeSeconds,
-              fetchStatusList: (uri) => fetchList(uri, 'application/statuslist+jwt'),
-            });
-      validations.push(validation);
-      tx.validations = validations;
-      if (!validation.valid) return `${credentialQuery.id}: ${validation.failed}: ${validation.checks.at(-1)?.detail}`;
-      for (const claim of credentialQuery.claims ?? []) {
-        let value: unknown = validation.claims;
-        for (const segment of claim.path) value = (value as Record<string, unknown> | undefined)?.[String(segment)];
-        if (value === undefined) return `${credentialQuery.id}: requested claim ${claim.path.join('.')} not disclosed`;
-        attributes[claim.path.join('.')] = value;
+      for (const entry of entries) {
+        const validation =
+          credentialQuery.format === 'mso_mdoc'
+            ? await validateMdocPresentation(entry, {
+                ...common,
+                expectedDocType: (credentialQuery.meta?.doctype_value as string | undefined) ?? PID_DOCTYPE,
+                handover: binding.handover,
+                // OpenID4VP Appendix B.2.6: the thumbprint of the key the response was encrypted to.
+                jwkThumbprint: await jwkThumbprint(tx.encryptionJwk as JsonWebKey),
+                fetchStatusList: (uri) => fetchList(uri, 'application/statuslist+cwt'),
+                fetchIdentifierList: (uri) => fetchList(uri, 'application/identifierlist+cwt'),
+              })
+            : await validateSdJwtVcPresentation(entry, {
+                ...common,
+                expectedVct: (credentialQuery.meta?.vct_values as string[] | undefined) ?? [PID_VCT],
+                audience: binding.audience,
+                kbMaxAgeSeconds: this.options.kbMaxAgeSeconds,
+                fetchStatusList: (uri) => fetchList(uri, 'application/statuslist+jwt'),
+              });
+        validations.push(validation);
+        tx.validations = validations;
+        if (!validation.valid) return `${credentialQuery.id}: ${validation.failed}: ${validation.checks.at(-1)?.detail}`;
+        disclosed.push({ id: credentialQuery.id, format: credentialQuery.format, claims: (validation.claims ?? {}) as Record<string, unknown> });
+        for (const claim of credentialQuery.claims ?? []) {
+          let value: unknown = validation.claims;
+          for (const segment of claim.path) value = (value as Record<string, unknown> | undefined)?.[String(segment)];
+          if (value === undefined) return `${credentialQuery.id}: requested claim ${claim.path.join('.')} not disclosed`;
+          attributes[claim.path.join('.')] = value;
+        }
       }
     }
+    // Combined presentations: the reference Relying Party binds the credentials by their identifying attributes (ICS
+    // RP.P.10 attribute-based, ARF section 6.6.3.10).
+    const combined = await validateCombinedBinding(disclosed);
+    tx.response = [...tx.response, ...combined.checks];
+    if (!combined.valid) return `${combined.failed}: ${combined.checks.at(-1)?.detail}`;
     tx.status = 'success';
     tx.attributes = attributes;
     if (validations.some((v) => v.trustListStale)) tx.flags = ['trust-list-stale'];

@@ -3,7 +3,7 @@
 // layer, Conformance Wallet response) and runs the reference validator over it in `all` mode.
 import { randomUUID } from 'node:crypto';
 import {
-  categoryOfQuery,
+  categoryOfCredentialQuery,
   type DcqlQuery,
   type DefaultQueryId,
   type Flow,
@@ -17,6 +17,9 @@ import {
   buildAuthorizationResponse,
   buildDcApiResponse,
   buildPresentation,
+  buildVpToken,
+  forgePresentations,
+  heldCredentialOf,
   buildSealedLote,
   buildTrustedLists,
   buildTrustListVersion,
@@ -54,8 +57,10 @@ import {
   type ValidationMode,
   validateAuthorizationResponse,
   validateMdocPresentation,
+  validateCombinedBinding,
   validateRequests,
   validateSdJwtVcPresentation,
+  validateVpToken,
 } from '../src/index';
 
 export const LISTS: LoteListId[] = ['TL-PID', 'TL-PUB', 'TL-WP', 'TL-AC', 'TL-RC'];
@@ -237,41 +242,54 @@ export class Fixture {
     const mode = options.mode ?? 'all';
     const [fault] = faultsOf(action);
     const flow = (fault && faultInfo(fault).flow) || options.flow || 'redirect';
-    const forged = await forgePresentation(action, {
+    const credentials = await forgePresentations(action, {
       pki: this.pki,
       holderPublicJwk: this.holder.publicJwk,
       holderSecp256k1PublicJwk: this.secp256k1.publicJwk,
       allocateStatusUri: () => `https://status.rp-test/self-validation/${randomUUID()}`,
       skewSeconds: SKEW,
     });
-    if (forged.statusList) this.statusLists.set(forged.statusList.uri, forged.statusList.served);
-    if (forged.identifierList) this.statusLists.set(forged.identifierList.uri, forged.identifierList.served);
+    const forged = credentials[0].forged;
+    for (const { forged: credential } of credentials) {
+      if (credential.statusList) this.statusLists.set(credential.statusList.uri, credential.statusList.served);
+      if (credential.identifierList) this.statusLists.set(credential.identifierList.uri, credential.identifierList.served);
+    }
     const tx = await this.transaction();
     const query = this.queries[action.query];
-    const credentialQuery = query.credentials[0];
     const handover = flow === 'dc-api' ? ({ flow, origin: ORIGIN } as const) : ({ flow, clientId: AUDIENCE, responseUri: RESPONSE_URI } as const);
     const audience = flow === 'dc-api' ? `origin:${ORIGIN}` : AUDIENCE;
     const presentationFault = action.response.faults.find((f) => faultInfo(f).point === 'presentation');
+    const vpTokenFault = action.response.faults.find((f) => faultInfo(f).point === 'vp-token');
     const replay = presentationFault === 'presentation.replay';
     if (replay && !options.other) throw new Error('presentation.replay needs another transaction');
     const boundTo = replay ? (options.other as Transaction) : tx;
-    const held = (
-      forged.format === 'mso_mdoc'
-        ? { format: 'mso_mdoc', value: forged.credential, ...(forged.documentDocType ? { docType: forged.documentDocType } : {}) }
-        : { format: 'dc+sd-jwt', value: forged.credential }
-    ) as HeldCredential;
-    const presentation = (replay && options.replayed) || await buildPresentation(
+    const held: HeldCredential[] = credentials.map(heldCredentialOf);
+    const built = await buildVpToken(
+      query,
       held,
-      { disclose: (credentialQuery.claims ?? []).map((c) => String(c.path[0])), elements: requestedElements(credentialQuery.claims) },
-      { audience, clientId: AUDIENCE, nonce: boundTo.nonce, handover, jwkThumbprint: await jwkThumbprint(boundTo.key.publicJwk as JsonWebKey) },
-      { holder: this.holder, secp256k1: this.secp256k1 },
-      { fault: replay ? undefined : presentationFault, skewSeconds: SKEW, kbMaxAgeSeconds: KB_MAX_AGE },
+      async (credential, requested, primary) =>
+        (primary && replay && options.replayed) ||
+        buildPresentation(
+          credential,
+          requested,
+          {
+            audience,
+            clientId: AUDIENCE,
+            nonce: primary ? boundTo.nonce : tx.nonce,
+            handover,
+            jwkThumbprint: await jwkThumbprint((primary ? boundTo : tx).key.publicJwk as JsonWebKey),
+          },
+          { holder: this.holder, secp256k1: this.secp256k1 },
+          { fault: primary && !replay ? presentationFault : undefined, skewSeconds: SKEW, kbMaxAgeSeconds: KB_MAX_AGE },
+        ),
+      vpTokenFault,
     );
+    const presentation = built.presentation;
     const responseFault = action.response.faults.find((f) => faultInfo(f).point === 'response');
     const encValues = ['A128GCM', 'A256GCM'];
     const state = flow === 'dc-api' ? undefined : tx.state;
     const input = {
-      payload: { vp_token: { [credentialQuery.id]: [presentation] }, ...(state ? { state } : {}) },
+      payload: { vp_token: built.vpToken, ...(state ? { state } : {}) },
       recipient: tx.key.publicJwk,
       enc: action.response.enc ?? 'A128GCM',
       walletKey: this.walletKey,
@@ -279,39 +297,70 @@ export class Fixture {
     };
     const form = flow === 'dc-api' ? await buildDcApiResponse(input, responseFault) : await buildAuthorizationResponse(input, responseFault);
     const response = await validateAuthorizationResponse(form, { keys: [tx.key], encValues, state, mode });
-    const presented = (response.payload?.vp_token as Record<string, string[]> | undefined)?.[credentialQuery.id]?.[0];
     const fetchList = async (uri: string): Promise<FetchedStatusList> => {
       const served = this.statusLists.get(uri);
       return served ? { status: 200, body: served.body, contentType: served.contentType } : { status: 404, body: '' };
     };
-    const common = {
-      trust: this.trust,
-      trustRule: TRUST_RULES[categoryOfQuery(action.query)],
-      nonce: tx.nonce,
-      skewSeconds: SKEW,
-      requireStatus: true,
-      maxStatusListBytes: MAX_STATUS_LIST_BYTES,
-      trustedAuthorities: credentialQuery.trusted_authorities,
-      mode,
+    const received = response.payload?.vp_token as Record<string, string[]> | undefined;
+    // The vp_token as a whole: when it fails, the presentations in it are not validated (OpenID4VP section 8.6).
+    const vpToken = received ? await validateVpToken(received, query, mode) : undefined;
+    const validations: { id: string; result: SdJwtVcValidation | MdocValidation }[] = [];
+    for (const credentialQuery of vpToken?.valid ? query.credentials : []) {
+      for (const presented of received?.[credentialQuery.id] ?? []) {
+        const common = {
+          trust: this.trust,
+          trustRule: TRUST_RULES[categoryOfCredentialQuery(credentialQuery.id)],
+          nonce: tx.nonce,
+          skewSeconds: SKEW,
+          requireStatus: true,
+          maxStatusListBytes: MAX_STATUS_LIST_BYTES,
+          trustedAuthorities: credentialQuery.trusted_authorities,
+          requestedClaims: credentialQuery.claims ?? [],
+          mode,
+        };
+        const result =
+          credentialQuery.format === 'mso_mdoc'
+            ? await validateMdocPresentation(presented, {
+                ...common,
+                expectedDocType: (credentialQuery.meta?.doctype_value as string | undefined) ?? PID_DOCTYPE,
+                handover,
+                jwkThumbprint: await jwkThumbprint(tx.key.publicJwk as JsonWebKey),
+                fetchStatusList: fetchList,
+                fetchIdentifierList: fetchList,
+              })
+            : await validateSdJwtVcPresentation(presented, {
+                ...common,
+                expectedVct: (credentialQuery.meta?.vct_values as string[] | undefined) ?? [PID_VCT],
+                audience,
+                kbMaxAgeSeconds: KB_MAX_AGE,
+                fetchStatusList: fetchList,
+              });
+        validations.push({ id: credentialQuery.id, result });
+      }
+    }
+    // Attribute-based binding of a combined presentation, over the credentials whose disclosures could be read.
+    const combined =
+      validations.length > 1
+        ? await validateCombinedBinding(
+            validations
+              .filter(({ result }) => result.claims)
+              .map(({ id, result }) => ({ id, format: query.credentials.find((c) => c.id === id)?.format ?? '', claims: result.claims as Record<string, unknown> })),
+            mode,
+          )
+        : undefined;
+    const credential = validations[0]?.result;
+    return {
+      forged,
+      transaction: tx,
+      presentation,
+      response: response.checks,
+      credential,
+      failures: [
+        ...response.failures,
+        ...(vpToken?.failures ?? []),
+        ...validations.flatMap(({ result }) => result.failures),
+        ...(combined?.failures ?? []),
+      ],
     };
-    const credential = !presented
-      ? undefined
-      : forged.format === 'mso_mdoc'
-        ? await validateMdocPresentation(presented, {
-            ...common,
-            expectedDocType: (credentialQuery.meta?.doctype_value as string | undefined) ?? PID_DOCTYPE,
-            handover,
-            jwkThumbprint: await jwkThumbprint(tx.key.publicJwk as JsonWebKey),
-            fetchStatusList: fetchList,
-            fetchIdentifierList: fetchList,
-          })
-        : await validateSdJwtVcPresentation(presented, {
-            ...common,
-            expectedVct: (credentialQuery.meta?.vct_values as string[] | undefined) ?? [PID_VCT],
-            audience,
-            kbMaxAgeSeconds: KB_MAX_AGE,
-            fetchStatusList: fetchList,
-          });
-    return { forged, transaction: tx, presentation, response: response.checks, credential, failures: [...response.failures, ...(credential?.failures ?? [])] };
   }
 }

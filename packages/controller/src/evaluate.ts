@@ -114,6 +114,21 @@ export function evaluatePolicy(expectation: Expectation, args: EvaluationInput):
   return { verdict: 'REVIEW', reason: `${policy.item} declares ${hex} as "${meaning}"; compare the verification result (${args.result.outcome}) by hand` };
 }
 
+/**
+ * `REJ_OR_INVALID` (IdentifyingData_004): an attribute value of the wrong data type is not accepted silently. A
+ * rejection passes as for `REJ`; an acceptance passes only when the verification result flags an attribute as invalid
+ * (`attribute-invalid` in its flags).
+ */
+export function evaluateRejectOrInvalid(args: EvaluationInput): Evaluation {
+  const rejected = args.result.outcome === 'failure' || (args.responseStatus !== undefined && args.responseStatus >= 400 && args.responseStatus < 500);
+  const delivered = args.delivered ?? args.responseStatus !== undefined;
+  if (!delivered) return evaluateReject(args.result, args.responseStatus, delivered);
+  if (rejected) return withPrefix('rejected', evaluateReject(args.result, args.responseStatus, delivered));
+  if (args.result.outcome !== 'success') return { verdict: 'FAIL', reason: `verification result is ${args.result.outcome}` };
+  if (args.result.flags?.includes('attribute-invalid')) return { verdict: 'PASS', reason: 'accepted and flagged attribute-invalid' };
+  return { verdict: 'FAIL', reason: 'accepted without rejecting or flagging the attribute of the wrong data type (attribute-invalid)' };
+}
+
 const withPrefix = (prefix: string, evaluation: Evaluation): Evaluation => ({ ...evaluation, reason: `${prefix}: ${evaluation.reason}` });
 
 export interface EvaluationInput {
@@ -149,6 +164,8 @@ export function evaluate(expectation: Expectation, args: EvaluationInput): Evalu
         return evaluateRejectOrAccept(args);
       case 'NOSTAT':
         return evaluateNoStatus(args);
+      case 'REJ_OR_INVALID':
+        return evaluateRejectOrInvalid(args);
       case 'POLICY':
         return evaluatePolicy(expectation, args);
       case 'NOFETCH':

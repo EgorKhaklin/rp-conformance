@@ -1,5 +1,9 @@
 import { isExecutable, type IssuerTestCaseDefinition } from '@rp-conformance/core';
 import { definitions as mainInteraction } from './pid_provider/Interaction/MainInteraction';
+// Issue 24: message structure
+import { definitions as credentialEndpoint } from './pid_provider/MessageStructure/CredentialEndpoint';
+import { definitions as metadata } from './pid_provider/MessageStructure/Metadata';
+import { definitions as offer } from './pid_provider/MessageStructure/Offer';
 // Issue 19: PP_WS_SM_ClientAttestation, _KeyAttestation, _ProofOfPossession.
 import { definitions as clientAttestation } from './pid_provider/SecurityMechanisms/ClientAttestation';
 import { definitions as keyAttestation } from './pid_provider/SecurityMechanisms/KeyAttestation';
@@ -13,6 +17,10 @@ export * from './wording';
  */
 export const issuerDefinitions: IssuerTestCaseDefinition[] = [
   ...mainInteraction,
+  // Issue 24: message structure
+  ...metadata,
+  ...offer,
+  ...credentialEndpoint,
   // Issue 19
   ...clientAttestation,
   ...keyAttestation,

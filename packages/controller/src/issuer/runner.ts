@@ -14,6 +14,7 @@ import {
   type IssuerIcs,
   type IssuerStepDefinition,
   type IssuerTestCaseDefinition,
+  isCredentialRequestFault,
   isExecutable,
   type Verdict,
   variantOf,
@@ -31,6 +32,7 @@ import {
   rememberIssuance,
   sentAttestations,
 } from './attestations';
+import { isOfferCapture, issueWithFault, runMetadata, runOfferCapture } from './artifacts';
 import { harnessInfo } from '../info';
 import { evaluateIssuance, type IssuanceObservation } from './evaluate';
 import { type IssuerHarness, PID_TRUST_RULE, startIssuerHarness } from './harness';
@@ -80,6 +82,10 @@ export interface IssuerStepRecord {
   /** Whether the Provider issued an access token, and its type. */
   token?: { tokenType: string };
   credentials: IssuedCredentialRecord[];
+  /** The named checks over the captured metadata or offer (`CONF`). */
+  checks?: CheckResult[];
+  /** The reference validator's credential request checks over the faulty request (point `credential-request`). */
+  requestChecks?: CheckResult[];
   /** Why the flow stopped before a credential arrived. */
   error?: string;
   artifacts: string[];
@@ -256,6 +262,8 @@ interface TestCaseState {
   clients: Map<string, IssuanceClient>;
   /** Moved status references and replay values of the Wallet Units (issue 19). */
   attestations: AttestationState;
+  /** Offers by value captured in the test case (`PP_WS_MS_Offer_002`). */
+  offersByValue: Record<string, unknown>[];
 }
 
 async function runIssuerTestCase(definition: IssuerTestCaseDefinition, ctx: Context): Promise<IssuerTestCaseRecord> {
@@ -270,7 +278,7 @@ async function runIssuerTestCase(definition: IssuerTestCaseDefinition, ctx: Cont
   const unmet = issuerApplicability(definition, ctx.ics);
   if (unmet.length) return end('NOT APPLICABLE', `profile not met: ${unmet.join('; ')}`);
   if (control && control.verdict !== 'PASS') return end('INCONCLUSIVE', `positive control ${outcomes.map((o) => o.id).join(' or ')} did not pass in ${variant}`);
-  const state: TestCaseState = { clients: new Map(), attestations: newAttestationState() };
+  const state: TestCaseState = { clients: new Map(), attestations: newAttestationState(), offersByValue: [] };
   const steps: IssuerStepRecord[] = [];
   for (const [index, step] of definition.steps.entries()) steps.push(await runIssuerStep(definition, variant, index + 1, step, ctx, state));
   // A step that does not apply to the Provider (NOT APPLICABLE) does not count, unless no step applies.
@@ -307,7 +315,8 @@ async function runIssuerStep(
     record.artifacts.push(relative(ctx.runDir, join(dir, name)));
   };
   try {
-    if (step.run?.kind === 'issuance') await runIssuance(step, step.run, record, save, ctx, state);
+    if (step.run?.kind === 'metadata') await runMetadata(step.expect, record, save, ctx);
+    else if (step.run?.kind === 'issuance') await runIssuance(step, step.run, record, save, ctx, state);
     else if (step.run?.kind === 'wallet-event' && step.expect.codes.every((code) => code === 'INFO')) {
       record.walletUnit = step.run.walletUnit ?? 'CW-1';
       const served = await applyWalletEvent(step.run, {
@@ -331,8 +340,8 @@ async function runIssuerStep(
 /** What the issuance client and the issuance action support so far; anything else leaves the step INCONCLUSIVE. */
 function unsupported(action: IssuanceAction): string | undefined {
   if (action.grant !== 'pre-authorized_code') return 'the issuance client implements the pre-authorized code flow only';
-  const notImplemented = action.faults.filter((fault) => !isIssuerRequestFault(fault));
-  if (notImplemented.length) return `the faults ${notImplemented.join(', ')} are not implemented yet`;
+  const notImplemented = action.faults.filter((fault) => !isCredentialRequestFault(fault) && !isIssuerRequestFault(fault));
+  if (notImplemented.length) return `issuer faults are not implemented yet (${notImplemented.join(', ')})`;
   const options: string[] = (['stopAfterToken', 'deferred', 'encryption', 'credentialIdentifier'] as const).filter((option) => action[option]);
   if ((action.batchSize ?? 1) > 1) options.push('batchSize');
   return options.length ? `the issuance option(s) ${options.join(', ')} are not implemented yet` : undefined;
@@ -347,6 +356,7 @@ async function runIssuance(
   ctx: Context,
   state: TestCaseState,
 ): Promise<void> {
+  if (isOfferCapture(step.expect)) return runOfferCapture(step.expect, action, record, save, ctx, state);
   const missing = unsupported(action);
   if (missing) {
     record.reason = missing;
@@ -364,7 +374,7 @@ async function runIssuance(
 
   // A plain issuance reuses the unit's client (one DPoP key per Wallet Unit); a step with a fault, a moved status
   // reference or another proof type gets a client with its own binding and hooks (issue 19).
-  const plain = !action.faults.length && !action.proofType && !action.keyAttestationNonce && !state.attestations.status.has(unit);
+  const plain = !action.faults.some(isIssuerRequestFault) && !action.proofType && !action.keyAttestationNonce && !state.attestations.status.has(unit);
   const prepared = plain ? undefined : await prepareIssuance(action, ctx.harness.twp, state.attestations);
   let client = plain ? state.clients.get(unit) : undefined;
   if (!client) {
@@ -374,7 +384,20 @@ async function runIssuance(
     });
     if (plain) state.clients.set(unit, client);
   }
-  const evidence = await client.issue({ offer: offer.offer, ...(offer.txCode !== undefined ? { txCode: offer.txCode } : {}), credentialConfigurationId: configurations[0] });
+  const requestFault = action.faults.find(isCredentialRequestFault);
+  let evidence: IssuanceEvidence;
+  if (requestFault) {
+    const faulty = await issueWithFault(requestFault, offer, configurations[0] as string, unit, ctx);
+    evidence = faulty.evidence;
+    if (faulty.requestChecks) record.requestChecks = faulty.requestChecks;
+    if (faulty.notApplicable) {
+      record.exchanges = evidence.exchanges;
+      record.reason = `the fault ${requestFault} cannot be applied: ${faulty.notApplicable}`;
+      return;
+    }
+  } else {
+    evidence = await client.issue({ offer: offer.offer, ...(offer.txCode !== undefined ? { txCode: offer.txCode } : {}), credentialConfigurationId: configurations[0] });
+  }
   // `REJ:invalid_nonce, then ISS`: the same request again, without the fault, with a fresh `c_nonce`.
   const firstAttempt = { exchanges: evidence.exchanges.length, credentials: evidence.credentials.length };
   if (action.retryWithFreshNonce && prepared && evidence.error && evidence.token && evidence.metadata) {
