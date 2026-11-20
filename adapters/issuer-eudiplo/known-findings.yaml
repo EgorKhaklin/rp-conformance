@@ -9,6 +9,14 @@
 #     ...
 #   reference: EUDIPLO/eudiplo#<n>
 #
-# Remove an entry once EUDIPLO fixes it; the run names a known finding whose test case passed. The one executable test
-# case, PP_WS_IA_MainInteraction_001 [SD+PA], passes, so the list is empty. The README lists the FAILs expected against 9.1.0.
-[]
+# Remove an entry once EUDIPLO fixes it; the run names a known finding whose test case passed. The README lists the
+# FAILs expected against 9.1.0. Entries without a reference are not reported upstream yet: the issue text prepared for
+# each is named in the comment above it, in upstream-findings/.
+
+# Issue 22 (revocation and published status lists).
+# Upstream issue text: upstream-findings/status-list-cache-headers.md
+- testCase: PP_RP_IA_Supportive_002
+  variants: [SD+PA]
+  finding: >-
+    The status list endpoint sets neither Cache-Control nor Expires, so caches are not bound to the token's ttl and exp
+    (Token Status List section 13.7)

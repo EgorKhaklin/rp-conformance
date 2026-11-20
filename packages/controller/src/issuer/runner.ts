@@ -27,6 +27,19 @@ import { type IssuerHarness, PID_TRUST_RULE, startIssuerHarness } from './harnes
 import { issuerApplicability, resolveConfigurations, usesTxCode } from './ics';
 import { describeIssuerFinding, type IssuerKnownFinding, issuerKnownFindingOf } from './known-findings';
 import { writeIssuerJUnit, writeIssuerSummary } from './report';
+// Lifecycle steps (issue 22): issuer-event, observe-status, present.
+import {
+  evaluateObservation,
+  evaluatePresentation,
+  type LifecycleState,
+  newLifecycleState,
+  observeStatus,
+  type PresentationObservation,
+  present,
+  runIssuerEvent,
+  type StatusObservation,
+  waits,
+} from './status';
 
 /** The validator's clock tolerance on the issuer side: the catalogue's cap of `T_skew` (section 3.5). */
 export const ISSUER_SKEW_SECONDS = 300;
@@ -72,6 +85,12 @@ export interface IssuerStepRecord {
   credentials: IssuedCredentialRecord[];
   /** Why the flow stopped before a credential arrived. */
   error?: string;
+  /** `issuer-event`: what the adapter reported done (`OBS-ADM`). */
+  event?: { sessionId: string; at: string; status: string };
+  /** `observe-status`: every poll of the published lists and the publication checks (`OBS-SL`). */
+  statusObservation?: StatusObservation;
+  /** `present`: the reference Relying Party's result. */
+  presentation?: Omit<PresentationObservation, 'result'>;
   artifacts: string[];
   verdict: Verdict;
   reason: string;
@@ -206,7 +225,7 @@ export async function runIssuerConformance(options: IssuerRunOptions): Promise<{
     }
     report.run.provider = await options.adapter.describe?.().catch(() => undefined);
     log(`adapter ${options.adapter.name} set up${report.run.provider ? ` (${Object.entries(report.run.provider).map(([k, v]) => `${k} ${v}`).join(', ')})` : ''}`);
-    for (const definition of selected) {
+    const execute = async (definition: IssuerTestCaseDefinition) => {
       const started = Date.now();
       const record = await runIssuerTestCase(definition, { ...options, harness, runDir, report });
       record.durationMs = Date.now() - started;
@@ -215,7 +234,12 @@ export async function runIssuerConformance(options: IssuerRunOptions): Promise<{
       report.results.push(record);
       log(`${record.verdict.padEnd(14)} ${record.testCase} [${record.variant}]${record.knownFinding ? ' (known finding)' : ''}${record.reason ? ` ${record.reason}` : ''}`);
       for (const step of record.steps) log(`    step ${step.step} ${step.verdict}: ${step.reason}`);
-    }
+    };
+    // Test cases whose steps wait (`REVOKED(t)`, polling across `exp`) run after the others and in parallel (design
+    // section 6.3); a test case gated on a control still runs after it.
+    const waiting = selected.filter((d) => waits(d.steps) && !d.control);
+    for (const definition of selected.filter((d) => !waiting.includes(d))) await execute(definition);
+    await Promise.all(waiting.map(execute));
   } finally {
     await options.adapter.tearDown?.().catch(() => {});
     await harness.stop();
@@ -241,8 +265,11 @@ interface Context extends IssuerRunOptions {
   report: IssuerRunReport;
 }
 
-/** State shared by the steps of one test case: one issuance client (one DPoP key) per Wallet Unit (design section 5.1). */
-interface TestCaseState {
+/**
+ * State shared by the steps of one test case: one issuance client (one DPoP key) per Wallet Unit (design section 5.1),
+ * and what the lifecycle steps read of earlier steps.
+ */
+interface TestCaseState extends LifecycleState {
   clients: Map<string, IssuanceClient>;
 }
 
@@ -258,7 +285,7 @@ async function runIssuerTestCase(definition: IssuerTestCaseDefinition, ctx: Cont
   const unmet = issuerApplicability(definition, ctx.ics);
   if (unmet.length) return end('NOT APPLICABLE', `profile not met: ${unmet.join('; ')}`);
   if (control && control.verdict !== 'PASS') return end('INCONCLUSIVE', `positive control ${outcomes.map((o) => o.id).join(' or ')} did not pass in ${variant}`);
-  const state: TestCaseState = { clients: new Map() };
+  const state: TestCaseState = { clients: new Map(), ...newLifecycleState() };
   const steps: IssuerStepRecord[] = [];
   for (const [index, step] of definition.steps.entries()) steps.push(await runIssuerStep(definition, variant, index + 1, step, ctx, state));
   return { ...base, verdict: worst(steps.map((s) => s.verdict)), control, steps };
@@ -294,7 +321,9 @@ async function runIssuerStep(
   };
   try {
     if (step.run?.kind === 'issuance') await runIssuance(step, step.run, record, save, ctx, state);
-    else record.reason = step.run ? `the step action ${step.run.kind} is not implemented yet` : 'the step is text only';
+    else if (step.run?.kind === 'issuer-event' || step.run?.kind === 'observe-status' || step.run?.kind === 'present') {
+      await runLifecycleStep(step, step.run, record, save, ctx, state);
+    } else record.reason = step.run ? `the step action ${step.run.kind} is not implemented yet` : 'the step is text only';
   } catch (error) {
     record.verdict = 'INCONCLUSIVE';
     record.reason = `the harness could not execute the step: ${(error as Error).message}`;
@@ -341,6 +370,7 @@ async function runIssuance(
     state.clients.set(unit, client);
   }
   const evidence = await client.issue({ offer: offer.offer, ...(offer.txCode !== undefined ? { txCode: offer.txCode } : {}), credentialConfigurationId: configurations[0] });
+  state.issued.set(record.step, { sessionId: offer.sessionId, credentials: evidence.credentials });
   record.exchanges = evidence.exchanges;
   if (evidence.token) record.token = { tokenType: evidence.token.tokenType };
   if (evidence.error) record.error = evidence.error;
@@ -351,6 +381,35 @@ async function runIssuance(
   const evaluation = evaluateIssuance(step.expect, observationOf(evidence, record.credentials));
   record.verdict = evaluation.verdict;
   record.reason = evaluation.reason;
+}
+
+/** The lifecycle steps (status.ts): `issuer-event`, `observe-status` and `present`, with their evidence. */
+async function runLifecycleStep(
+  step: IssuerStepDefinition,
+  action: Extract<IssuerStepDefinition['run'], { kind: 'issuer-event' | 'observe-status' | 'present' }>,
+  record: IssuerStepRecord,
+  save: (name: string, content: string) => Promise<void>,
+  ctx: Context,
+  state: TestCaseState,
+): Promise<void> {
+  const lifecycle = { harness: ctx.harness, ics: ctx.ics, harnessHost: ctx.harnessHost, ...(ctx.log ? { log: ctx.log } : {}) };
+  if (action.kind === 'issuer-event') {
+    const { event, ...evaluation } = await runIssuerEvent(action, record.step, state, { ...lifecycle, adapter: ctx.adapter });
+    if (event) record.event = event;
+    Object.assign(record, evaluation);
+    return;
+  }
+  if (action.kind === 'observe-status') {
+    const observation = await observeStatus(action, record.step, state, lifecycle);
+    record.statusObservation = observation;
+    await save('status-observation.json', `${JSON.stringify(observation, null, 2)}\n`);
+    Object.assign(record, evaluateObservation(step.expect, observation, ctx.ics));
+    return;
+  }
+  const { result, ...presentation } = await present(action, state, lifecycle);
+  record.presentation = presentation;
+  await save('presentation.json', `${JSON.stringify({ ...presentation, result }, null, 2)}\n`);
+  Object.assign(record, evaluatePresentation(step.expect, { ...presentation, ...(result ? { result } : {}) }));
 }
 
 /** `OBS-CRED`: every credential the step received through the reference validator, with the suite's trust configuration. */

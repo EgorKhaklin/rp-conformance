@@ -52,8 +52,21 @@ the instance must report; with `EUDIPLO_EXPECT_VERSION=9.1.0-main.ae0792a` the s
 
 `setStatus` cannot be shown without an issued credential: for a session that has issued none, EUDIPLO answers
 `409 No status mapping found for session ... and credential configuration undefined`, and
-`GET /api/session/{id}/credential-status` answers `[]`. The test asserts exactly that; revocation of an issued PID needs
-the issuance client (issue 15) and comes with the first issuer test case (issue 17).
+`GET /api/session/{id}/credential-status` answers `[]`. The test asserts exactly that. Revocation of an issued PID is
+exercised by the revocation test cases (issue 22): `PP_WS_SM_Revocation_003` and `PP_RP_SM_Revocation_008` revoke
+through `setStatus` and see the published list change within `T_rev`.
+
+## Status lists (issue 22)
+
+The status list test cases (`PP_WS_SM_Revocation_001` to `_003`, `PP_RP_IA_Supportive_*`, `PP_RP_SM_Revocation_*`)
+fetch the lists EUDIPLO publishes under `/issuers/{tenant}/status-management/status-list/{id}` anonymously, as a
+Relying Party does. EUDIPLO answers `Accept: application/statuslist+cwt` with a CWT and anything else with a JWT
+(`ICS-05.token_formats`). It re-signs a list on every change (`immediateUpdate`) and when a fetch finds it expired, so
+every fetch returns a token that has not expired (`PP_RP_SM_Revocation_005`). It sets no cache headers on the status
+list response, a known finding of `PP_RP_IA_Supportive_002` (issue text in
+[`upstream-findings/status-list-cache-headers.md`](upstream-findings/status-list-cache-headers.md)). It publishes no
+identifier lists and the adapter configures no mdoc PID, so `PP_WS_SM_Revocation_002` and the `MD` variants of
+`PP_RP_SM_Revocation_001` and `_007` are NOT APPLICABLE.
 
 ## Hooks EUDIPLO 9.1.0 cannot offer
 
@@ -84,7 +97,7 @@ change that adds it on `main`.
 | No subject record to change | `changeSubject` missing | `PP_WS_SM_Revocation_008` |
 | `NextUpdate` of a wallet provider list is not enforced (after 9.1.0, EUDIPLO/eudiplo#1441) | `ICS-15.next_update_grace` "not enforced"; the `POLICY` verdict compares with that | `PP_Inf_SM_TrustMechanisms_006_UF` is decided by the declared policy, which the catalogue may not accept as a grace period |
 | Proofs are bound by `c_nonce` only, which lives 10 minutes | `ICS-14.T_proof` PT10M is above the catalogue's 5 minute cap; the time mutations of the test (`iat` ± 1 h) still apply | `PP_WS_SM_ProofOfPossession_006_UF` to be confirmed with the issuance client |
-| Shortest status list lifetime 60 s (`ttl` minimum) | `T_rev` PT1M with `immediateUpdate` | none: `REVOKED(T_rev)` test cases poll for a minute |
+| Shortest status list lifetime 60 s (`ttl` minimum) | `T_rev` PT1M with `immediateUpdate` | none: `REVOKED(T_rev)` test cases (`PP_WS_SM_Revocation_003`, `PP_RP_SM_Revocation_008`) poll for a minute, `PP_RP_SM_Revocation_005` across one `exp` |
 | No enrolment by CSR (after 9.1.0, EUDIPLO/eudiplo#1397) | The Registrar generates the keys (`method` `generated`) | none |
 
 Not configured by the adapter although EUDIPLO 9.1.0 supports it; each can be added when the test cases need it:

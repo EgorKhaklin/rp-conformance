@@ -13,6 +13,7 @@
     "@rp-conformance/forge": "workspace:*",
     "@rp-conformance/issuer-definitions": "workspace:*",
     "@rp-conformance/issuer-wallet": "workspace:*",
+    "@rp-conformance/reference-rp": "workspace:*",
     "@rp-conformance/status-provider": "workspace:*",
     "@rp-conformance/trust-infrastructure": "workspace:*",
     "@rp-conformance/validator": "workspace:*",

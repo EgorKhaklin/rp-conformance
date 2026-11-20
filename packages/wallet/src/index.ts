@@ -73,6 +73,11 @@ export interface ConformanceWalletOptions {
   allowInsecureUrls?: boolean;
   /** Follow `redirect_uri` after the response (default true). */
   followRedirect?: boolean;
+  /**
+   * The key the presented credentials are bound to; default a fresh one. The issuer suite presents a credential a
+   * Provider issued to the key of its proof (`PP_RP_SM_Revocation_008`).
+   */
+  holderKey?: EcKeyPair;
 }
 
 const hash: CallbackContext['hash'] = (data, alg) => createHash(alg.replace('-', '').toLowerCase()).update(data).digest();
@@ -166,7 +171,7 @@ export class ConformanceWallet {
   static async create(options: ConformanceWalletOptions): Promise<ConformanceWallet> {
     if (options.allowInsecureUrls) setGlobalConfig({ allowInsecureUrls: true });
     const anchors = options.accessCertificateAnchors.map((a) => (typeof a === 'string' ? parseCertificate(a) : a));
-    return new ConformanceWallet(await generateEcKeyPair(), generateSecp256k1KeyPair(), options, anchors);
+    return new ConformanceWallet(options.holderKey ?? (await generateEcKeyPair()), generateSecp256k1KeyPair(), options, anchors);
   }
 
   /**
