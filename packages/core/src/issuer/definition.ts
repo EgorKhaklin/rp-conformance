@@ -95,7 +95,7 @@ export interface TokenReuseAction {
   ofStep: number;
   /** The Wallet Unit that sends it; default the one of that step (`CW-2` for a code redeemed by another client). */
   walletUnit?: WalletUnit;
-  /** Issue 25: the named fault (at most one) of the repeated request, for example `dpop.refresh-other-key`. */
+  /** Issue 25: the named fault (at most one) of the repeated request, for example `dpop.missing`. */
   faults?: SessionFaultId[];
 }
 

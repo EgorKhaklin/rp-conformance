@@ -69,6 +69,12 @@ const encoding003 = (format: FormatVariant, grant: GrantVariant) =>
     ],
   });
 
+/** `PP_WS_SH_Encoding_004_UF` steps 5 and 6: a private address in the pre-TS3-1.5 `status` claim, recorded. */
+const topLevelInfo = {
+  codes: ['INFO' as const],
+  text: 'Whether the Provider rejects the request (it read the top-level `status` and could not, or would not, obtain the list) or issues the PID (it ignores the claim) is recorded; HTTP 5xx fails.',
+};
+
 const encoding004 = (format: FormatVariant, grant: GrantVariant) =>
   defineIssuerTestCase({
     id: 'PP_WS_SH_Encoding_004_UF',
@@ -85,9 +91,12 @@ const encoding004 = (format: FormatVariant, grant: GrantVariant) =>
       faultStep(format, grant, 'ka.ca-x-status-uri', both(rej(), noFetch)),
       faultStep(format, grant, 'wia.status-uri-private', rej()),
       faultStep(format, grant, 'ka.status-uri-private', rej()),
+      faultStep(format, grant, 'wia.status-uri-private-top-level', topLevelInfo),
+      faultStep(format, grant, 'ka.status-uri-private-top-level', topLevelInfo),
     ],
     comments: [
       'A request to `169.254.169.254` does not reach the Test Status Provider, so the harness cannot log it: steps 3 and 4 expect REJ only. Whether the Provider tried the address is visible in its own logs (for EUDIPLO, `OUTBOUND_URL_ALLOW_PRIVATE_NETWORK` decides).',
+      'Steps 3 and 4 put the private address where TS3 1.5 carries the status reference (`client_status`, `key_storage_status`), an EUDI/TS3 requirement. A Provider that reads only the earlier top-level `status` (TS3 1.4.1, OpenID4VCI 1.0 Appendices D.1 and E) never reads that address, so its result there says nothing about server-side request forgery. Steps 5 and 6 (spec review 2026-11-20) add the same address in a top-level `status` next to the valid TS3 reference and record the outcome: such a Provider reads it, and in strict mode refuses the attestation whose status it cannot obtain; one that reads only the TS3 claims ignores it.',
     ],
   });
 

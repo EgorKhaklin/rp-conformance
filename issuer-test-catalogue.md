@@ -453,7 +453,7 @@ All **PID only**; Attestation Providers are tested against their rulebook in `AP
 | `PP_WS_SH_Encoding_001_UF` | Malformed JSON, wrong `Content-Type`, and malformed JWTs at every endpoint are rejected without 5xx. | Truncated JSON; `text/plain`; two-part JWT | REJ | RFC 8725; OpenID4VCI §8.3.1 | | G/R |
 | `PP_WS_SH_Encoding_002_UF` | An oversized request is rejected (any 4xx, an error object not required); how deeply nested JSON is handled is recorded; the SUT stays available. | 10 MB body; nesting depth 10 000 | REJ (4xx); INFO for the nesting (§8.3) | OWASP API4; OpenID4VCI §8.2 (unknown parameters MUST be ignored); RFC 8259 §9 (nesting limits "may") | | G/R |
 | `PP_WS_SH_Encoding_003_UF` | `jku`, `x5u` or a `kid` URL in a proof, WIA or KA header is not dereferenced. | Header pointing to the TSP | NOFETCH; rejection or issuance recorded (§8.3) | RFC 8725 §3.10 (SHOULD protect; no rejection required) | | G/R |
-| `PP_WS_SH_Encoding_004_UF` | A status `uri` in a WIA or KA that fails signature validation is not fetched; a validly signed status `uri` pointing to a private address is not fetched. | WIA by `CA-X` with `uri` = TSP; `uri` = `http://169.254.169.254/…` | REJ, NOFETCH | Token Status List §6.2, §11.4; OWASP SSRF | | G/R |
+| `PP_WS_SH_Encoding_004_UF` | A status `uri` in a WIA or KA that fails signature validation is not fetched; a validly signed status `uri` pointing to a private address is not fetched. | WIA by `CA-X` with `uri` = TSP; `uri` = `http://169.254.169.254/…` in `client_status` / `key_storage_status` (TS3 1.5), and in a top-level `status` (before TS3 1.5; INFO, §8.3) | REJ, NOFETCH; INFO for the top-level `status` | Token Status List §6.2, §11.4; OWASP SSRF; TS3 §2.3 (EUDI/TS3 claims) | | G/R |
 | `PP_WS_SH_Encoding_005_UF` | A WIA or KA status list that is a decompression bomb is refused without exhausting resources. | `lst` inflating to 1 GB | REJ, SUT stays available | Token Status List §11.1 | | G/R |
 
 ##### PP_WS_SH_Encryption (`P-ENC`)
@@ -738,6 +738,37 @@ What the plan tests and the catalogue has no objective for. The rows are not add
 - **TS3.** The WIA and KA structure (revocation maintenance period, status reference) follows TS3 at the ARF commit above; names of claims are deliberately not fixed here.
 - **ISO/IEC 18013-5 second edition** is a draft; the `MD` status and identifier list objectives follow it.
 - **DC API issuance** (ISSU_03) enters once its specification exists; the RP harness's DC API shim could then be reused.
+
+### 8.3 Corrections after the spec review of the EUDIPLO findings (2026-11-20)
+
+Before any finding was reported upstream, every FAIL of the reference run was checked against the primary
+specifications and EUDIPLO's source at `ae0792a`. Where the test demanded more than a specification does, the test
+changed; where no specification has a MUST, the result is informational (`INFO`) or follows a declared policy
+(`POLICY`), and the row states the true normative strength. Requirements of the EUDI profile only (ARF, TS3, PID
+Rulebook) stay FAILs and are marked as such in `adapters/issuer-eudiplo/known-findings.yaml` (`basis: profile`); the
+upstream texts are in `adapters/issuer-eudiplo/upstream-findings/`.
+
+| Test case | Change | Why |
+| --- | --- | --- |
+| `IA_AuthorizationCode_006_UF` | Step 2 adds the unknown `scope` value to a valid request and expects `ISS`; the reference validator ignores unknown scope values. | OpenID4VCI 1.0 section 5.1.2: "Credential Issuers MUST ignore unknown scope values in a request." |
+| `IA_Reissuance_002_UF` | The refresh token is presented by `CW-2` with its own WIA, PoP and DPoP key; the fault `dpop.refresh-other-key` is gone. | RFC 9449 section 5: refresh tokens of confidential clients "are not bound to the DPoP proof public key"; they are bound to the client (RFC 6749 sections 6, 10.4). |
+| `IA_Notification_001` | Any 2xx passes (check `notification-2xx`); a 2xx other than 204 is recorded. | OpenID4VCI 1.0 section 11.2: 2xx MUST, 204 RECOMMENDED. |
+| `SH_Encoding_002_UF` | Step 1 accepts a 4xx without an OAuth error object (413); step 2 (deep nesting) is INFO. | OpenID4VCI 1.0 section 8.2: unrecognized parameters MUST be ignored; RFC 8259 section 9: nesting limits "may". |
+| `SH_Encoding_003_UF` | NOFETCH only; rejection or issuance recorded. | RFC 8725 section 3.10 asks not to follow `jku`/`x5u` ("SHOULD protect"), not to reject. |
+| `PP_RP_IA_Supportive_002` | A response without caching headers passes; present headers are still checked; references §8.2 and §13.7. | Token Status List (draft 21) has no cache-header rule for the Status Provider; section 8.2 only tells Relying Parties to prefer `exp`/`ttl` "If caching-related HTTP headers are present". |
+| `SM_ClientAttestation_006_UF`, `SM_KeyAttestation_004_UF` (d) | INFO; the reference validator accepts any issuance anchor of `TL-WP` for a WIA or KA. | TS3 sections 2.2.1.2, 2.2.2.2 and ARF ISSU_28, ISSU_30a bind anchors per Wallet Provider; TS3 section 3.2 is informative and maps no KA field. |
+| `SM_KeyAttestation_007_UF` | Steps 3 and 4 (KA `nonce` in a `jwt` proof) are INFO; step 5 (`attestation` proof without nonce) still rejects. | OpenID4VCI 1.0 Appendix F.4 and TS3 section 2.2.2.2 require the `c_nonce` in the proof; F.1's KA nonce rule binds the wallet. Step 4 equals the area's valid baseline. |
+| `SM_ClientAttestation_009_UF` | Step 4 (PoP `jti` replay) INFO. | Attestation-Based Client Auth (draft 08) section 12.1: replay detection SHOULD. |
+| `IA_Batch_003_UF` | INFO, `G/O`; reference §12.2.4. | `batch_size` is "the maximum array size for the proofs parameter" (section 12.2.4); no rejection MUST. |
+| `IA_Reissuance_004_UF` | Step 3 INFO. | VCR_04 forbids reversing a revocation; re-issuance after revocation is not covered. |
+| `IA_Notification_002_UF` | Step 3 (unknown event) INFO. | Section 11.3's 400 MUST is scoped to an invalid `notification_id`; the codes are SHOULD. |
+| `SM_ProofOfPossession_007_UF` | INFO, `G/O`. | Appendix F.1's `iss` rule binds the wallet; F.4 lists no `iss` check. |
+| `SM_IssuerIntegrity_006` | A SD-JWT VC salt below 128 bits is recorded, not failed; uniqueness still fails. | RFC 9901 section 9.3: 128 bits RECOMMENDED; ISSU_35 is about uniqueness. |
+| `PP_Inf_SM_TrustMechanisms_004_UF` | Steps 2 and 4 are `POLICY` (new ICS-15.invalid_version: `keep` gives `ISS`, `discard` `REJ`). | No specification requires a last-known-good list; fail-closed conforms. The EUDIPLO adapter's `refreshTrust` empties the cache itself. |
+| `SM_ClientAttestation_015`, `SM_KeyAttestation_011` | Stimulus 31 days instead of 30; references TS3 section 2.4.3. | TS3 section 2.4.2 guarantees a Wallet Unit can present at least 31 days; 30 days was below that guarantee. |
+| `SM_ClientAttestation_016_UF` | References TS3 section 2.4.3 and ISSU_12c; WUA_32 dropped. | WUA_32 is about communicating a minimum period, not about the PID's expiry. |
+| `SH_Encoding_004_UF` | Steps 5 and 6 put the private address in a top-level `status` (before TS3 1.5), recorded as INFO. | Steps 3 and 4 use the TS3 1.5 claims; a Provider that reads only the earlier claim never reads the address there, so they say nothing about request forgery. |
+| `DM_PidMdoc_002`, `SM_IssuerIntegrity_005` | References: PID Rulebook v1.7 section 3.1.2 (not "4.2"), ISO/IEC 18013-5 not verified; PID_21 is the SHALL, RFC 9901 section 4.2.2 only permits array element disclosures; ARB_30 dropped. | EUDI profile requirements. |
 
 ## 9. Next steps
 

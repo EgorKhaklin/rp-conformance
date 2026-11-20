@@ -199,6 +199,7 @@ const WIA_FAULTS: Partial<Record<IssuerFaultId, AttestationFault>> = {
     signer: issuanceSigner('CA-X'),
   },
   'wia.status-uri-private': { change: (p) => void (statusList(p.payload, 'client_status').uri = PRIVATE_STATUS_URI) },
+  'wia.status-uri-private-top-level': { change: (p) => void (p.payload.status = { status_list: { uri: PRIVATE_STATUS_URI, idx: 0 } }) },
   'wia.jku-header': { change: (p) => void (p.header.jku = tspUrl(p.payload, 'client_status', 'jku')) },
   'wia.x5u-header': { change: (p) => void (p.header.x5u = tspUrl(p.payload, 'client_status', 'x5u')) },
 };
@@ -243,6 +244,7 @@ const KA_FAULTS: Partial<Record<IssuerFaultId, AttestationFault>> = {
     signer: issuanceSigner('CA-X'),
   },
   'ka.status-uri-private': { change: (p) => void (statusList(p.payload, 'key_storage_status').uri = PRIVATE_STATUS_URI) },
+  'ka.status-uri-private-top-level': { change: (p) => void (p.payload.status = { status_list: { uri: PRIVATE_STATUS_URI, idx: 0 } }) },
   'ka.jku-header': { change: (p) => void (p.header.jku = tspUrl(p.payload, 'key_storage_status', 'jku')) },
   'ka.x5u-header': { change: (p) => void (p.header.x5u = tspUrl(p.payload, 'key_storage_status', 'x5u')) },
 };

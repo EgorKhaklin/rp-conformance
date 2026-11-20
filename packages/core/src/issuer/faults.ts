@@ -71,6 +71,14 @@ export const ISSUER_FAULTS = {
     'the `uri` of the status reference in the `client_status` claim of its WIA is `http://169.254.169.254/latest/meta-data/status`, a link-local address',
     `${ENC}_004_UF`,
   ),
+  // Spec review 2026-11-20: the status reference where a product that predates TS3 1.5 reads it (TS3 1.4.1, OpenID4VCI
+  // 1.0 Appendix E), so that `PP_WS_SH_Encoding_004_UF` shows what such a product does with a private address. The
+  // reference validator reads `client_status` (TS3 1.5), so the claim fails none of its checks.
+  'wia.status-uri-private-top-level': wia(
+    null,
+    'its WIA additionally carries a top-level `status` claim, the place of the status reference before TS3 1.5, whose `status_list.uri` is `http://169.254.169.254/latest/meta-data/status`, a link-local address',
+    `${ENC}_004_UF`,
+  ),
   'wia.jku-header': wia('wia-signature', 'the header of its WIA additionally carries a `jku` member pointing to the Test Status Provider', `${ENC}_003_UF`),
   'wia.x5u-header': wia('wia-signature', 'the header of its WIA additionally carries an `x5u` member pointing to the Test Status Provider', `${ENC}_003_UF`),
 
@@ -127,6 +135,11 @@ export const ISSUER_FAULTS = {
   'ka.status-uri-private': ka(
     'ka-status',
     'the `uri` of the status reference in the `key_storage_status` claim of its KA is `http://169.254.169.254/latest/meta-data/status`, a link-local address',
+    `${ENC}_004_UF`,
+  ),
+  'ka.status-uri-private-top-level': ka(
+    null,
+    'its KA additionally carries a top-level `status` claim, the place of the status reference before TS3 1.5 (OpenID4VCI 1.0 Appendix D.1), whose `status_list.uri` is `http://169.254.169.254/latest/meta-data/status`, a link-local address',
     `${ENC}_004_UF`,
   ),
   'ka.jku-header': ka('ka-signature', 'the header of its KA additionally carries a `jku` member pointing to the Test Status Provider', `${ENC}_003_UF`),
@@ -264,7 +277,7 @@ export const ISSUER_REQUEST_STIMULI: IssuerStimulus[] = [
 
   { testCase: `${ENC}_003_UF`, stimulus: '`jku`, `x5u` or a `kid` URL in a proof, WIA or KA header', faults: ['wia.jku-header', 'wia.x5u-header', 'ka.jku-header', 'ka.x5u-header', 'proof.jku-header', 'proof.kid-url'] },
   { testCase: `${ENC}_004_UF`, stimulus: 'WIA by `CA-X` with `uri` = TSP', faults: ['wia.ca-x-status-uri', 'ka.ca-x-status-uri'] },
-  { testCase: `${ENC}_004_UF`, stimulus: '`uri` = `http://169.254.169.254/…`', faults: ['wia.status-uri-private', 'ka.status-uri-private'] },
+  { testCase: `${ENC}_004_UF`, stimulus: '`uri` = `http://169.254.169.254/…`', faults: ['wia.status-uri-private', 'ka.status-uri-private', 'wia.status-uri-private-top-level', 'ka.status-uri-private-top-level'] },
 
   { testCase: 'PP_WS_IA_Batch', stimulus: 'one bad proof; one key twice; `batch_size` + 1 proofs', faults: [], leftOut: BATCH },
 ];

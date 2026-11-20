@@ -1,0 +1,50 @@
+# Prepared upstream issues for EUDIPLO as PID Provider
+
+Issue texts for the known findings in [`../known-findings.yaml`](../known-findings.yaml). Each file is one issue for
+`EUDIPLO/eudiplo`: the first heading is the title, the rest is the body. Nothing has been filed; they are opened by hand
+once the maintainer agrees, the issue reference then goes into the `reference` of the entries and the file is removed.
+
+All findings were reviewed against the primary specifications and EUDIPLO's source at `ae0792a` on 2026-11-20 (spec
+review of the EUDIPLO findings). Each text names the specification version it quotes and says whether the requirement
+is one of the base specification (`basis: confirmed` in the findings list) or of the EUDI profile only (`basis:
+profile`: ARF, TS3, PID Rulebook), in which case EUDIPLO conforms to the base specification. Findings whose test was
+wrong were removed with their texts; findings without a specification MUST are no longer FAILs, and the texts kept for
+them are in [`suggestions/`](suggestions), labelled as hardening suggestions or questions.
+
+Checked against `ghcr.io/eudiplo/eudiplo@sha256:1a1f53b77b69cfeaf573f6950de6a70947b909181654a6de252f8207e1b138a7`
+(`9.1.0-main.ae0792a`, the image pinned in [`../reference.env`](../reference.env)). Source links point to revision
+`ae0792a98991c28607879c2291d26b26b9ee9817`.
+
+| File | Basis | Test cases |
+| --- | --- | --- |
+| [deferred-transaction-id-500.md](deferred-transaction-id-500.md) | confirmed (OpenID4VCI 1.0 §9.3) | `PP_WS_IA_Deferred_002_UF` |
+| [proof-alg-none-error.md](proof-alg-none-error.md) | confirmed, minor (OpenID4VCI 1.0 §8.3.1.2) | `PP_WS_SM_ProofOfPossession_002_UF` |
+| [wallet-attestation-status-claim.md](wallet-attestation-status-claim.md) | profile (TS3 ≥ 1.5) | `PP_WS_SM_ClientAttestation_012_UF`, `_013_UF`, `PP_WS_SM_KeyAttestation_008_UF`, `_009_UF`, `PP_WS_SM_Revocation_007`, `PP_WS_IA_Reissuance_005_UF`, `PP_WS_SH_Encoding_004_UF` (and `_005_UF`, which it keeps from showing anything) |
+| [wia-revocation-chaining.md](wia-revocation-chaining.md) | profile (TS3 1.5 §2.4.3, WURevocation_18) | `PP_WS_SM_Revocation_006` |
+| [maintenance-period.md](maintenance-period.md) | profile (TS3 1.5 §2.4.3, ISSU_12c) | `PP_WS_SM_ClientAttestation_016_UF` |
+| [mdoc-full-date.md](mdoc-full-date.md) | profile (PID Rulebook v1.7 §3.1.2, PID_09) | `PP_WS_DM_PidMdoc_002` |
+| [sd-jwt-array-element-disclosure.md](sd-jwt-array-element-disclosure.md) | profile (PID_21) | `PP_WS_SM_IssuerIntegrity_005` |
+
+Suggestions and questions (not conformance findings, no FAIL in the suite):
+
+| File | Test cases (informational or `POLICY`) |
+| --- | --- |
+| [suggestions/client-attestation-pop-jti-replay.md](suggestions/client-attestation-pop-jti-replay.md) | `PP_WS_SM_ClientAttestation_009_UF` step 4 (INFO) |
+| [suggestions/sd-jwt-salt-length.md](suggestions/sd-jwt-salt-length.md) | `PP_WS_SM_IssuerIntegrity_006` (SD; salt length recorded) |
+| [suggestions/trust-list-last-known-good.md](suggestions/trust-list-last-known-good.md) | `PP_Inf_SM_TrustMechanisms_004_UF` (`POLICY` ICS-15.invalid_version) |
+
+Removed after the review, because the test was wrong: the WIA/KA service anchor text (`PP_WS_SM_ClientAttestation_006_UF`,
+`PP_WS_SM_KeyAttestation_004_UF`), the KA nonce text (`PP_WS_SM_KeyAttestation_007_UF`) and the status list cache
+header text (`PP_RP_IA_Supportive_002`). The other findings the review classed as wrong tests or without a MUST
+(`PP_WS_IA_AuthorizationCode_006_UF`, `_Reissuance_002_UF`, `_004_UF`, `_Notification_001`, `_002_UF`, `_Batch_003_UF`,
+`PP_WS_SH_Encoding_002_UF`, `_003_UF`, `PP_WS_SM_ProofOfPossession_007_UF`) had no text here.
+
+To reproduce one of them:
+
+```bash
+EUDIPLO_PORT=3228 docker compose --env-file adapters/issuer-eudiplo/reference.env -p rp-conformance-fix -f adapters/eudiplo/docker-compose.yml up -d --wait
+```
+
+```bash
+EUDIPLO_PORT=3228 pnpm rp-conformance issuer run --adapter eudiplo --only '<test case ID>'
+```
