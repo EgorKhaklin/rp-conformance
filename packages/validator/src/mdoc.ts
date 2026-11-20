@@ -70,7 +70,7 @@ export interface MdocValidationOptions {
   now?: Date;
   /** Freshness policy for Status List Tokens (ICS RP.R.7, RP.R.8). */
   statusListFreshness?: StatusListFreshness;
-  /** Reject a PID whose administrative expiry date has passed (ICS RP.P.11 Reject). */
+  /** Reject a PID whose administrative expiry date has passed (ICS RP.P.12 Reject). */
   rejectPastExpiryDate?: boolean;
 }
 
@@ -241,7 +241,7 @@ export async function validateMdocPresentation(presentation: string, options: Md
       if (now.getTime() < validFrom.getTime() - skewMs) fail(`not yet valid: validFrom ${validFrom.toISOString()}, T_skew ${options.skewSeconds} s`);
       // expectedUpdate is informative (ISO/IEC 18013-5 section 9.1.2.4): Validity_012.
       const expectedUpdate = dateOf(validityInfo.get('expectedUpdate'));
-      // RP_WS_SM_Validity_020: the administrative expiry date of a PID, under the policy of ICS RP.P.11.
+      // RP_WS_SM_Validity_020: the administrative expiry date of a PID, under the policy of ICS RP.P.12.
       const expiry = claims?.[PID_NAMESPACE]?.expiry_date;
       if (options.rejectPastExpiryDate && typeof expiry === 'string' && expiry < now.toISOString().slice(0, 10)) fail(`the administrative expiry date ${expiry} has passed`);
       if (expectedUpdate && expectedUpdate < now) return `expectedUpdate ${expectedUpdate.toISOString()} has passed (informative)`;

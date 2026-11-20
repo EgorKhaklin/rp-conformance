@@ -11,8 +11,8 @@ RP.P.3: "Yes"   # enforces trusted_authorities (type aki) of its own query
 RP.P.4: 60      # T_skew, seconds
 RP.P.5: "Yes"
 RP.P.6: 300     # T_kb, seconds
-RP.P.10: 1048576  # maximum Authorization Response size, bytes
-RP.P.11: Reject  # PID whose administrative expiry date has passed
+RP.P.11: 1048576  # maximum Authorization Response size, bytes
+RP.P.12: Reject  # PID whose administrative expiry date has passed
 RP.R.1: "Yes"   # checks the revocation status of PIDs
 RP.R.2: Reject
 RP.R.3: None

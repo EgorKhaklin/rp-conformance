@@ -273,7 +273,7 @@ export function evaluateStatusRequest(args: EvaluationInput): Evaluation {
 /**
  * `POLICY` against the ICS items of issue 32: `RP.R.7`, the maximum age of a Status List Token (a token at least that
  * old gives no reliable status, `NOSTAT`; `None` or a longer age accepts); `RP.R.8`, whether a token issued in the future
- * is refused (`Yes`: `NOSTAT`, `No`: accepted); `RP.P.11`, a PID whose administrative expiry date has passed (`Reject`
+ * is refused (`Yes`: `NOSTAT`, `No`: accepted); `RP.P.12`, a PID whose administrative expiry date has passed (`Reject`
  * or `Accept`).
  */
 export function evaluateDeclaredPolicy(policy: Exclude<PolicyReference, { item: 'RP.R.3' }>, args: EvaluationInput): Evaluation {
@@ -292,7 +292,7 @@ export function evaluateDeclaredPolicy(policy: Exclude<PolicyReference, { item: 
       if (/^yes$/i.test(declared)) return refuse('Yes');
       if (/^no$/i.test(declared)) return accept('No');
       return undeclared();
-    case 'RP.P.11':
+    case 'RP.P.12':
       if (/^reject/i.test(declared)) return withPrefix(`${policy.item} ${declared}`, evaluateReject(args.result, args.responseStatus, args.delivered));
       if (/^accept/i.test(declared)) return accept(declared);
       return undeclared();

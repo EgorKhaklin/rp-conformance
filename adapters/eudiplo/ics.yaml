@@ -12,8 +12,8 @@ RP.P.3: "No"    # VP_REMOVE_TA strips trusted_authorities from the request
 RP.P.4: 60      # T_skew: skewSeconds, EUDIPLO default 60
 RP.P.5: "Yes"
 RP.P.6: 300     # T_kb: KB-JWT iat at most 300 s old
-RP.P.10: 10485760  # body parser limit 10mb (main.helpers.ts configureBodyParsers)
-RP.P.11: Accept  # does not evaluate the PID expiry date
+RP.P.11: 10485760  # body parser limit 10mb (main.helpers.ts configureBodyParsers)
+RP.P.12: Accept  # does not evaluate the PID expiry date
 RP.R.1: "Yes"   # statusCheckMode strict
 RP.R.2: Reject
 RP.R.3: None

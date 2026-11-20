@@ -511,7 +511,7 @@ async function runPresentation(
     replayedPresentation: replayed,
     skewSeconds,
     kbMaxAgeSeconds,
-    maxResponseBytes: Number(ctx.ics.items['RP.P.10'] ?? 0) || undefined,
+    maxResponseBytes: Number(ctx.ics.items['RP.P.11'] ?? 0) || undefined,
   };
 
   let evidence: PresentationEvidence;

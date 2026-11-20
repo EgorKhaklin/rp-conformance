@@ -1,5 +1,5 @@
 // RP_WS_SM_Validity_004 and _020: an SD-JWT VC issued in the future, whose handling is only recorded (catalogue
-// decision 5), and a PID whose administrative expiry date has passed, handled as the Relying Party declares (ICS RP.P.11).
+// decision 5), and a PID whose administrative expiry date has passed, handled as the Relying Party declares (ICS RP.P.12).
 import {
   comments,
   defineTestCase,
@@ -33,8 +33,8 @@ const expiryClaim = (format: FormatWording) => (format === sdJwtVc ? '`date_of_e
 
 const expiryPolicy = (format: FormatWording): Expectation => ({
   codes: ['POLICY'],
-  policy: { item: 'RP.P.11' },
-  text: `If the Relying Party declares in its ICS that it rejects such a PID (RP.P.11 Reject), it rejects the presentation: its verification result reports a failure and releases no attribute value from the presentation, and the endpoint receiving the Authorization Response does not answer with HTTP status 5xx. If it declares that it accepts it (RP.P.11 Accept), it accepts the presentation: its verification result reports success and releases exactly the attributes requested, ${expiryClaim(format)} included, with the values of the presented credential.`,
+  policy: { item: 'RP.P.12' },
+  text: `If the Relying Party declares in its ICS that it rejects such a PID (RP.P.12 Reject), it rejects the presentation: its verification result reports a failure and releases no attribute value from the presentation, and the endpoint receiving the Authorization Response does not answer with HTTP status 5xx. If it declares that it accepts it (RP.P.12 Accept), it accepts the presentation: its verification result reports success and releases exactly the attributes requested, ${expiryClaim(format)} included, with the values of the presented credential.`,
 });
 
 const administrativeExpiry = (format: FormatWording) =>
@@ -64,7 +64,7 @@ const administrativeExpiry = (format: FormatWording) =>
       }),
     ],
     comments: [
-      'The PID Rulebook distinguishes the administrative validity of the PID (its expiry date) from the technical validity of the credential. Whether a PID past its expiry date is still acceptable is a decision of the relying service; the ICS item RP.P.11 declares it. A PID whose expiry date is not requested never reaches the Relying Party, since the Conformance Wallet discloses only the requested attributes.',
+      'The PID Rulebook distinguishes the administrative validity of the PID (its expiry date) from the technical validity of the credential. Whether a PID past its expiry date is still acceptable is a decision of the relying service; the ICS item RP.P.12 declares it. A PID whose expiry date is not requested never reaches the Relying Party, since the Conformance Wallet discloses only the requested attributes.',
       comments.flow,
     ],
   });

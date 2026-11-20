@@ -41,7 +41,7 @@ const MIB = 1024 * 1024;
 
 /**
  * The `response` parameter with a robustness fault, or undefined for another fault. `valid` encrypts a payload as the
- * valid response does; `maxResponseBytes` is the maximum response size the Relying Party declares (ICS RP.P.10).
+ * valid response does; `maxResponseBytes` is the maximum response size the Relying Party declares (ICS RP.P.11).
  */
 export async function robustResponse(
   fault: FaultId | undefined,

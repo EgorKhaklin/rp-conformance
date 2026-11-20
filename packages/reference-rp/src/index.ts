@@ -51,14 +51,15 @@ export interface ReferenceRpOptions extends ServerOptions {
   allowInsecureUrls?: boolean;
   /** The grace period `G` after the `NextUpdate` of a trust list (ICS RP.T.2), milliseconds; default 0. */
   graceMs?: number;
-  /** The maximum size of an Authorization Response (ICS RP.P.10), bytes; a larger request body is refused with 413. */
+  /** The maximum size of an Authorization Response (ICS RP.P.11), bytes; a larger request body is refused with 413. */
   maxResponseBytes?: number;
   /** Cache Status List Tokens for their `ttl` (ICS RP.R.5). */
   cacheStatusLists?: boolean;
   /** Timeout of a status list or identifier list retrieval (ICS RP.R.6), milliseconds; default 5000. */
-  statusTimeoutMs?: number;  /** Freshness policy for Status List Tokens (ICS RP.R.7, RP.R.8). */
+  statusTimeoutMs?: number;
+  /** Freshness policy for Status List Tokens (ICS RP.R.7, RP.R.8). */
   statusListFreshness?: StatusListFreshness;
-  /** Reject a PID whose administrative expiry date has passed (ICS RP.P.11). */
+  /** Reject a PID whose administrative expiry date has passed (ICS RP.P.12). */
   rejectPastExpiryDate?: boolean;
 }
 

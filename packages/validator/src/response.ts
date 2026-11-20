@@ -15,7 +15,7 @@ export interface ResponseValidationOptions {
   /** `state` of the request, if any. */
   state?: string;
   mode?: ValidationMode;
-  /** The maximum size of the `response` parameter the Relying Party accepts (ICS RP.P.10), bytes; default unlimited. */
+  /** The maximum size of the `response` parameter the Relying Party accepts (ICS RP.P.11), bytes; default unlimited. */
   maxResponseBytes?: number;
 }
 

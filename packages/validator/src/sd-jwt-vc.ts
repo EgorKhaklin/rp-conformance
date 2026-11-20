@@ -52,7 +52,7 @@ export interface SdJwtVcValidationOptions {
   now?: Date;
   /** Freshness policy for Status List Tokens (ICS RP.R.7, RP.R.8). */
   statusListFreshness?: StatusListFreshness;
-  /** Reject a PID whose administrative expiry date has passed (ICS RP.P.11 Reject). */
+  /** Reject a PID whose administrative expiry date has passed (ICS RP.P.12 Reject). */
   rejectPastExpiryDate?: boolean;
 }
 
@@ -147,7 +147,7 @@ export async function validateSdJwtVcPresentation(presentation: string, options:
       if (typeof payload.exp === 'number' && nowSeconds > payload.exp + skew) fail(`expired: exp ${payload.exp}, now ${nowSeconds}, T_skew ${skew}`);
       if (typeof payload.nbf === 'number' && nowSeconds < payload.nbf - skew) fail(`not yet valid: nbf ${payload.nbf}, now ${nowSeconds}, T_skew ${skew}`);
       // A credential iat in the future is recorded only (catalogue decision 5).
-      // RP_WS_SM_Validity_020: the administrative expiry date of a PID, under the policy of ICS RP.P.11.
+      // RP_WS_SM_Validity_020: the administrative expiry date of a PID, under the policy of ICS RP.P.12.
       const expiry = claims?.date_of_expiry;
       if (options.rejectPastExpiryDate && typeof expiry === 'string' && expiry < now.toISOString().slice(0, 10)) fail(`the administrative expiry date ${expiry} has passed`);
       if (typeof payload.iat === 'number' && payload.iat > nowSeconds + skew) return `iat ${payload.iat} lies in the future (informative)`;

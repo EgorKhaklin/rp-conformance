@@ -156,7 +156,7 @@ export const definitions = [
     ...formatNeutral,
     steps: [step({ ...responseFault('response.oversized'), expect: rej() }), stillAvailable(sdJwtVc)],
     comments: [
-      'The maximum response size is the value the Relying Party declares in its ICS (RP.P.10). The padding is a member of the encrypted payload, so a Relying Party without a size limit decrypts the response and accepts it.',
+      'The maximum response size is the value the Relying Party declares in its ICS (RP.P.11). The padding is a member of the encrypted payload, so a Relying Party without a size limit decrypts the response and accepts it.',
       AVAILABLE,
       comments.encryptionFormat,
       comments.flow,

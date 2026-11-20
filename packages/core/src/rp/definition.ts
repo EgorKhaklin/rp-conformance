@@ -245,7 +245,7 @@ export type InformativeExpectationCode = 'INFO';
 /**
  * The ICS declaration a `POLICY` expectation is compared with: `RP.R.3`, the meaning the Relying Party assigns to an
  * application-specific status value; `RP.R.7`, the maximum age of a Status List Token, for a token `ageSeconds` old;
- * `RP.R.8`, whether it refuses a Status List Token issued in the future; `RP.P.11`, its policy for a PID whose
+ * `RP.R.8`, whether it refuses a Status List Token issued in the future; `RP.P.12`, its policy for a PID whose
  * administrative expiry date has passed.
  */
 export type PolicyReference =
@@ -256,7 +256,7 @@ export type PolicyReference =
     }
   | { item: 'RP.R.7'; ageSeconds: number }
   | { item: 'RP.R.8' }
-  | { item: 'RP.P.11' };
+  | { item: 'RP.P.12' };
 
 /** An expected result of an RP test case. */
 export interface Expectation extends ExpectationOf<ExpectationCode> {

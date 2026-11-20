@@ -93,7 +93,7 @@ export interface ResponseOptions {
   /** `T_skew` and `T_kb`, seconds, for the KB-JWT time faults; default 0 and 300. */
   skewSeconds?: number;
   kbMaxAgeSeconds?: number;
-  /** For `response.oversized`: the maximum response size the Relying Party declares (ICS RP.P.10), bytes. */
+  /** For `response.oversized`: the maximum response size the Relying Party declares (ICS RP.P.11), bytes. */
   maxResponseBytes?: number;
 }
 

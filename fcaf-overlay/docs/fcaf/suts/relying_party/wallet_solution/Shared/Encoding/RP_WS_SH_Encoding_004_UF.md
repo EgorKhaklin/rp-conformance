@@ -36,7 +36,7 @@ EUDI_generic | EUDI_required
 
 ## Comments
 
-The maximum response size is the value the Relying Party declares in its ICS (RP.P.10). The padding is a member of the encrypted payload, so a Relying Party without a size limit decrypts the response and accepts it.
+The maximum response size is the value the Relying Party declares in its ICS (RP.P.11). The padding is a member of the encrypted payload, so a Relying Party without a size limit decrypts the response and accepts it.
 
 The last step shows that the Relying Party stays available: a Relying Party that crashed or exhausted its resources on the previous step cannot accept it.
 

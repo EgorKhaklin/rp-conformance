@@ -431,7 +431,7 @@ export interface ResponseInput {
   walletKey: EcKeyPair;
   /** For `response.other-transaction-key`: the encryption key recorded for another transaction. */
   otherTransactionKey?: JWK;
-  /** For `response.oversized`: the maximum response size the Relying Party declares (ICS RP.P.10), bytes. */
+  /** For `response.oversized`: the maximum response size the Relying Party declares (ICS RP.P.11), bytes. */
   maxResponseBytes?: number;
 }
 

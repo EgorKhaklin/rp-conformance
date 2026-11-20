@@ -394,7 +394,7 @@ Certificate path, both formats:
 | `RP_WS_SM_Validity_010_UF` | Expired mdoc is rejected. | `validUntil` = now − `T_skew` − 1 h | REJ | ISO/IEC 18013-5 §9.3.1 | MD | G/R |
 | `RP_WS_SM_Validity_011_UF` | Not yet valid mdoc is rejected. | `validFrom` = now + `T_skew` + 1 h | REJ | ISO/IEC 18013-5 §9.3.1 | MD | G/R |
 | `RP_WS_SM_Validity_012` | Passed `expectedUpdate` alone does not cause rejection. | `expectedUpdate` past, `validUntil` future | ACC | ISO/IEC 18013-5 §9.1.2.4 | MD | G/R |
-| `RP_WS_SM_Validity_020` | PID whose administrative expiry date has passed while the technical validity is fine is handled per declared policy, and the date is passed on. | PID rulebook expiry date seven days in the past, requested by the RP (`date_of_expiry`, mdoc `expiry_date`) | POLICY (ICS RP.P.11; accepted means the date is released) | PID rulebook; ARF §5 (administrative vs technical validity) | SD, MD | S/U |
+| `RP_WS_SM_Validity_020` | PID whose administrative expiry date has passed while the technical validity is fine is handled per declared policy, and the date is passed on. | PID rulebook expiry date seven days in the past, requested by the RP (`date_of_expiry`, mdoc `expiry_date`) | POLICY (ICS RP.P.12; accepted means the date is released) | PID rulebook; ARF §5 (administrative vs technical validity) | SD, MD | S/U |
 
 ##### RP_WS_SM_TrustMechanisms (trust anchor and its category)
 
