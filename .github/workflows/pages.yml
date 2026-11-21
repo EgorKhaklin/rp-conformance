@@ -8,7 +8,12 @@ on:
     paths: &site-paths
       - fcaf-overlay/docs/**
       - fcaf-overlay-issuer/docs/**
-      # The issuer suite's project documents on the site (scripts/site-project-pages.py).
+      # The project documents of both suites on the site (scripts/site-project-pages.py).
+      - rp-test-catalogue.md
+      - harness-design.md
+      - adapters/eudiplo/ics.yaml
+      - adapters/eudiplo/known-findings.yaml
+      - adapters/eudiplo/upstream-findings/**
       - issuer-test-catalogue.md
       - issuer-harness-design.md
       - adapters/issuer-eudiplo/README.md

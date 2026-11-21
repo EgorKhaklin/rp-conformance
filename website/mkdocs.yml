@@ -81,15 +81,24 @@ nav:
   - Home: index.md
   - Functional Conformance:
       - Roadmap: roadmap.md
-  # The issuer suite's project documents, copied by scripts/site-project-pages.py.
-  - Issuer suite:
-      - Overview: issuer/index.md
-      - Test catalogue: issuer/issuer-test-catalogue.md
-      - Harness design: issuer/issuer-harness-design.md
-      - EUDIPLO reference issuer:
-          - Adapter: issuer/eudiplo/index.md
-          - ICS: issuer/eudiplo/ics.md
-          - Known findings: issuer/eudiplo/known-findings.md
-          - Upstream findings: issuer/eudiplo/upstream-findings/index.md
+  # The project documents of both suites, copied by scripts/site-project-pages.py: the same pages for each.
+  - Test suites:
+      - Relying Party suite:
+          - Overview: rp/index.md
+          - Test catalogue: rp/rp-test-catalogue.md
+          - Harness design: rp/harness-design.md
+          - EUDIPLO reference verifier:
+              - ICS: rp/eudiplo/ics.md
+              - Known findings: rp/eudiplo/known-findings.md
+              - Upstream findings: rp/eudiplo/upstream-findings/index.md
+      - Issuer suite:
+          - Overview: issuer/index.md
+          - Test catalogue: issuer/issuer-test-catalogue.md
+          - Harness design: issuer/issuer-harness-design.md
+          - EUDIPLO reference issuer:
+              - Adapter: issuer/eudiplo/index.md
+              - ICS: issuer/eudiplo/ics.md
+              - Known findings: issuer/eudiplo/known-findings.md
+              - Upstream findings: issuer/eudiplo/upstream-findings/index.md
   - Repository: https://github.com/cre8/rp-conformance
   - Official FCAF: https://conformance.eudi.dev

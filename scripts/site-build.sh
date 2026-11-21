@@ -6,10 +6,10 @@
 #     or OVERLAY_DIR) and then the issuer overlay (fcaf-overlay-issuer/docs/fcaf, or ISSUER_OVERLAY_DIR) over the
 #     content,
 #  3. adds website/: the configuration, which inherits the FCAF one and replaces the European Commission's name,
-#     logo, navigation and copyright, the stylesheet that replaces its colours, the home page, the issuer suite page
-#     and the "unofficial" banner,
-#  4. adds the issuer suite's project documents (scripts/site-project-pages.py): the issuer catalogue, the issuer
-#     harness design, and the EUDIPLO issuer adapter's README, ICS, known findings and upstream finding texts,
+#     logo, navigation and copyright, the stylesheet that replaces its colours, the home page, the overview page of
+#     each suite and the "unofficial" banner,
+#  4. adds the project documents of both suites (scripts/site-project-pages.py): the test catalogue, the harness
+#     design, and the EUDIPLO adapter's README, ICS, known findings and upstream finding texts,
 #  5. runs MkDocs (website/requirements.txt) into <work-dir>/public, or serves the site with SITE_SERVE=1.
 #
 #   scripts/site-build.sh [work-dir]
@@ -38,7 +38,8 @@ cp -R "$root/website/overrides/." "$compose/overrides/"
 cp "$root/website/rp.css" "$compose/docs/media/css/rp.css"
 # The home page of this site replaces the FCAF one.
 sed "s/@FCAF_SUBMITTED@/${SUBMITTED:0:7}/g" "$root/website/index.md" > "$compose/docs/index.md"
-mkdir -p "$compose/docs/issuer"
+mkdir -p "$compose/docs/rp" "$compose/docs/issuer"
+cp "$root/website/rp.md" "$compose/docs/rp/index.md"
 cp "$root/website/issuer.md" "$compose/docs/issuer/index.md"
 python3 "$root/scripts/site-project-pages.py" "$root" "$compose/docs"
 
