@@ -506,6 +506,8 @@ These objectives check what the RP catalogue's `RP_PP_*` tests assume the Provid
 
 Every `PP_*` objective not marked **PID only** applies to `AP_*` with the same number and the category variants `Q`, `PB`, `E`. For non-qualified EAAs, which revocation method and which anchor apply follow the rulebook (VCR_02, ARB_26). The objectives below apply to Attestation Providers only.
 
+Implementation (issue 27). The `AP_*` variants are derived from the `PP_*` definitions: same steps, faults and expected results, with the Provider enrolled as `QP-T`, `PB-T` or `EP-T` and FCAF `default_credential_A` as its attestation. Two expected results change with the category: `ClientAttestation_013_UF` and `KeyAttestation_009_UF` expect `POLICY` (ICS-18) instead of `REJ`, and `SM_Revocation_008` compares the values of `default_credential_A`. A Provider of several categories answers the ICS once per category; each category runs against its own instance. A configuration that is not device-bound is named in the ICS under `ICS-04.NDB.SD`. `AP_WS_SM_Revocation_100` applies to every Attestation Provider: its `POLICY` (ICS-07) covers both answers, so `P-CHAIN` is not a condition of it.
+
 ##### AP_WS_MS_Metadata
 
 | ID | Objective | Stimulus | Expected | References | Var | Rel |
@@ -528,7 +530,7 @@ Every `PP_*` objective not marked **PID only** applies to `AP_*` with the same n
 
 | ID | Objective | Stimulus | Expected | References | Var | Rel |
 | --- | --- | --- | --- | --- | --- | --- |
-| `AP_WS_SM_Revocation_100` | Revocation chaining follows the published policy: revoked within `T_chain` if it chains, unchanged if it does not. | TWP revokes Wallet Instance | POLICY (ICS-07) | WURevocation_19; VCR_07d | `P-CHAIN` | S/O |
+| `AP_WS_SM_Revocation_100` | Revocation chaining follows the published policy: revoked within `T_chain` if it chains, unchanged if it does not. | TWP revokes Wallet Instance | POLICY (ICS-07) | WURevocation_19; VCR_07d | | S/O |
 | `AP_WS_SM_Revocation_101` | When the Provider chains, the attestation's expiry is no later than the end of the WIA's and KA's maintenance period. | Short maintenance period | CONF | ISSU_12d | `P-CHAIN` | S/R |
 | `AP_WS_SM_Revocation_102` | A change to the embedded disclosure policy revokes the attestations issued under the old one. | Adapter changes the EDP | REVOKED(`T_rev`) | EDP_11 | `P-EDP` | S/R |
 | `AP_WS_SM_Revocation_103` | A non-qualified EAA follows the revocation method its rulebook prescribes. | `SCN-I`, inspect | CONF | VCR_02 | `E` | S/R |
@@ -766,6 +768,7 @@ upstream texts are in `adapters/issuer-eudiplo/upstream-findings/`.
 | `SM_IssuerIntegrity_006` | A SD-JWT VC salt below 128 bits is recorded, not failed; uniqueness still fails. | RFC 9901 section 9.3: 128 bits RECOMMENDED; ISSU_35 is about uniqueness. |
 | `PP_Inf_SM_TrustMechanisms_004_UF` | Steps 2 and 4 are `POLICY` (new ICS-15.invalid_version: `keep` gives `ISS`, `discard` `REJ`). | No specification requires a last-known-good list; fail-closed conforms. The EUDIPLO adapter's `refreshTrust` empties the cache itself. |
 | `SM_ClientAttestation_015`, `SM_KeyAttestation_011` | Stimulus 31 days instead of 30; references TS3 section 2.4.3. | TS3 section 2.4.2 guarantees a Wallet Unit can present at least 31 days; 30 days was below that guarantee. |
+| `AP_WS_SM_Revocation_101` | Stimulus 31 days instead of 30, as `SM_ClientAttestation_015` and `SM_KeyAttestation_011`. | TS3 section 2.4.2, as above. The other `AP_*` variants of the test cases in this table take the change from the `PP_*` definition. |
 | `SM_ClientAttestation_016_UF` | References TS3 section 2.4.3 and ISSU_12c; WUA_32 dropped. | WUA_32 is about communicating a minimum period, not about the PID's expiry. |
 | `SH_Encoding_004_UF` | Steps 5 and 6 put the private address in a top-level `status` (before TS3 1.5), recorded as INFO. | Steps 3 and 4 use the TS3 1.5 claims; a Provider that reads only the earlier claim never reads the address there, so they say nothing about request forgery. |
 | `DM_PidMdoc_002`, `SM_IssuerIntegrity_005` | References: PID Rulebook v1.7 section 3.1.2 (not "4.2"), ISO/IEC 18013-5 not verified; PID_21 is the SHALL, RFC 9901 section 4.2.2 only permits array element disclosures; ARB_30 dropped. | EUDI profile requirements. |

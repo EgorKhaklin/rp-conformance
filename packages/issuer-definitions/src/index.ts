@@ -32,17 +32,19 @@ import { definitions as trustMechanisms } from './pid_provider_inf/SecurityMecha
 // Issue 20: authorization code and pre-authorized code
 import { definitions as authorizationCode } from './pid_provider/Interaction/AuthorizationCode';
 import { definitions as preAuthorized } from './pid_provider/Interaction/PreAuthorized';
+// Issue 27: the Attestation Provider: category variants of the PP_* test cases and the AP_* objectives from 100.
+import { attestationVariants } from './attestation_provider/variants';
+import { definitions as attestationObjectives } from './attestation_provider/objectives';
 
 export * from './wording';
 export * from './status';
 // Issue 26
 export * from './inspection';
+// Issue 27
+export { isPidOnly, PID_ONLY } from './attestation_provider/variants';
 
-/**
- * Every issuer test definition (issuer harness design section 6.1), one per test case and variant: the source of truth
- * for the issuer test cases, as `@rp-conformance/definitions` is for the RP ones. Areas append their definitions here.
- */
-export const issuerDefinitions: IssuerTestCaseDefinition[] = [
+/** The PID Provider's definitions (`PP_*`); areas append theirs here. */
+const pidProviderDefinitions: IssuerTestCaseDefinition[] = [
   ...mainInteraction,
   // Issue 25
   ...tokenBinding,
@@ -78,6 +80,13 @@ export const issuerDefinitions: IssuerTestCaseDefinition[] = [
   ...preAuthorized,
   ...authorizationCode,
 ];
+
+/**
+ * Every issuer test definition (issuer harness design section 6.1), one per test case and variant: the source of truth
+ * for the issuer test cases. Issue 27: the PID Provider's, their category variants `Q`, `PB`, `E` for an Attestation
+ * Provider, and the `AP_*` objectives from 100.
+ */
+export const issuerDefinitions: IssuerTestCaseDefinition[] = [...pidProviderDefinitions, ...attestationVariants(pidProviderDefinitions), ...attestationObjectives];
 
 /** The issuer definitions the harness can execute. */
 export const executableIssuerDefinitions = issuerDefinitions.filter(isExecutable);

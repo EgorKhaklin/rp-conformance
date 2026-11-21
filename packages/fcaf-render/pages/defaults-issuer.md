@@ -1,6 +1,6 @@
 ## PID Provider testing
 
-The following items apply when the System Under Test is a PID Provider: its Credential Issuer and Authorization Server, the credentials it signs and the status information it publishes. They are those of the [Issuer catalogue] section 3. The test environment reuses the controlled trust infrastructure of [Relying Party testing](#relying-party-testing) and adds a Wallet Provider of its own, so that the Provider faces Wallet Units whose every attestation the test environment controls.
+The following items apply when the System Under Test is a PID Provider or an Attestation Provider: its Credential Issuer and Authorization Server, the credentials it signs and the status information it publishes. They are those of the [Issuer catalogue] section 3. The test environment reuses the controlled trust infrastructure of [Relying Party testing](#relying-party-testing) and adds a Wallet Provider of its own, so that the Provider faces Wallet Units whose every attestation the test environment controls.
 
 ### Provider test roles
 
@@ -21,6 +21,7 @@ The Provider is configured with the scheme operator certificates of the test lis
 | --- | --- |
 | `TL-WP` | Wallet Provider list of trusted entities. `WP-A`: granted, with separate CAs for WIA and KA signing and for their status lists. `WP-B`: a second granted Wallet Provider. `WP-W`: withdrawn. |
 | `TL-PID` | Contains the Provider as `PP-T`: its issuance CA and its revocation CA, as certified by the Test Registrar. Also `PP-A`, another PID Provider, used as a wrong anchor for WIAs and KAs. |
+| `TL-QEAA`, `TL-PUB`, `TA-EAA` | Contain an Attestation Provider for its category: `QP-T` with a granted qualified EAA service on `TL-QEAA` (the Trusted List the LOTL points to), `PB-T` on `TL-PUB`, or `EP-T` under the anchor `CA-EP-T` that the rulebook of its attestation defines. |
 | `TL-AC`, `TL-RC` | `AC-A` and `RC-A`, which issued the Provider's access and registration certificates. |
 | `CA-X` | Self-signed CA on no list. |
 
@@ -33,14 +34,14 @@ A WIA or KA is trusted only if it validates to an anchor that `TL-WP` publishes 
 | `CW-1` | Wallet Unit of `WP-A`: a WIA with a fresh `cnf` key, not revoked, with a revocation maintenance period of more than one year; a KA with `key_storage` and `user_authentication` `iso_18045_high`, as many `attested_keys` as the batch size, not revoked, with the same maintenance period. |
 | `CW-2` | A second, independent Wallet Unit of `WP-A`. |
 | `CW-B` | A Wallet Unit of `WP-B`. |
-| `SUBJ-1` | Test subject whose attributes the adapter seeds or knows (ICS-17). The Conformance Wallet compares every issued value with them. |
+| `SUBJ-1` | Test subject whose attributes the adapter seeds or knows (ICS-17). The Conformance Wallet compares every issued value with them. For an Attestation Provider, the attributes of `default_credential_A`. |
 | `SUBJ-2` | `SUBJ-1` with one attribute changed. |
 
 ### `default_configuration_PP_1`
 
 | Property | Setting, contents, or value |
 | --- | --- |
-| Enrolment | Before the first test, the Provider generates its keys and the Test Registrar certifies them from CSRs: the credential signing certificates under the Provider's issuance CA in `TL-PID` (`PP-T`), the status list signing certificate under its revocation CA, the access certificate from `AC-A` and the registration certificate from `RC-A`, with `providesAttestations` listing every credential type the Provider offers. |
+| Enrolment | Before the first test, the Provider generates its keys and the Test Registrar certifies them from CSRs: the credential signing certificates under the Provider's issuance CA in `TL-PID` (`PP-T`), or for an Attestation Provider under that of its category (`QP-T`, `PB-T`, `EP-T`), the status list signing certificate under its revocation CA, the access certificate from `AC-A` and the registration certificate from `RC-A`, with `providesAttestations` listing every credential type the Provider offers. |
 | Service | One registered service, with the certificates of the enrolment. The metadata offers every credential configuration declared in the ICS. |
 | Trust | The Provider trusts only `TL-WP` for Wallet Providers and has refreshed it before the test. |
 | Offers | The adapter can create a credential offer for `SUBJ-1` and a configuration, by value or by reference, for each grant the ICS declares. For the authorization code flow it completes the User's authentication for `SUBJ-1` without a human. |

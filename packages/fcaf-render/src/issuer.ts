@@ -6,19 +6,44 @@ import { parseIssuerTestCaseId, variantOf, type IssuerTestCaseDefinition } from 
 
 /** The directory of the PID Provider SUT below `docs/fcaf`. */
 export const PID_PROVIDER_DIR = 'suts/pid_provider';
+/** Issue 27: the directory of the Attestation Provider SUT below `docs/fcaf` (issuer harness design section 10, I4). */
+export const ATTESTATION_PROVIDER_DIR = 'suts/attestation_provider';
 
-/** Class directories below the PID Provider SUT. `AP_*` (issuer harness design section 10, I4) gets its own SUT. */
-export const ISSUER_CLASS_DIR: Record<string, string> = { PP_WS: 'wallet_solution', PP_RP: 'relying_party', PP_Inf: 'infrastructure' };
+/** The SUTs of the issuer overlay: their directory, title and the prefix of their classes. */
+export const ISSUER_SUTS = [
+  { prefix: 'PP', dir: PID_PROVIDER_DIR, title: 'PID Provider (SUT)', page: 'pid-provider.md' },
+  { prefix: 'AP', dir: ATTESTATION_PROVIDER_DIR, title: 'Attestation Provider (SUT)', page: 'attestation-provider.md' },
+] as const;
+
+/** The SUT directory of a class: `PP_*` the PID Provider, `AP_*` the Attestation Provider. */
+export const sutDirOf = (sutClass: string) => (sutClass.startsWith('AP_') ? ATTESTATION_PROVIDER_DIR : PID_PROVIDER_DIR);
+
+/** Class directories below each Provider SUT. */
+export const ISSUER_CLASS_DIR: Record<string, string> = {
+  PP_WS: 'wallet_solution',
+  PP_RP: 'relying_party',
+  PP_Inf: 'infrastructure',
+  // Issue 27
+  AP_WS: 'wallet_solution',
+  AP_RP: 'relying_party',
+  AP_Inf: 'infrastructure',
+};
 export const ISSUER_CLASS_TITLE: Record<string, string> = {
   PP_WS: 'PID Provider - Wallet Solution',
   PP_RP: 'PID Provider - Relying Party',
   PP_Inf: 'PID Provider - Trust Infrastructure',
+  AP_WS: 'Attestation Provider - Wallet Solution',
+  AP_RP: 'Attestation Provider - Relying Party',
+  AP_Inf: 'Attestation Provider - Trust Infrastructure',
 };
 /** Navigation label and overview page of each class, as the RP overlay names its classes. */
 export const ISSUER_CLASS_NAV: Record<string, { label: string; overview: string }> = {
   PP_WS: { label: '(pp_ws) Wallet Solution', overview: 'pp_ws.md' },
   PP_RP: { label: '(pp_rp) Relying Party', overview: 'pp_rp.md' },
   PP_Inf: { label: '(pp_inf) Trust Infrastructure', overview: 'pp_inf.md' },
+  AP_WS: { label: '(ap_ws) Wallet Solution', overview: 'ap_ws.md' },
+  AP_RP: { label: '(ap_rp) Relying Party', overview: 'ap_rp.md' },
+  AP_Inf: { label: '(ap_inf) Trust Infrastructure', overview: 'ap_inf.md' },
 };
 
 /** Layers of the issuer catalogue section 2.1, which follow the FCAF. */
@@ -32,6 +57,8 @@ const ISSUER_AREA_TITLE: Record<string, string> = {
   Portrait: 'PID portrait',
   PreAuthorized: 'Pre-Authorized Code',
   ProofOfPossession: 'Proof of Possession',
+  // Issue 27
+  Rulebook: 'Rulebook of the attestation',
 };
 
 /** The title of an area: `ClientAttestation` is "Client Attestation", unless `ISSUER_AREA_TITLE` names it. */
@@ -41,10 +68,10 @@ export function issuerAreaTitle(area: string): string {
 
 /** Path of an issuer test case below the overlay root `docs/fcaf`. */
 export function issuerTestCasePath(id: string): string {
-  return `${PID_PROVIDER_DIR}/${issuerTestCasePathInSut(id)}`;
+  return `${sutDirOf(parseIssuerTestCaseId(id).sutClass)}/${issuerTestCasePathInSut(id)}`;
 }
 
-/** Path of an issuer test case below the PID Provider SUT directory. */
+/** Path of an issuer test case below its SUT directory. */
 export function issuerTestCasePathInSut(id: string): string {
   const { sutClass, layer, area } = parseIssuerTestCaseId(id);
   const classDir = ISSUER_CLASS_DIR[sutClass];

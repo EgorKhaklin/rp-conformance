@@ -227,6 +227,40 @@ server's `token.lifetimeSeconds` to EUDIPLO's minimum of 60 s (ICS-14.access_tok
 `PP_WS_IA_Batch_006` runs in the authorization code flow (issue 20) and passes: one authorization gives the batch.
 Not applicable against EUDIPLO: `PP_WS_SM_TokenBinding_006_UF` (no DPoP server nonce).
 
+## EUDIPLO as Attestation Provider (issue 27)
+
+The `categories` of [`ics.yaml`](ics.yaml) declare three more Provider instances of the same image, one tenant each, which
+the runner sets up and tests in parallel with the PID Provider: a QEAA Provider (`Q`, enrolled as `QP-T` with a granted
+qualified EAA service on `TL-QEAA`), a PuB-EAA Provider (`PB`, `PB-T` on `TL-PUB`) and a non-qualified EAA Provider
+(`E`, `EP-T` under the rulebook anchor `CA-EP-T`). Each issues FCAF `default_credential_A`
+(`vct` `urn:rp-conformance:credential_a:1`, doctype `test.rp-conformance.credential_a.1`) in the same configurations as
+the PID (`ICS-02.SD`, `.MD`, `.second`, `ICS-05.short.*`), plus one SD-JWT VC configuration that is not device-bound
+(`ICS-04.NDB.SD`, `keyBinding: false`). The device-bound ones require `iso_18045_moderate` or `iso_18045_high`
+(ICS-04), so `AP_WS_SM_KeyAttestation_101_UF` runs with `basic`. The QEAA and PuB-EAA tenants chain revocation
+(`revokeWithWalletUnit`, ICS-07 Yes), the non-qualified EAA tenant does not (ICS-07 No), so `AP_WS_SM_Revocation_100`
+sees both answers of its `POLICY`. Every tenant rejects an unobtainable WIA or KA status (`strict`, ICS-18 reject). The
+QEAA tenant publishes an embedded disclosure policy (`embeddedDisclosurePolicy`, ICS-19 `P-EDP`), which
+`changeDisclosurePolicy` changes with `PATCH /api/issuer/credentials/{id}`.
+
+The `AP_*` variants of `PP_*` test cases fail where the `PP_*` test case fails, for the same reason: EUDIPLO's behaviour
+does not depend on the credential type. [`known-findings.yaml`](known-findings.yaml) lists them in its Attestation
+Provider block, each naming the finding it repeats and with its basis; the `AP_*` variants of the `PP_*` findings that
+the spec review of 2026-11-20 removed are gone with them, and `AP_WS_SM_Revocation_101` uses the 31-day stimulus of
+`PP_WS_SM_ClientAttestation_015`. Two findings are new (`basis: profile`; they were not part of the review):
+
+| Behaviour | Test cases |
+| --- | --- |
+| A configuration with `keyBinding: false` is published with `cryptographic_binding_methods_supported` and proof types, and a credential request without `proofs` is rejected (`invalid_proof`), though the credential is issued without `cnf` ([`key-binding-false.md`](upstream-findings/key-binding-false.md)) | `AP_WS_MS_Metadata_008`, `_100`, `_101`; `AP_WS_SM_KeyAttestation_102`, `_103` (`Q`, `PB`, `E`) |
+| Changing the embedded disclosure policy leaves the attestations issued under the old one valid, EDP_11 ([`disclosure-policy-change.md`](upstream-findings/disclosure-policy-change.md)) | `AP_WS_SM_Revocation_102` (`Q`) |
+
+Not applicable against EUDIPLO, with the reason in the report: `AP_WS_MS_Metadata_102` and `AP_WS_SM_Revocation_102` in
+`PB` and `E` (no embedded disclosure policy configured there, ICS-19), `AP_WS_SM_Revocation_101` in `E` (no chaining),
+and the `AP_*` variants of the `PP_*` test cases that are not applicable to the PID Provider (`P-IL`, DPoP server nonce).
+
+`POST /api/session/revoke` sometimes answers HTTP 503 "Could not generate current tokens for status list" when several
+lifecycle test cases of one tenant change the same status list at once; the adapter's `setStatus` repeats the call, and
+accepts a credential that already has the new status.
+
 ## Authorization code flow with a scripted login (option, not used)
 
 Issue 20 chose the built-in authorization server (see "The authorization code flow" above). A chained server with a

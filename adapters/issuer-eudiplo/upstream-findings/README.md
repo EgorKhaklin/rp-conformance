@@ -24,6 +24,10 @@ Checked against `ghcr.io/eudiplo/eudiplo@sha256:1a1f53b77b69cfeaf573f6950de6a709
 | [maintenance-period.md](maintenance-period.md) | profile (TS3 1.5 §2.4.3, ISSU_12c) | `PP_WS_SM_ClientAttestation_016_UF` |
 | [mdoc-full-date.md](mdoc-full-date.md) | profile (PID Rulebook v1.7 §3.1.2, PID_09) | `PP_WS_DM_PidMdoc_002` |
 | [sd-jwt-array-element-disclosure.md](sd-jwt-array-element-disclosure.md) | profile (PID_21) | `PP_WS_SM_IssuerIntegrity_005` |
+| [key-binding-false.md](key-binding-false.md) | profile (ARF WUA_10a; issue 27, not part of the review) | `AP_WS_MS_Metadata_008`, `_100`, `_101`, `AP_WS_SM_KeyAttestation_102`, `_103` |
+| [disclosure-policy-change.md](disclosure-policy-change.md) | profile (ARF EDP_11; issue 27, not part of the review) | `AP_WS_SM_Revocation_102` |
+
+The `AP_*` variants of the `PP_*` test cases above (issue 27) share their text and basis.
 
 Suggestions and questions (not conformance findings, no FAIL in the suite):
 

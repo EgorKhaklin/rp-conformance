@@ -13,13 +13,16 @@ import {
   ISSUER_LAYER_TITLE,
   issuerAreaTitle,
   issuerTestCasePath,
-  PID_PROVIDER_DIR,
+  ISSUER_SUTS,
   renderIssuerTestCase,
+  sutDirOf,
 } from './issuer';
 
 /** The hand-written pages of the PID Provider SUT (pages/). */
 export interface IssuerPages {
   pidProvider: string;
+  /** Issue 27: the overview of the Attestation Provider SUT. */
+  attestationProvider: string;
   classOverview: Record<string, string>;
   defaults: string;
   ics: string;
@@ -34,6 +37,7 @@ export async function loadIssuerPages(): Promise<IssuerPages> {
   for (const [sutClass, { overview }] of Object.entries(ISSUER_CLASS_NAV)) classOverview[sutClass] = await read(`pages/${overview}`);
   return {
     pidProvider: await read('pages/pid-provider.md'),
+    attestationProvider: await read('pages/attestation-provider.md'),
     classOverview,
     defaults: await read('pages/defaults-issuer.md'),
     ics: await read('pages/ics-issuer.md'),
@@ -89,12 +93,15 @@ export function renderIssuerIcs(intro: string, technology: string[]): string {
   ].join('\n\n');
 }
 
-/** The navigation of the PID Provider SUT, below `Test Suites by SUTs`. */
+/** The navigation of the PID Provider and Attestation Provider SUTs, below `Test Suites by SUTs`. */
 function issuerNav(): string {
-  const lines = ['      - PID Provider (SUT):', `          - Overview: ${PID_PROVIDER_DIR}/index.md`, '          - Test Classes:'];
-  for (const [sutClass, { label, overview }] of Object.entries(ISSUER_CLASS_NAV)) {
-    const dir = `${PID_PROVIDER_DIR}/${ISSUER_CLASS_DIR[sutClass]}`;
-    lines.push(`              - ${label}:`, `                  - Overview: ${dir}/${overview}`, `                  - Test cases: ${dir}/test-cases.md`);
+  const lines: string[] = [];
+  for (const sut of ISSUER_SUTS) {
+    lines.push(`      - ${sut.title}:`, `          - Overview: ${sut.dir}/index.md`, '          - Test Classes:');
+    for (const [sutClass, { label, overview }] of Object.entries(ISSUER_CLASS_NAV).filter(([c]) => c.startsWith(`${sut.prefix}_`))) {
+      const dir = `${sut.dir}/${ISSUER_CLASS_DIR[sutClass]}`;
+      lines.push(`              - ${label}:`, `                  - Overview: ${dir}/${overview}`, `                  - Test cases: ${dir}/test-cases.md`);
+    }
   }
   return `${lines.join('\n')}\n`;
 }
@@ -123,9 +130,9 @@ export function renderIssuerOverlay(definitions: IssuerTestCaseDefinition[], rp:
   const unknownClass = ids.filter((id) => !ISSUER_CLASS_DIR[parseIssuerTestCaseId(id).sutClass]);
   if (unknownClass.length) throw new Error(`no SUT directory for ${unknownClass.join(', ')}`);
 
-  write(`${PID_PROVIDER_DIR}/index.md`, pages.pidProvider);
+  for (const sut of ISSUER_SUTS) write(`${sut.dir}/index.md`, sut.prefix === 'PP' ? pages.pidProvider : pages.attestationProvider);
   for (const [sutClass, classDir] of Object.entries(ISSUER_CLASS_DIR)) {
-    const dir = `${PID_PROVIDER_DIR}/${classDir}`;
+    const dir = `${sutDirOf(sutClass)}/${classDir}`;
     write(`${dir}/${ISSUER_CLASS_NAV[sutClass].overview}`, pages.classOverview[sutClass]);
     const mine = ids.filter((id) => parseIssuerTestCaseId(id).sutClass === sutClass).map(parseIssuerTestCaseId);
     write(
@@ -150,14 +157,14 @@ export function renderIssuerOverlay(definitions: IssuerTestCaseDefinition[], rp:
   write('defaults.md', `${trimNewlines(fromRp('defaults.md'))}\n\n${pages.defaults}`);
   write('references.md', `${trimNewlines(fromRp('references.md'))}\n${pages.references}`);
   let nav = insertAt(fromRp('.nav.yml'), '      - Shared: suts/shared/index.md\n', issuerNav(), 'before');
-  nav = insertAt(nav, '  - ICS (Relying Party): ics-rp.md\n', '  - ICS (PID Provider): ics-issuer.md\n', 'after');
+  nav = insertAt(nav, '  - ICS (Relying Party): ics-rp.md\n', '  - ICS (PID and Attestation Provider): ics-issuer.md\n', 'after');
   write('.nav.yml', nav);
   write(
     'suts/index.md',
     insertAt(
       fromRp('suts/index.md'),
       '(relying_party/index.md).\n',
-      '\nA draft **PID Provider** SUT is defined in addition: see [PID Provider (SUT)](pid_provider/index.md).\n',
+      '\nDraft **PID Provider** and **Attestation Provider** SUTs are defined in addition: see [PID Provider (SUT)](pid_provider/index.md) and [Attestation Provider (SUT)](attestation_provider/index.md).\n',
       'after',
     ),
   );

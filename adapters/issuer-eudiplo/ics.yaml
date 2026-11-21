@@ -1,5 +1,6 @@
-# Implementation Conformance Statement of EUDIPLO as PID Provider (issuer test catalogue section 4), as the EUDIPLO
-# issuer adapter configures the reference image pinned in reference.env (main image 9.1.0-main.ae0792a, by digest).
+# Implementation Conformance Statement of EUDIPLO as PID Provider and, under `categories` (issue 27), as Attestation
+# Provider (issuer test catalogue section 4), as the EUDIPLO issuer adapter configures the reference image pinned in
+# reference.env (main image 9.1.0-main.ae0792a, by digest).
 # `profiles` are the profiles the answers select; `items` the declared values, keyed by ICS item or `<item>.<name>`
 # (IssuerIcs). "live" marks a value checked against the running pinned image by the adapter's integration test or by a
 # call to its API; "source" one read from EUDIPLO at revision ae0792a (apps/backend/src/..., apps/docs/docs/...) that
@@ -76,3 +77,63 @@ items:
   ICS-17.portrait_opt_out: "No"              # the PID configurations have no portrait; inline claims cannot carry the empty bstr an mdoc needs (DM_Portrait_001 NOT APPLICABLE)
   ICS-18: reject                             # live: walletAttestationStatusCheckMode strict (read back by GET /api/issuer/config): a WIA or KA whose status list cannot be fetched, is unreadable, expired, or signed by another key is rejected (docs trust/attestation.md). As decision 2 requires of a PID Provider
   ICS-19: "No"                               # embeddedDisclosurePolicy not set
+
+# Issue 27: EUDIPLO as Attestation Provider. One tenant per category, each a Provider instance of its own, enrolled by
+# the Test Registrar as QP-T (TL-QEAA, granted qualified EAA service), PB-T (TL-PUB) or EP-T (rulebook anchor CA-EP-T),
+# issuing FCAF default_credential_A (vct urn:rp-conformance:credential_a:1, doctype test.rp-conformance.credential_a.1).
+# Each entry is the ICS of that instance: its profiles, and the items that differ from the PID Provider's above (the
+# others are the same, since the adapter configures every tenant alike). The runner executes the AP_* test cases of a
+# category against its instance, the categories in parallel.
+categories:
+  Q:
+    profiles: [P-Q, P-SD, P-MD, P-PA, P-AC, P-DB, P-NDB, P-REV, P-SHORT, P-SUSP, P-HOOK, P-CHAIN, P-BATCH, P-REISS, P-DEF, P-NOT, P-ENC, P-DPN, P-EDP]
+    items:
+      ICS-01: QEAA Provider                    # entity QP-T, granted EAA/Q service on TL-QEAA; rulebook FCAF default_credential_A
+      ICS-02: SD-JWT VC and mdoc
+      ICS-02.SD: qeaa-sd-jwt-vc                # default_credential_A, device-bound, 30 days with a status reference
+      ICS-02.MD: qeaa-mso-mdoc
+      ICS-02.second: qeaa-sd-jwt-vc-2
+      ICS-04: device-bound and not device-bound
+      ICS-04.NDB.SD: qeaa-sd-jwt-vc-ndb        # keyBinding false: no cryptographic binding, no proof type (P-NDB)
+      ICS-04.key_storage: [iso_18045_moderate, iso_18045_high]   # keyAttestationsRequired of the device-bound configurations
+      ICS-04.user_authentication: [iso_18045_moderate, iso_18045_high]
+      ICS-05.short.SD: qeaa-sd-jwt-vc-short
+      ICS-05.short.MD: qeaa-mso-mdoc-short
+      ICS-07: "Yes"                            # revokeWithWalletUnit true on the device-bound configurations with status (WURevocation_19)
+      ICS-17: seeds SUBJ-1 and SUBJ-2          # default_credential_A claims inline with each offer (ATTESTATION_TEST_SUBJECTS)
+      ICS-18: reject                           # walletAttestationStatusCheckMode strict
+      ICS-19: "Yes"                            # embeddedDisclosurePolicy allowList [https://rp.rp-test] on every configuration, published as disclosure_policy; changeDisclosurePolicy PATCHes another relying party
+  PB:
+    profiles: [P-PB, P-SD, P-MD, P-PA, P-AC, P-DB, P-NDB, P-REV, P-SHORT, P-SUSP, P-HOOK, P-CHAIN, P-BATCH, P-REISS, P-DEF, P-NOT, P-ENC, P-DPN]
+    items:
+      ICS-01: PuB-EAA Provider                 # entity PB-T on TL-PUB; rulebook FCAF default_credential_A
+      ICS-02: SD-JWT VC and mdoc
+      ICS-02.SD: pub-eaa-sd-jwt-vc
+      ICS-02.MD: pub-eaa-mso-mdoc
+      ICS-02.second: pub-eaa-sd-jwt-vc-2
+      ICS-04: device-bound and not device-bound
+      ICS-04.NDB.SD: pub-eaa-sd-jwt-vc-ndb
+      ICS-04.key_storage: [iso_18045_moderate, iso_18045_high]
+      ICS-04.user_authentication: [iso_18045_moderate, iso_18045_high]
+      ICS-05.short.SD: pub-eaa-sd-jwt-vc-short
+      ICS-05.short.MD: pub-eaa-mso-mdoc-short
+      ICS-07: "Yes"
+      ICS-17: seeds SUBJ-1 and SUBJ-2
+      ICS-18: reject
+  E:
+    profiles: [P-E, P-SD, P-MD, P-PA, P-AC, P-DB, P-NDB, P-REV, P-SHORT, P-SUSP, P-HOOK, P-BATCH, P-REISS, P-DEF, P-NOT, P-ENC, P-DPN]
+    items:
+      ICS-01: non-qualified EAA Provider       # entity EP-T under the rulebook anchor CA-EP-T (TA-EAA); rulebook FCAF default_credential_A
+      ICS-02: SD-JWT VC and mdoc
+      ICS-02.SD: eaa-sd-jwt-vc
+      ICS-02.MD: eaa-mso-mdoc
+      ICS-02.second: eaa-sd-jwt-vc-2
+      ICS-04: device-bound and not device-bound
+      ICS-04.NDB.SD: eaa-sd-jwt-vc-ndb
+      ICS-04.key_storage: [iso_18045_moderate, iso_18045_high]
+      ICS-04.user_authentication: [iso_18045_moderate, iso_18045_high]
+      ICS-05.short.SD: eaa-sd-jwt-vc-short
+      ICS-05.short.MD: eaa-mso-mdoc-short
+      ICS-07: "No"                             # revokeWithWalletUnit false: this instance does not chain (WURevocation_19 leaves it to the Provider)
+      ICS-17: seeds SUBJ-1 and SUBJ-2
+      ICS-18: reject

@@ -37,7 +37,7 @@ import type { AttestationState } from './attestations';
 import type { LifecycleState } from './status';
 import { type Evaluation, worst } from '../evaluate';
 import { evaluateIssuance } from './evaluate';
-import { type IssuerHarness, PID_TRUST_RULE } from './harness';
+import type { IssuerHarness } from './harness';
 import { issuerIcsValue, resolveConfigurations, usesTxCode } from './ics';
 import { type IssuedCredentialRecord, ISSUER_SKEW_SECONDS, type IssuerStepRecord, observationOf } from './runner';
 
@@ -416,8 +416,8 @@ async function validateSessionCredentials(evidence: SessionEvidence, ctx: Sessio
     const configuration = evidence.metadata?.result.credentialIssuer.credential_configurations_supported[issued.credentialConfigurationId] as { vct?: string } | undefined;
     const validation = await validateIssuedSdJwtVc(issued.credential, {
       trust,
-      trustRule: PID_TRUST_RULE,
-      issuerEntity: ctx.harness.enrolment?.entity ?? 'PP-T',
+      trustRule: ctx.harness.trustRule,
+      issuerEntity: ctx.harness.issuerName,
       expectedVct: configuration?.vct ? [configuration.vct] : [],
       proofKeys: issued.proofKeys.map((k) => k.publicJwk),
       keyAttestations: [issued.keyAttestation],

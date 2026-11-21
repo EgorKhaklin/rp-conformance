@@ -29,6 +29,26 @@ describe('ICS of EUDIPLO as PID Provider (pinned reference image)', () => {
   });
 });
 
+// Issue 27: EUDIPLO as Attestation Provider, one tenant per category.
+describe('ICS of EUDIPLO as Attestation Provider (categories)', () => {
+  it('declares a QEAA, a PuB-EAA and a non-qualified EAA Provider, each with its configurations of default_credential_A', async () => {
+    const ics = await loadIssuerIcs();
+    expect(Object.keys(ics.categories ?? {}).sort()).toEqual(['E', 'PB', 'Q']);
+    for (const [category, entry] of Object.entries(ics.categories ?? {})) {
+      expect(entry?.profiles).toContain(`P-${category}`);
+      expect(entry?.profiles).not.toContain('P-PID');
+      expect(entry?.profiles).toEqual(expect.arrayContaining(['P-DB', 'P-NDB']));
+      for (const ref of ['ICS-02.SD', 'ICS-02.MD', 'ICS-02.second', 'ICS-04.NDB.SD', 'ICS-05.short.SD', 'ICS-05.short.MD']) expect(entry?.items?.[ref], `${category} ${ref}`).toEqual(expect.any(String));
+      expect(entry?.items?.['ICS-18']).toBe('reject');
+    }
+    // Both answers of ICS-07 are exercised: the QEAA and PuB-EAA tenants chain, the non-qualified EAA tenant does not.
+    expect(ics.categories?.Q?.items?.['ICS-07']).toBe('Yes');
+    expect(ics.categories?.E?.items?.['ICS-07']).toBe('No');
+    expect(ics.categories?.E?.profiles).not.toContain('P-CHAIN');
+    expect(ics.categories?.Q?.profiles).toContain('P-EDP');
+  });
+});
+
 describe('ICS checks', () => {
   it('reads durations', () => {
     expect(durationSeconds('PT7M')).toBe(420);
