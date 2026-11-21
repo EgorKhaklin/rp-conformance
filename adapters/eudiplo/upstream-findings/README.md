@@ -1,8 +1,8 @@
 # Prepared upstream issues for EUDIPLO
 
 Issue texts for the known findings in [`../known-findings.yaml`](../known-findings.yaml) that are not reported upstream
-yet. Each file is one issue for `EUDIPLO/eudiplo`: the first heading is the title, the rest is the body. Nothing has been
-filed; they are opened by hand once the maintainer agrees, the issue reference then goes into the `reference` of the
+yet. Each file is one issue for `EUDIPLO/eudiplo`: the first heading is the title, the rest is the body. The confirmed
+findings were filed on 2026-11-21 and the table links their issues; the others are opened by hand once the maintainer agrees, the issue reference then goes into the `reference` of the
 entries and the file is removed.
 
 All findings were reviewed against the primary specifications and EUDIPLO's source on 2026-11-20 (spec review of the
@@ -15,11 +15,11 @@ Checked against `ghcr.io/eudiplo/eudiplo:main` (`sha256:1a1f53b77b69cfeaf573f695
 version `9.1.0-main.ae0792a`, revision `ae0792a98991c28607879c2291d26b26b9ee9817`). Source links point to that
 revision. The evidence is shortened; the certificates and credentials are test data of the suite's test PKI.
 
-| File | Basis | Test cases |
+| Issue or text | Basis | Test cases |
 | --- | --- | --- |
-| [dcql-credential-type-not-checked.md](dcql-credential-type-not-checked.md) | confirmed (OpenID4VP 1.0) | `RP_WS_SM_IssuerIntegrity_013_UF`, `_025_UF` |
-| [certificate-path-constraints.md](certificate-path-constraints.md) | confirmed (RFC 5280, RFC 7515) | `RP_WS_SM_IssuerIntegrity_034a_UF`, `_034b_UF`, `_037a_UF`, `_037b_UF` |
-| [mdoc-map-claims-empty.md](mdoc-map-claims-empty.md) | confirmed (product bug) | `RP_WS_DM_IdentifyingData_001b` |
+| [EUDIPLO/eudiplo#1615](https://github.com/EUDIPLO/eudiplo/issues/1615) | confirmed (OpenID4VP 1.0) | `RP_WS_SM_IssuerIntegrity_013_UF`, `_025_UF` |
+| [EUDIPLO/eudiplo#1616](https://github.com/EUDIPLO/eudiplo/issues/1616) | confirmed (RFC 5280, RFC 7515) | `RP_WS_SM_IssuerIntegrity_034a_UF`, `_034b_UF`, `_037a_UF`, `_037b_UF` |
+| [EUDIPLO/eudiplo#1617](https://github.com/EUDIPLO/eudiplo/issues/1617) | confirmed (product bug) | `RP_WS_DM_IdentifyingData_001b` |
 
 `RP_WS_SM_Validity_005b_UF` (an expired mdoc's status list is fetched before the validity check, in `@owf/mdoc`) is a
 profile-only known finding without a text here: the "MUST NOT" fetch rule of Token Status List section 8.3 is in
