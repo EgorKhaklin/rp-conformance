@@ -195,11 +195,12 @@ describe('grant checks: valid flows', () => {
 describe('grant checks: each fault fails exactly its target check', () => {
   for (const id of GRANT_FAULT_IDS) {
     const info = GRANT_FAULTS[id];
-    it(`${id} fails ${info.target}`, async () => {
+    const ignored = 'mustIgnore' in info && info.mustIgnore;
+    it(ignored ? `${id} is ignored: ${info.target} passes` : `${id} fails ${info.target}`, async () => {
       const evidence = await issue(info.grant, id);
       expect(evidence.grant?.fault).toBe(id);
       const { failures, result } = await failuresOf(inputOf(evidence));
-      expect(failures, JSON.stringify(result.checks)).toEqual([info.target]);
+      expect(failures, JSON.stringify(result.checks)).toEqual(ignored ? [] : [info.target]);
     });
   }
 

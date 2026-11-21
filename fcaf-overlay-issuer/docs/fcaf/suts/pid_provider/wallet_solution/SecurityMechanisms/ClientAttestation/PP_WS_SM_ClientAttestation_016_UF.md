@@ -6,8 +6,8 @@ Verify that the PID Provider rejects a WIA whose revocation maintenance period e
 
 ## References
 
-- [ARF] Annex 2, WUA_32, ISSU_12c
-- [TS3] section 2.4.1
+- [ARF] Annex 2, ISSU_12c
+- [TS3] sections 2.4.1 and 2.4.3
 
 ## Profile applicability
 
@@ -42,5 +42,7 @@ EUDI_specific | EUDI_required
 1. Either the Provider issues no credential and no token and answers with HTTP 4xx and an OAuth error object, or it issues a PID that passes every check of `ISS` and whose `exp` is no later than the `exp` of the WIA's `client_status` claim (`maintenance-period`); never HTTP 5xx.
 
 ## Comments
+
+An EUDI/TS3 requirement: TS3 section 2.4.3 "The technical validity period of a PID SHALL end before the `client_status.exp` of the WIA" and ARF ISSU_12c. WUA_32 (communicating a minimum remaining period) is not the rule tested here.
 
 Variant `SD+PA` (`P-PID`, `P-SD`, `P-PA`) (issuer catalogue section 2.3); it applies when the Provider's ICS puts it in these profiles.

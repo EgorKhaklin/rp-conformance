@@ -177,7 +177,7 @@ Verdicts: PASS, FAIL, INCONCLUSIVE, REVIEW, NOT APPLICABLE.
 | ICS-12 | Credential request and response encryption | `P-ENC` |
 | ICS-13 | DPoP server nonce used; nonce endpoint offered | `P-DPN` |
 | ICS-14 | `T_proof`, `T_skew` (each at most 5 minutes), lifetime of pre-authorized codes, `c_nonce` and access tokens | |
-| ICS-15 | `T_refresh` for `TL-WP` and the grace period after its `NextUpdate` | |
+| ICS-15 | `T_refresh` for `TL-WP`, the grace period after its `NextUpdate`, and whether the previous `TL-WP` stays in force after a version whose seal fails (`keep`) or no list is used until a valid one arrives (`discard`) (§8.3) | used by `POLICY` |
 | ICS-16 | Minimum number of entries per status list (herd privacy, VCR_18), at least 10 000 (decision 4); declared timestamp precision for batch issuance (ISSU_36) | |
 | ICS-17 | Whether the adapter seeds `SUBJ-1` and `SUBJ-2`, or the fixed test identities and their attribute values if it cannot (decision 5); whether the PID portrait opt-out is offered (PID_03) | |
 | ICS-18 | Policy when the WIA or KA status cannot be obtained (status list unreachable or invalid). Attestation Providers only; PID Providers reject (decision 2). | used by `POLICY` |
@@ -258,7 +258,7 @@ Columns as in the RP catalogue: **Objective**, **Stimulus** (mutation on top of 
 | `PP_WS_IA_AuthorizationCode_003_UF` | A wrong `code_verifier` is rejected. | Other verifier | REJ:invalid_grant (OIDF `fapi2-…-incorrect-pkce-code-verifier-rejected`, `fapi2-…-ensure-pkce-code-verifier-required`) | RFC 7636 §4.6 | `AC` | G/R |
 | `PP_WS_IA_AuthorizationCode_004_UF` | A PAR `request_uri` is single-use and expires. | Reuse; use after `expires_in` + 1 h (that half NOT APPLICABLE in a run whose wait limit is shorter; scheduled last otherwise) | REJ (OIDF `fapi2-…-par-attempt-reuse-request_uri`, `fapi2-…-par-attempt-to-use-expired-request_uri`; partial) | RFC 9126 §4, §7.3 | `AC` | G/R |
 | `PP_WS_IA_AuthorizationCode_005_UF` | An authorization code is single-use and bound to `client_id` and `redirect_uri`. | Reuse; other `client_id`; other `redirect_uri` | REJ:invalid_grant (OIDF `fapi2-…-attempt-reuse-authorization-code-after-one-second`, `fapi2-…-ensure-authorization-code-is-bound-to-client`; partial) | RFC 6749 §4.1.3, §10.5 | `AC` | G/R |
-| `PP_WS_IA_AuthorizationCode_006_UF` | Unknown `credential_configuration_id` in `authorization_details`, or unknown `scope`, is rejected. | Unknown values | REJ | OpenID4VCI §5.1.1, §5.1.2 | `AC` | G/R |
+| `PP_WS_IA_AuthorizationCode_006_UF` | Unknown `credential_configuration_id` in `authorization_details` is rejected; an unknown `scope` value next to a valid request is ignored. | Unknown `credential_configuration_id`; unknown `scope` value added | REJ; ISS for the `scope` (§8.3) | OpenID4VCI §5.1.1, §5.1.2 ("MUST ignore unknown scope values") | `AC` | G/R |
 | `PP_WS_IA_AuthorizationCode_007` | `state` is returned unaltered; `iss` is returned in the authorization response. | Capture | CONF (OIDF `fapi2-…-happy-flow`) | RFC 6749 §4.1.2; RFC 9207; HAIP 4 | `AC` | G/R |
 
 ##### PP_WS_IA_Batch (`P-BATCH`)
@@ -267,7 +267,7 @@ Columns as in the RP catalogue: **Objective**, **Stimulus** (mutation on top of 
 | --- | --- | --- | --- | --- | --- | --- |
 | `PP_WS_IA_Batch_001` | A request with `batch_size` proofs returns that many credentials, each bound to a different key from the proofs. | `SCN-I`, N proofs | ISS (OIDF `batch-issuance`; partial) | ISSU_43, ISSU_64; OpenID4VCI §8.2 | | S/R |
 | `PP_WS_IA_Batch_002` | All credentials of a batch carry the same attribute values and the same validity period. | `SCN-I`, N proofs | CONF (OIDF `batch-issuance`; partial) | ISSU_11a, ISSU_43, ISSU_51 | | S/R |
-| `PP_WS_IA_Batch_003_UF` | More proofs than `batch_size` is rejected. | `batch_size` + 1 proofs | REJ:invalid_proof or invalid_credential_request | OpenID4VCI §8.2 | | G/R |
+| `PP_WS_IA_Batch_003_UF` | How a request with more proofs than `batch_size` is answered is recorded. | `batch_size` + 1 `jwt` proofs | INFO (§8.3; rejection with invalid_proof or invalid_credential_request is the hardened behaviour) | OpenID4VCI §12.2.4 (`batch_size` is the maximum array size; no rejection MUST) | | G/O |
 | `PP_WS_IA_Batch_004_UF` | One invalid proof in a batch fails the whole request: no partial batch is issued. | Corrupt the signature of proof 2 of N | REJ:invalid_proof | OpenID4VCI §8.2 | | G/R |
 | `PP_WS_IA_Batch_005_UF` | The same key twice in one batch does not give two credentials bound to the same key. | Proofs 1 and 2 with one key | REJ or INFO | ISSU_35 (d) | | S/O |
 | `PP_WS_IA_Batch_006` | The first batch needs a single User authentication regardless of its size. | `SCN-I`, `AC`, batch | CONF | ISSU_61 | `AC` | S/R |
@@ -277,9 +277,9 @@ Columns as in the RP catalogue: **Objective**, **Stimulus** (mutation on top of 
 | ID | Objective | Stimulus | Expected | References | Var | Rel |
 | --- | --- | --- | --- | --- | --- | --- |
 | `PP_WS_IA_Reissuance_001` | A refresh token is issued, DPoP-bound to the wallet's key, and gives a new access token without User interaction. | Refresh grant with the original DPoP key | ISS (OIDF `fapi2-…-refresh-token`; partial) | ISSU_42, ISSU_63, ISSU_65; OpenID4VCI §14.5; HAIP 4.4; RFC 9449 §5 | | S/R |
-| `PP_WS_IA_Reissuance_002_UF` | A refresh token presented with another DPoP key is rejected. | DPoP proof with key of `CW-2` | REJ (OIDF `fapi2-…-refresh-token`; partial) | ISSU_65; RFC 9449 §5 | | S/R |
+| `PP_WS_IA_Reissuance_002_UF` | A refresh token presented by another Wallet Unit is rejected. | Refresh by `CW-2` with its own WIA, PoP and DPoP key (§8.3) | REJ (OIDF `fapi2-…-refresh-token`; partial) | ISSU_65; RFC 6749 §6, §10.4; RFC 9449 §5 (a confidential client's refresh token is bound to the client, not to the DPoP key) | | S/R |
 | `PP_WS_IA_Reissuance_003` | A re-issued credential has the same attributes, new unique elements (salts, status index, key), and a new validity period. | Compare with the original | CONF | ISSU_35, ISSU_59, ISSU_63 | | S/R |
-| `PP_WS_IA_Reissuance_004_UF` | After the PID was revoked, the refresh token no longer gives a credential. | Revoke via adapter, then refresh | REJ or POLICY | VCR_04; ISSU_65 | `P-HOOK` | S/O |
+| `PP_WS_IA_Reissuance_004_UF` | Whether the refresh token still gives a credential after the PID was revoked is recorded. | Revoke via adapter, then refresh | INFO (§8.3; refusing is a design choice, no requirement) | VCR_04 (no reversal of a revocation; does not cover re-issuance); ISSU_65 | `P-HOOK` | S/O |
 | `PP_WS_IA_Reissuance_005_UF` | A WIA or KA presented at re-issuance is validated as at first issuance: a revoked Wallet Instance gets no new credential. | TWP revokes the Wallet Instance, then refresh | REJ | ISSU_21, WUA_25 | | S/R |
 
 ##### PP_WS_IA_Deferred (`P-DEF`)
@@ -294,8 +294,8 @@ Columns as in the RP catalogue: **Objective**, **Stimulus** (mutation on top of 
 
 | ID | Objective | Stimulus | Expected | References | Var | Rel |
 | --- | --- | --- | --- | --- | --- | --- |
-| `PP_WS_IA_Notification_001` | `credential_accepted`, `credential_failure` and `credential_deleted` are accepted with 204. | Each event | CONF (OIDF `happy-flow`; partial) | OpenID4VCI §11.1, §11.2 | | G/O |
-| `PP_WS_IA_Notification_002_UF` | Unknown `notification_id`, or an unknown event, is rejected. | Random id; event `foo` | REJ:invalid_notification_id or invalid_notification_request | OpenID4VCI §11.3 | | G/O |
+| `PP_WS_IA_Notification_001` | `credential_accepted`, `credential_failure` and `credential_deleted` are accepted with HTTP 2xx; whether it is the RECOMMENDED 204 is recorded. | Each event | CONF (OIDF `happy-flow`; partial) | OpenID4VCI §11.1, §11.2 (2xx MUST, 204 RECOMMENDED) | | G/O |
+| `PP_WS_IA_Notification_002_UF` | Unknown `notification_id` is rejected; the answer to an unknown event is recorded. | Random id; event `foo` | REJ:invalid_notification_id or invalid_notification_request; INFO for the event (§8.3) | OpenID4VCI §11.3 (the 400 MUST covers an invalid `notification_id` only; the error codes are SHOULD) | | G/O |
 | `PP_WS_IA_Notification_003` | A `credential_deleted` notification does not revoke or otherwise act against the User (the wallet must not notify on deletion, so a notification must not be required). | Delete event; no event at all | UNCHANGED (OIDF `happy-flow-skip-notification`; partial) | PAD_03 | | S/O |
 
 #### 5.1.3 Layer SM: security mechanisms
@@ -309,17 +309,17 @@ Columns as in the RP catalogue: **Objective**, **Stimulus** (mutation on top of 
 | `PP_WS_SM_ClientAttestation_003_UF` | WIA with an invalid signature is rejected. | Corrupt signature | REJ:invalid_client (OIDF `fail-invalid-client-attestation-signature`) | WUA_25 | | S/R |
 | `PP_WS_SM_ClientAttestation_004_UF` | WIA signed under an anchor not in `TL-WP` is rejected. | Signed by (a) `CA-X`, (b) `PP-A`'s issuance CA in `TL-PID`, (c) `AC-A` | REJ:invalid_client | ISSU_21, ISSU_28, ISSU_30a; WPNot_04 | | S/R |
 | `PP_WS_SM_ClientAttestation_005_UF` | WIA of a withdrawn Wallet Provider is rejected. | Signed under `WP-W` | REJ:invalid_client | ISSU_30a; WPNot_04 | | S/R |
-| `PP_WS_SM_ClientAttestation_006_UF` | WIA signed under `WP-A`'s KA CA (another purpose of the same Wallet Provider) is rejected. | Wrong service anchor | REJ:invalid_client | ISSU_30a; TS3 | | S/R |
+| `PP_WS_SM_ClientAttestation_006_UF` | How a WIA signed under `WP-A`'s KA CA (another service of the same Wallet Provider) is treated is recorded. | Other service anchor of the same Wallet Provider | INFO (§8.3) | ISSU_28, ISSU_30a; TS3 §2.2.1.2 (anchor on the Trusted List for Wallet Providers; §3.2 informative) | | S/O |
 | `PP_WS_SM_ClientAttestation_007_UF` | Expired, or not yet valid, WIA is rejected. | `exp` past; `nbf` future (beyond `T_skew`) | REJ:invalid_client (OIDF `fail-client-attestation-exp-in-past`; partial) | OpenID4VCI App. E; Attestation-Based Client Auth | | G/R |
 | `PP_WS_SM_ClientAttestation_008_UF` | PoP signed with a key other than the WIA's `cnf` key is rejected. | Other key | REJ:invalid_client (OIDF `fail-mismatched-client-attestation-pop-key`, `fail-invalid-client-attestation-pop-signature`) | Attestation-Based Client Auth | | G/R |
-| `PP_WS_SM_ClientAttestation_009_UF` | PoP with wrong `aud`, stale `iat`, or a replayed `jti` is rejected. | Each mutation | REJ:invalid_client (OIDF `fail-client-attestation-pop-wrong-aud`; partial) | Attestation-Based Client Auth | | G/R |
+| `PP_WS_SM_ClientAttestation_009_UF` | PoP with wrong `aud` or stale `iat` is rejected; whether a replayed `jti` is detected is recorded. | Each mutation | REJ:invalid_client; INFO for the `jti` replay (§8.3) (OIDF `fail-client-attestation-pop-wrong-aud`; partial) | Attestation-Based Client Auth; its §12.1 (replay detection SHOULD) | | G/R |
 | `PP_WS_SM_ClientAttestation_010_UF` | WIA whose `sub` differs from the `client_id` of the request is rejected. | Other `client_id` | REJ:invalid_client (OIDF `fail-client-attestation-no-sub`, `fapi2-…-ensure-client-id-in-token-endpoint`; partial) | Attestation-Based Client Auth | | G/R |
 | `PP_WS_SM_ClientAttestation_011_UF` | Wrong `typ` on WIA or PoP is rejected. | `typ` `JWT` | REJ:invalid_client | Attestation-Based Client Auth | | G/R |
 | `PP_WS_SM_ClientAttestation_012_UF` | WIA of a revoked Wallet Instance is rejected. | Status set in `SL-WP-A` | REJ | ISSU_21, ISSU_30a; WUA_25, WUA_26 | | S/R |
 | `PP_WS_SM_ClientAttestation_013_UF` | WIA status that cannot be obtained (list unreachable, bad signature, expired, signed under a wrong anchor) gives no successful issuance of a PID. | Each TSP mutation of the RP catalogue's `RP_PP_SM_Revocation` | REJ (PID); POLICY (others, ICS-18) | ISSU_21; WUA_25 | | S/R |
 | `PP_WS_SM_ClientAttestation_014_UF` | WIA signed with a non-ECCG algorithm is rejected. | ES256K; HS256 | REJ:invalid_client | WUA_04; OIA_03 | | S/R |
-| `PP_WS_SM_ClientAttestation_015` | The PID's expiry is no later than the end of the WIA's revocation maintenance period. | WIA with maintenance period ending in 30 days | CONF | ISSU_12c; WUA_30 | **PID only** | S/R |
-| `PP_WS_SM_ClientAttestation_016_UF` | A WIA below the SUT's declared minimum remaining maintenance period is rejected, or the PID is shortened. | Maintenance period ending tomorrow | REJ or CONF (`exp` ≤ end) | WUA_32; ISSU_12c | | S/R |
+| `PP_WS_SM_ClientAttestation_015` | The PID's expiry is no later than the end of the WIA's revocation maintenance period. | WIA with maintenance period ending in 31 days (the minimum TS3 §2.4.2 guarantees; §8.3) | CONF | ISSU_12c; WUA_30; TS3 §2.4.3 (EUDI/TS3 only) | **PID only** | S/R |
+| `PP_WS_SM_ClientAttestation_016_UF` | A WIA below the SUT's declared minimum remaining maintenance period is rejected, or the PID is shortened. | Maintenance period ending tomorrow | REJ or CONF (`exp` ≤ end) | ISSU_12c; TS3 §2.4.3 (EUDI/TS3 only) | | S/R |
 
 ##### PP_WS_SM_KeyAttestation (KA, at the credential endpoint)
 
@@ -328,14 +328,14 @@ Columns as in the RP catalogue: **Objective**, **Stimulus** (mutation on top of 
 | `PP_WS_SM_KeyAttestation_001` | A valid KA from `WP-A` is accepted, and every credential is bound to one of its `attested_keys`. | `SCN-I`; KA in the proof's `key_attestation` header, and as `attestation` proof type where supported | ISS (OIDF `happy-flow`; partial) | WUA_09a, WUA_11a, WUA_12; OpenID4VCI App. D, App. F.1, F.3 | | S/R |
 | `PP_WS_SM_KeyAttestation_002_UF` | A PID request without KA is rejected. | Omit KA | REJ:invalid_proof | WUA_05, WUA_11a; ISSU_21 | **PID only** | S/R |
 | `PP_WS_SM_KeyAttestation_003_UF` | KA with an invalid signature is rejected. | Corrupt signature | REJ:invalid_proof (OIDF `fail-invalid-key-attestation-signature`) | WUA_11a; OpenID4VCI App. F.4 | | S/R |
-| `PP_WS_SM_KeyAttestation_004_UF` | KA signed under an anchor not in `TL-WP`, or under a withdrawn Wallet Provider, is rejected. | (a) `CA-X`, (b) `PP-A`, (c) `WP-W`, (d) `WP-A`'s WIA CA | REJ:invalid_proof | ISSU_21, ISSU_28, ISSU_30 | | S/R |
+| `PP_WS_SM_KeyAttestation_004_UF` | KA signed under an anchor not in `TL-WP`, or under a withdrawn Wallet Provider, is rejected. | (a) `CA-X`, (b) `PP-A`, (c) `WP-W`, (d) `WP-A`'s WIA CA | REJ:invalid_proof for (a)–(c); INFO for (d) (§8.3) | ISSU_21, ISSU_28, ISSU_30; TS3 §2.2.2.2 | | S/R |
 | `PP_WS_SM_KeyAttestation_005_UF` | Expired KA is rejected. | `exp` past | REJ:invalid_proof | OpenID4VCI App. D | | G/R |
 | `PP_WS_SM_KeyAttestation_006_UF` | Proof signed with a key not listed in `attested_keys` is rejected. | Fresh key | REJ:invalid_proof | WUA_09a, WUA_12 | | S/R |
-| `PP_WS_SM_KeyAttestation_007_UF` | KA whose `nonce` is not a `c_nonce` of this SUT is rejected, when the SUT offers a nonce endpoint. | Nonce from another session; no nonce | REJ:invalid_nonce or invalid_proof (OIDF `fail-invalid-nonce`; partial) | WUA_10b; OpenID4VCI App. D.1, App. F.1 | `P-DPN` | S/R |
+| `PP_WS_SM_KeyAttestation_007_UF` | A KA without `nonce` as the `attestation` proof type is rejected, when the SUT offers a nonce endpoint; the KA `nonce` in a `jwt` proof is recorded. | Nonce from another session; no nonce (`jwt` proof); no nonce (`attestation` proof) | REJ:invalid_nonce or invalid_proof for the `attestation` proof; INFO in a `jwt` proof (§8.3) (OIDF `fail-invalid-nonce`; partial) | WUA_10b; OpenID4VCI App. D.1, F.1 (wallet rule), F.3, F.4; TS3 §2.2.2.2 | `P-DPN` | S/R |
 | `PP_WS_SM_KeyAttestation_008_UF` | KA of a revoked WSCD is rejected. | Status set in `SL-WP-A` | REJ | ISSU_21, ISSU_30; WUA_11a | | S/R |
 | `PP_WS_SM_KeyAttestation_009_UF` | KA status that cannot be obtained gives no PID. | As `ClientAttestation_013_UF` | REJ (PID); POLICY (others) | ISSU_21; WUA_11a | | S/R |
 | `PP_WS_SM_KeyAttestation_010_UF` | For a PID, `key_storage` or `user_authentication` below `iso_18045_high` is rejected. | `iso_18045_moderate`; `iso_18045_basic`; absent | REJ:invalid_proof | WUA_34; ISSU_27d; WIAM_14b | **PID only** | S/R |
-| `PP_WS_SM_KeyAttestation_011` | The PID's expiry is no later than the end of the KA's revocation maintenance period. | KA maintenance period ending in 30 days | CONF | ISSU_12c; WUA_30 | **PID only** | S/R |
+| `PP_WS_SM_KeyAttestation_011` | The PID's expiry is no later than the end of the KA's revocation maintenance period. | KA maintenance period ending in 31 days (the minimum TS3 §2.4.2 guarantees; §8.3) | CONF | ISSU_12c; WUA_30; TS3 §2.4.3 (EUDI/TS3 only) | **PID only** | S/R |
 | `PP_WS_SM_KeyAttestation_012_UF` | KA with wrong `typ` or a non-ECCG algorithm is rejected. | `typ` `JWT`; ES256K | REJ:invalid_proof | OpenID4VCI App. D.1; WUA_04 | | S/R |
 | `PP_WS_SM_KeyAttestation_013_UF` | A KA of another Wallet Unit, valid in itself, combined with this wallet's WIA, does not give a PID bound to the other unit's keys. | KA of `CW-2`, WIA of `CW-1` | REJ or INFO | WUA_10b; TS3 | | S/O |
 
@@ -349,7 +349,7 @@ Columns as in the RP catalogue: **Objective**, **Stimulus** (mutation on top of 
 | `PP_WS_SM_ProofOfPossession_004_UF` | Proof whose `aud` is not the Credential Issuer identifier is rejected. | Other issuer; absent | REJ:invalid_proof | OpenID4VCI App. F.1 | | G/R |
 | `PP_WS_SM_ProofOfPossession_005_UF` | Proof with a missing, unknown or already used `nonce` is rejected with a fresh `c_nonce`; the retry with that nonce succeeds. | Missing; random; replay a used proof | REJ:invalid_nonce, then ISS (OIDF `fail-invalid-nonce`; partial) | OpenID4VCI §7, §8.3.1.2, App. F.1 | `P-DPN` | G/R |
 | `PP_WS_SM_ProofOfPossession_006_UF` | Proof with `iat` outside `T_proof` is rejected. | `iat` −1 h; +1 h | REJ:invalid_proof | OpenID4VCI App. F.1 | | G/R |
-| `PP_WS_SM_ProofOfPossession_007_UF` | Proof whose `iss` differs from the `client_id` is rejected (authorization code flow). | Other `iss` | REJ:invalid_proof | OpenID4VCI App. F.1 | `AC` | G/R |
+| `PP_WS_SM_ProofOfPossession_007_UF` | How a proof whose `iss` differs from the `client_id` is treated is recorded (authorization code flow). | Other `iss` | INFO (§8.3; rejection with invalid_proof is the hardened behaviour) | OpenID4VCI App. F.1 (wallet MUST), F.4 (no `iss` check) | `AC` | G/O |
 | `PP_WS_SM_ProofOfPossession_008_UF` | Proof with a private key in `jwk`, or more than one of `jwk`, `kid`, `x5c`, is rejected. | `jwk` with `d`; `jwk` and `x5c` | REJ:invalid_proof | OpenID4VCI App. F.1 | | G/R |
 | `PP_WS_SM_ProofOfPossession_009_UF` | Proof key on an unsupported curve or an invalid point is rejected. | Off-curve point; P-521 if not advertised | REJ:invalid_proof | RFC 8725 §3.4; OpenID4VCI App. F.1 | | G/R |
 | `PP_WS_SM_ProofOfPossession_010` | The issued credential's `cnf.jwk` (SD) or `deviceKeyInfo` (MD) equals the proof key. | `SCN-I` | CONF (OIDF `happy-flow`) | ISSU_17; WUA_09a | | S/R |
@@ -374,8 +374,8 @@ Columns as in the RP catalogue: **Objective**, **Stimulus** (mutation on top of 
 | `PP_WS_SM_IssuerIntegrity_002` | mdoc: `IssuerAuth` COSE_Sign1 with ECCG `alg` and `x5chain` validating to the SUT's issuance anchor; `digestAlgorithm` SHA-256; every value digest matches. | `SCN-I` | CONF (OIDF `happy-flow`; partial) | PPNot_03; ISO/IEC 18013-5 §9.1.2 | `MD` | S/R |
 | `PP_WS_SM_IssuerIntegrity_003` | The signing certificate follows the ETSI TS 119 412-6 profile of the SUT's category. | Inspect leaf | CONF | ISSU_68, ISSU_70, ISSU_71, ISSU_73 | | S/R |
 | `PP_WS_SM_IssuerIntegrity_004` | The credential signer is not the access certificate, and the access certificate key signs no credential. | Compare keys | CONF | ISSU_22; Reg_10 | | S/R |
-| `PP_WS_SM_IssuerIntegrity_005` | Every claim the PID Rulebook allows is individually selectively disclosable (top level, nested, array entries); `_sd_alg` is `sha-256`. | Inspect disclosures | CONF | PID_21; ARB_30; RFC 9901 §4 | `SD` | S/R |
-| `PP_WS_SM_IssuerIntegrity_006` | Salts are at least 128 bits and unique per disclosure; mdoc `random` at least 16 bytes per item. | Inspect | CONF (OIDF `happy-flow`, `batch-issuance`; partial) | ISSU_35 (a); RFC 9901 §9.3; ISO/IEC 18013-5 §9.1.2.5 | | S/R |
+| `PP_WS_SM_IssuerIntegrity_005` | Every claim the PID Rulebook allows is individually selectively disclosable (top level, nested, array entries); `_sd_alg` is `sha-256`. | Inspect disclosures | CONF | PID_21 (the EUDI SHALL); RFC 9901 §4.2.2 (permits array element disclosures, does not require them) | `SD` | S/R |
+| `PP_WS_SM_IssuerIntegrity_006` | Salts are unique per disclosure, and whether they reach 128 bits is recorded; mdoc `random` at least 16 bytes per item. | Inspect | CONF; INFO for the SD-JWT VC salt length (§8.3) (OIDF `happy-flow`, `batch-issuance`; partial) | ISSU_35 (a) (uniqueness); RFC 9901 §9.3 (new salt per claim MUST; 128 bits RECOMMENDED); ISO/IEC 18013-5 §9.1.2.5 (not verified) | | S/R |
 | `PP_WS_SM_IssuerIntegrity_007` | The issued credential signature algorithm is one of those advertised in the metadata. | Compare | CONF | OpenID4VCI §12.2.4 | | G/R |
 
 ##### PP_WS_SM_Validity
@@ -432,7 +432,7 @@ All **PID only**; Attestation Providers are tested against their rulebook in `AP
 | ID | Objective | Stimulus | Expected | References | Var | Rel |
 | --- | --- | --- | --- | --- | --- | --- |
 | `PP_WS_DM_PidMdoc_001` | Doctype and namespace are `eu.europa.ec.eudi.pid.1`; domestic attributes are only in a domestic namespace. | `SCN-I` | CONF | PID_04, PID_05, PID_06 | `MD` | S/R |
-| `PP_WS_DM_PidMdoc_002` | All mandatory attributes and metadata of PID Rulebook §4.2 are present as issuer-signed items with the CBOR types of its tables (for example `full-date` tag 1004). | `SCN-I` | CONF | PID_08, PID_09, PID_10 | `MD` | S/R |
+| `PP_WS_DM_PidMdoc_002` | All mandatory attributes and metadata of PID Rulebook §3.1.2 are present as issuer-signed items with the CBOR types of its table (for example `full-date` tag 1004). | `SCN-I` | CONF | PID_08, PID_09 (EUDI only), PID_10; PID Rulebook v1.7 §3.1.2 (ARF PID_09 still links it as "Section 4.2.1"); RFC 8943; ISO/IEC 18013-5 not verified | `MD` | S/R |
 | `PP_WS_DM_PidMdoc_003` | Each attribute identifier appears at most once. | Inspect | CONF | PID_11 | `MD` | S/R |
 | `PP_WS_DM_PidMdoc_004` | Values equal `SUBJ-1`'s data and are valid at `validFrom` (age attributes included). | Compare | CONF | PID_12 | `MD` | S/R |
 | `PP_WS_DM_PidMdoc_005` | `issuance_date` and `expiry_date`, if present, are consistent with `validFrom` and `validUntil` per the declared policy. | Compare | CONF | PID_13 | `MD` | S/R |
@@ -451,9 +451,9 @@ All **PID only**; Attestation Providers are tested against their rulebook in `AP
 | ID | Objective | Stimulus | Expected | References | Var | Rel |
 | --- | --- | --- | --- | --- | --- | --- |
 | `PP_WS_SH_Encoding_001_UF` | Malformed JSON, wrong `Content-Type`, and malformed JWTs at every endpoint are rejected without 5xx. | Truncated JSON; `text/plain`; two-part JWT | REJ | RFC 8725; OpenID4VCI §8.3.1 | | G/R |
-| `PP_WS_SH_Encoding_002_UF` | Oversized requests and deeply nested JSON are rejected; the SUT stays available. | 10 MB body; nesting depth 10 000 | REJ | OWASP API4 | | G/R |
-| `PP_WS_SH_Encoding_003_UF` | `jku`, `x5u` or a `kid` URL in a proof, WIA or KA header is not dereferenced. | Header pointing to the TSP | REJ, NOFETCH | RFC 8725 §3.10 | | G/R |
-| `PP_WS_SH_Encoding_004_UF` | A status `uri` in a WIA or KA that fails signature validation is not fetched; a validly signed status `uri` pointing to a private address is not fetched. | WIA by `CA-X` with `uri` = TSP; `uri` = `http://169.254.169.254/…` | REJ, NOFETCH | Token Status List §6.2, §11.4; OWASP SSRF | | G/R |
+| `PP_WS_SH_Encoding_002_UF` | An oversized request is rejected (any 4xx, an error object not required); how deeply nested JSON is handled is recorded; the SUT stays available. | 10 MB body; nesting depth 10 000 | REJ (4xx); INFO for the nesting (§8.3) | OWASP API4; OpenID4VCI §8.2 (unknown parameters MUST be ignored); RFC 8259 §9 (nesting limits "may") | | G/R |
+| `PP_WS_SH_Encoding_003_UF` | `jku`, `x5u` or a `kid` URL in a proof, WIA or KA header is not dereferenced. | Header pointing to the TSP | NOFETCH; rejection or issuance recorded (§8.3) | RFC 8725 §3.10 (SHOULD protect; no rejection required) | | G/R |
+| `PP_WS_SH_Encoding_004_UF` | A status `uri` in a WIA or KA that fails signature validation is not fetched; a validly signed status `uri` pointing to a private address is not fetched. | WIA by `CA-X` with `uri` = TSP; `uri` = `http://169.254.169.254/…` in `client_status` / `key_storage_status` (TS3 1.5), and in a top-level `status` (before TS3 1.5; INFO, §8.3) | REJ, NOFETCH; INFO for the top-level `status` | Token Status List §6.2, §11.4; OWASP SSRF; TS3 §2.3 (EUDI/TS3 claims) | | G/R |
 | `PP_WS_SH_Encoding_005_UF` | A WIA or KA status list that is a decompression bomb is refused without exhausting resources. | `lst` inflating to 1 GB | REJ, SUT stays available | Token Status List §11.1 | | G/R |
 
 ##### PP_WS_SH_Encryption (`P-ENC`)
@@ -473,7 +473,7 @@ These objectives check what the RP catalogue's `RP_PP_*` tests assume the Provid
 | ID | Objective | Stimulus | Expected | References | Var | Rel |
 | --- | --- | --- | --- | --- | --- | --- |
 | `PP_RP_IA_Supportive_001` | The status list is served without authentication, over https, with `Content-Type` `application/statuslist+jwt` or `+cwt` per `Accept`. | Anonymous GET with each `Accept` | CONF (OIDF `happy-flow`; partial) | VCR_16; Token Status List §8.1 | | S/R |
-| `PP_RP_IA_Supportive_002` | The response sets cache headers consistent with `ttl` and `exp`. | Inspect | CONF | Token Status List §8.1, §13.7 | | G/O |
+| `PP_RP_IA_Supportive_002` | Cache headers of the response, if any, are consistent with `ttl` and `exp`; no headers pass (§8.3). | Inspect | CONF | Token Status List §8.2 (RP rule when headers are present), §13.7; RFC 9111 §4.2 | | G/O |
 | `PP_RP_IA_Supportive_003` | The status endpoint does not require or log anything that identifies the requester beyond the HTTP request itself (no tracking parameters, no per-credential URLs). | Inspect URIs of 20 credentials | CONF (OIDF `batch-issuance`; partial) | VCR_18 note; Token Status List §12.3 | | S/R |
 
 ##### PP_RP_SM_Revocation
@@ -496,7 +496,7 @@ These objectives check what the RP catalogue's `RP_PP_*` tests assume the Provid
 | `PP_Inf_SM_TrustMechanisms_001` | The SUT reads Wallet Provider anchors from the LoTE `TL-WP` per ETSI TS 119 602. | `SCN-T`, unchanged list | ISS | ISSU_19, ISSU_19b, ISSU_28a | | S/R |
 | `PP_Inf_SM_TrustMechanisms_002_UF` | A Wallet Provider removed from `TL-WP`, or with status withdrawn, is no longer accepted after refresh. | Remove `WP-A`; withdraw `WP-A` | REJ:invalid_client | ISSU_30a; WPNot_04 | | S/R |
 | `PP_Inf_SM_TrustMechanisms_003` | A Wallet Provider added to `TL-WP` is accepted after refresh. | Add `WP-C` | ISS | ISSU_28; WPNot_04 | | S/R |
-| `PP_Inf_SM_TrustMechanisms_004_UF` | A `TL-WP` with an invalid seal, or sealed by an untrusted scheme operator, is not used; the previous list stays in force. | Corrupt seal; `CA-X` seal, with `WP-A` removed in it | ISS (old list still applies) | ETSI TS 119 602; WPNot_04 | | S/R |
+| `PP_Inf_SM_TrustMechanisms_004_UF` | A `TL-WP` with an invalid seal, or sealed by an untrusted scheme operator, is not used; the Provider then keeps the previous list or uses none, as it declares. | Corrupt seal; `CA-X` seal, with `WP-A` removed in it | POLICY (ICS-15.invalid_version: `keep` ISS, `discard` REJ) (§8.3) | ETSI TS 119 602 (seal verified before use; no last-known-good rule); WPNot_04 | | S/R |
 | `PP_Inf_SM_TrustMechanisms_005_UF` | A `TL-WP` older than the one in use (rollback) is not used. | Serve the previous sequence number, with `WP-W` granted | REJ for `WP-W` | ETSI TS 119 602 | | S/R |
 | `PP_Inf_SM_TrustMechanisms_006_UF` | A `TL-WP` past its `NextUpdate` with no newer list is handled per the declared grace period. | Stale list | POLICY (ICS-15) | ETSI TS 119 602 | | S/O |
 | `PP_Inf_SM_TrustMechanisms_007` | Every credential, status list and the access certificate validate under the anchors published for the SUT, for the right service (issuance, revocation, access). | Validate with §3.2 | CONF | PPNot_03, PPNot_03a, PPNot_04; PuBPNot_04, PuBPNot_05; RPACANot_03, RPACANot_03a | | S/R |
@@ -740,6 +740,38 @@ What the plan tests and the catalogue has no objective for. The rows are not add
 - **TS3.** The WIA and KA structure (revocation maintenance period, status reference) follows TS3 at the ARF commit above; names of claims are deliberately not fixed here.
 - **ISO/IEC 18013-5 second edition** is a draft; the `MD` status and identifier list objectives follow it.
 - **DC API issuance** (ISSU_03) enters once its specification exists; the RP harness's DC API shim could then be reused.
+
+### 8.3 Corrections after the spec review of the EUDIPLO findings (2026-11-20)
+
+Before any finding was reported upstream, every FAIL of the reference run was checked against the primary
+specifications and EUDIPLO's source at `ae0792a`. Where the test demanded more than a specification does, the test
+changed; where no specification has a MUST, the result is informational (`INFO`) or follows a declared policy
+(`POLICY`), and the row states the true normative strength. Requirements of the EUDI profile only (ARF, TS3, PID
+Rulebook) stay FAILs and are marked as such in `adapters/issuer-eudiplo/known-findings.yaml` (`basis: profile`); the
+upstream texts are in `adapters/issuer-eudiplo/upstream-findings/`.
+
+| Test case | Change | Why |
+| --- | --- | --- |
+| `IA_AuthorizationCode_006_UF` | Step 2 adds the unknown `scope` value to a valid request and expects `ISS`; the reference validator ignores unknown scope values. | OpenID4VCI 1.0 section 5.1.2: "Credential Issuers MUST ignore unknown scope values in a request." |
+| `IA_Reissuance_002_UF` | The refresh token is presented by `CW-2` with its own WIA, PoP and DPoP key; the fault `dpop.refresh-other-key` is gone. | RFC 9449 section 5: refresh tokens of confidential clients "are not bound to the DPoP proof public key"; they are bound to the client (RFC 6749 sections 6, 10.4). |
+| `IA_Notification_001` | Any 2xx passes (check `notification-2xx`); a 2xx other than 204 is recorded. | OpenID4VCI 1.0 section 11.2: 2xx MUST, 204 RECOMMENDED. |
+| `SH_Encoding_002_UF` | Step 1 accepts a 4xx without an OAuth error object (413); step 2 (deep nesting) is INFO. | OpenID4VCI 1.0 section 8.2: unrecognized parameters MUST be ignored; RFC 8259 section 9: nesting limits "may". |
+| `SH_Encoding_003_UF` | NOFETCH only; rejection or issuance recorded. | RFC 8725 section 3.10 asks not to follow `jku`/`x5u` ("SHOULD protect"), not to reject. |
+| `PP_RP_IA_Supportive_002` | A response without caching headers passes; present headers are still checked; references §8.2 and §13.7. | Token Status List (draft 21) has no cache-header rule for the Status Provider; section 8.2 only tells Relying Parties to prefer `exp`/`ttl` "If caching-related HTTP headers are present". |
+| `SM_ClientAttestation_006_UF`, `SM_KeyAttestation_004_UF` (d) | INFO; the reference validator accepts any issuance anchor of `TL-WP` for a WIA or KA. | TS3 sections 2.2.1.2, 2.2.2.2 and ARF ISSU_28, ISSU_30a bind anchors per Wallet Provider; TS3 section 3.2 is informative and maps no KA field. |
+| `SM_KeyAttestation_007_UF` | Steps 3 and 4 (KA `nonce` in a `jwt` proof) are INFO; step 5 (`attestation` proof without nonce) still rejects. | OpenID4VCI 1.0 Appendix F.4 and TS3 section 2.2.2.2 require the `c_nonce` in the proof; F.1's KA nonce rule binds the wallet. Step 4 equals the area's valid baseline. |
+| `SM_ClientAttestation_009_UF` | Step 4 (PoP `jti` replay) INFO. | Attestation-Based Client Auth (draft 08) section 12.1: replay detection SHOULD. |
+| `IA_Batch_003_UF` | INFO, `G/O`; reference §12.2.4. | `batch_size` is "the maximum array size for the proofs parameter" (section 12.2.4); no rejection MUST. |
+| `IA_Reissuance_004_UF` | Step 3 INFO. | VCR_04 forbids reversing a revocation; re-issuance after revocation is not covered. |
+| `IA_Notification_002_UF` | Step 3 (unknown event) INFO. | Section 11.3's 400 MUST is scoped to an invalid `notification_id`; the codes are SHOULD. |
+| `SM_ProofOfPossession_007_UF` | INFO, `G/O`. | Appendix F.1's `iss` rule binds the wallet; F.4 lists no `iss` check. |
+| `SM_IssuerIntegrity_006` | A SD-JWT VC salt below 128 bits is recorded, not failed; uniqueness still fails. | RFC 9901 section 9.3: 128 bits RECOMMENDED; ISSU_35 is about uniqueness. |
+| `PP_Inf_SM_TrustMechanisms_004_UF` | Steps 2 and 4 are `POLICY` (new ICS-15.invalid_version: `keep` gives `ISS`, `discard` `REJ`). | No specification requires a last-known-good list; fail-closed conforms. The EUDIPLO adapter's `refreshTrust` empties the cache itself. |
+| `SM_ClientAttestation_015`, `SM_KeyAttestation_011` | Stimulus 31 days instead of 30; references TS3 section 2.4.3. | TS3 section 2.4.2 guarantees a Wallet Unit can present at least 31 days; 30 days was below that guarantee. |
+| `AP_WS_SM_Revocation_101` | Stimulus 31 days instead of 30, as `SM_ClientAttestation_015` and `SM_KeyAttestation_011`. | TS3 section 2.4.2, as above. The other `AP_*` variants of the test cases in this table take the change from the `PP_*` definition. |
+| `SM_ClientAttestation_016_UF` | References TS3 section 2.4.3 and ISSU_12c; WUA_32 dropped. | WUA_32 is about communicating a minimum period, not about the PID's expiry. |
+| `SH_Encoding_004_UF` | Steps 5 and 6 put the private address in a top-level `status` (before TS3 1.5), recorded as INFO. | Steps 3 and 4 use the TS3 1.5 claims; a Provider that reads only the earlier claim never reads the address there, so they say nothing about request forgery. |
+| `DM_PidMdoc_002`, `SM_IssuerIntegrity_005` | References: PID Rulebook v1.7 section 3.1.2 (not "4.2"), ISO/IEC 18013-5 not verified; PID_21 is the SHALL, RFC 9901 section 4.2.2 only permits array element disclosures; ARB_30 dropped. | EUDI profile requirements. |
 
 ## 9. Next steps
 

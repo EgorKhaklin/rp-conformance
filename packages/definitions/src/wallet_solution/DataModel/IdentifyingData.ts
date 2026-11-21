@@ -68,10 +68,14 @@ const variantStep = (fault: FaultId, format: FormatWording, expect: (query?: str
   });
 };
 
-/** `REJ_OR_INVALID`: the Relying Party does not accept the value of the wrong data type silently. */
-const rejOrInvalid = (attribute: string): Expectation => ({
-  codes: ['REJ_OR_INVALID'],
-  text: `${rej().text} Alternatively, it accepts the presentation and its verification result flags \`${attribute}\` as invalid (\`attribute-invalid\`). It does not accept the presentation without such a flag.`,
+/**
+ * `INFO` (spec review 2026-11-20): how the Relying Party handles a value of the wrong data type is recorded. Rejecting
+ * it, or accepting it and flagging the attribute (`attribute-invalid`), is the hardened behaviour; no specification
+ * requires a Relying Party to validate attribute types.
+ */
+const typeInfo = (attribute: string): Expectation => ({
+  codes: ['INFO'],
+  text: `Whether the Relying Party rejects the presentation, flags \`${attribute}\` as invalid (\`attribute-invalid\`), or accepts it as it is, is recorded; HTTP 5xx fails.`,
 });
 
 interface Options {
@@ -149,14 +153,17 @@ const forFormat = (format: FormatWording) => {
       format,
       unhappyFlow: true,
       relevancy: relevancy.specificOptional,
-      objective: `Verify that the Relying Party does not silently accept PID attributes in ${name} format whose values have the wrong data type.`,
+      objective: `Record how the Relying Party handles PID attributes in ${name} format whose values have the wrong data type.`,
       references: [PID_RULEBOOK, '[ISO 8601-1:2019]', ...(format === mdoc ? ['[RFC8943]'] : []), '[OpenID4VP] section 8.6'],
       preconditions: [queryVariant.mandatory(format)],
       steps: [
-        variantStep(faultOf({ a: 'credential.birthdate-integer', b: 'mdoc.birth-date-integer' }, format), format, () => rejOrInvalid(birthDate.slice(1, -1))),
+        variantStep(faultOf({ a: 'credential.birthdate-integer', b: 'mdoc.birth-date-integer' }, format), format, () => typeInfo(birthDate.slice(1, -1))),
         variantStep(faultOf({ a: 'credential.nationalities-string', b: 'mdoc.nationality-string' }, format), format, () =>
-          rejOrInvalid(format === sdJwtVc ? 'nationalities' : 'nationality'),
+          typeInfo(format === sdJwtVc ? 'nationalities' : 'nationality'),
         ),
+      ],
+      comments: [
+        'Informational since the spec review of 2026-11-20 (catalogue section 8.3): the PID Rulebook and ISO 8601-1 bind the issuer of the value; neither OpenID4VP 1.0 section 8.6 nor the ARF requires a Relying Party to validate the data type of an attribute. Rejecting the presentation or flagging the attribute invalid is the hardened behaviour.',
       ],
     }),
     identifyingData({
@@ -203,11 +210,16 @@ export const definitions = [
     number: 7,
     format: sdJwtVc,
     relevancy: relevancy.genericRequired,
-    objective: 'Verify that the Relying Party accepts a PID in SD-JWT VC format that carries a claim it does not know, and does not release that claim.',
-    references: ['[SD-JWT VC] section 2.2.2', '[OpenID4VP] section 8.6'],
-    steps: [variantStep('credential.private-claim', sdJwtVc, () => acc({ credential: 'the presented variant' }))],
+    objective: 'Verify that the Relying Party accepts a PID in SD-JWT VC format that carries a claim it does not know.',
+    references: ['[SD-JWT VC] section 2.2.2', '[OpenID4VP] section 6.4, 8.6'],
+    steps: [
+      variantStep('credential.private-claim', sdJwtVc, () =>
+        acc({ credential: 'the presented variant', extra: 'Whether it also passes the unknown claim along is not judged: the claim is not selectively disclosable.' }),
+      ),
+    ],
     comments: [
       'The claim is not selectively disclosable, so it reaches the Relying Party with every presentation. An mdoc has no such element: the Conformance Wallet presents only requested elements, and a presentation with an element the query does not request is `RP_WS_DM_CredentialMetadata_001b_UF`.',
+      'Since the spec review of 2026-11-20 (catalogue section 8.3) the step checks acceptance only: a claim that is always disclosed cannot be withheld (OpenID4VP 1.0 section 6.4 lets a presentation contain claims that "are not selectively disclosable"), so it is treated like the technical claims (`iss`, `vct`, …) when the released attributes are compared.',
     ],
   }),
 ];

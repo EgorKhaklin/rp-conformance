@@ -192,13 +192,14 @@ const WIA_FAULTS: Partial<Record<IssuerFaultId, AttestationFault>> = {
   'wia.es256k': { signer: (v) => es256kUnder(v, 'wia') },
   'wia.hs256': { assemble: (p) => hs256(p, leafJwkOf(p)) },
   'wia.sub-other': { change: (p) => void (p.payload.sub = 'other-wallet-unit') },
-  'wia.maintenance-30-days': { change: (p, v) => void (statusObject(p.payload, 'client_status').exp = v.now + 30 * DAY) },
+  'wia.maintenance-31-days': { change: (p, v) => void (statusObject(p.payload, 'client_status').exp = v.now + 31 * DAY) },
   'wia.maintenance-tomorrow': { change: (p, v) => void (statusObject(p.payload, 'client_status').exp = v.now + DAY) },
   'wia.ca-x-status-uri': {
     change: (p) => void (statusList(p.payload, 'client_status').uri = tspUrl(p.payload, 'client_status', 'ca-x-wia-status')),
     signer: issuanceSigner('CA-X'),
   },
   'wia.status-uri-private': { change: (p) => void (statusList(p.payload, 'client_status').uri = PRIVATE_STATUS_URI) },
+  'wia.status-uri-private-top-level': { change: (p) => void (p.payload.status = { status_list: { uri: PRIVATE_STATUS_URI, idx: 0 } }) },
   'wia.jku-header': { change: (p) => void (p.header.jku = tspUrl(p.payload, 'client_status', 'jku')) },
   'wia.x5u-header': { change: (p) => void (p.header.x5u = tspUrl(p.payload, 'client_status', 'x5u')) },
 };
@@ -235,7 +236,7 @@ const KA_FAULTS: Partial<Record<IssuerFaultId, AttestationFault>> = {
   'ka.user-authentication-moderate': levels('user_authentication', ISO_18045.moderate),
   'ka.user-authentication-basic': levels('user_authentication', ISO_18045.basic),
   'ka.user-authentication-absent': levels('user_authentication', undefined),
-  'ka.maintenance-30-days': { change: (p, v) => void (statusObject(p.payload, 'key_storage_status').exp = v.now + 30 * DAY) },
+  'ka.maintenance-31-days': { change: (p, v) => void (statusObject(p.payload, 'key_storage_status').exp = v.now + 31 * DAY) },
   'ka.typ-jwt': { change: (p) => void (p.header.typ = 'JWT') },
   'ka.es256k': { signer: (v) => es256kUnder(v, 'ka') },
   'ka.ca-x-status-uri': {
@@ -243,6 +244,7 @@ const KA_FAULTS: Partial<Record<IssuerFaultId, AttestationFault>> = {
     signer: issuanceSigner('CA-X'),
   },
   'ka.status-uri-private': { change: (p) => void (statusList(p.payload, 'key_storage_status').uri = PRIVATE_STATUS_URI) },
+  'ka.status-uri-private-top-level': { change: (p) => void (p.payload.status = { status_list: { uri: PRIVATE_STATUS_URI, idx: 0 } }) },
   'ka.jku-header': { change: (p) => void (p.header.jku = tspUrl(p.payload, 'key_storage_status', 'jku')) },
   'ka.x5u-header': { change: (p) => void (p.header.x5u = tspUrl(p.payload, 'key_storage_status', 'x5u')) },
 };

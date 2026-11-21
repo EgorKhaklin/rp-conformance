@@ -2,12 +2,13 @@
 
 ## Objective
 
-Verify that the PID in mdoc format carries every mandatory attribute and metadata of the PID Rulebook section 4.2 as issuer-signed items, with the CBOR types of its tables.
+Verify that the PID in mdoc format carries every mandatory attribute and metadata of the PID Rulebook section 3.1.2 as issuer-signed items, with the CBOR types of its table.
 
 ## References
 
 - [ARF] Annex 2, PID_08, PID_09, PID_10
-- [ARF] Annex 3.01 (PID Rulebook), section 4.2
+- [PID rulebook] v1.7, section 3.1.2
+- [RFC8943]
 
 ## Profile applicability
 

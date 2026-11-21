@@ -2,7 +2,7 @@
 // signed by another attested key of one KA.
 import { defineIssuerTestCase, type FormatVariant, type GrantVariant, ICS_BATCH_SIZE, relevancy } from '@rp-conformance/core';
 import { iss, issuance, preconditions, rej, technologyOf } from '../../wording';
-import { both, conf, FORMAT, faultStep, GRANT, MAIN, profileOf, rejAny, ufPreconditions } from '../session';
+import { both, conf, FORMAT, faultStep, GRANT, MAIN, profileOf, ufPreconditions } from '../session';
 
 const BATCH_SCN = '`CW-1` runs `SCN-I` for `SUBJ-1` without mutation, with a KA that attests `batch_size` keys (ICS-08) and a credential request with `batch_size` key proofs, each signed by another of these keys and carrying the KA.';
 const batch = (format: FormatVariant, grant: GrantVariant) => issuance(format, grant, { batchSize: ICS_BATCH_SIZE });
@@ -54,13 +54,21 @@ const batch003 = (format: FormatVariant, grant: GrantVariant) =>
     id: 'PP_WS_IA_Batch_003_UF',
     variants: [format, grant],
     control: MAIN,
-    objective: 'Verify that the PID Provider rejects a credential request with more proofs than its `batch_size`.',
-    references: [VCI],
+    objective: 'Record how the PID Provider answers a credential request with more `jwt` proofs than its `batch_size`.',
+    references: ['[OpenID4VCI] section 12.2.4'],
     profile: profileOf(format, grant, 'P-BATCH'),
-    relevancy: relevancy.genericRequired,
+    relevancy: relevancy.genericOptional,
     technology: technologyOf(format),
     preconditions: ufPreconditions(),
-    steps: [faultStep(format, grant, 'batch.over-size', rejAny('invalid_proof', 'invalid_credential_request'))],
+    steps: [
+      faultStep(format, grant, 'batch.over-size', {
+        codes: ['INFO'],
+        text: 'Whether the Provider rejects the request (`invalid_proof` or `invalid_credential_request`) or issues the credentials is recorded; HTTP 5xx fails. OpenID4VCI 1.0 section 12.2.4 defines `batch_size` as "the maximum array size for the proofs parameter in a Credential Request", which the request exceeds, but states no rejection the Credential Issuer MUST give.',
+      }),
+    ],
+    comments: [
+      'Informational since the spec review of 2026-11-20 (issuer catalogue section 8.3): `batch_size` is defined in section 12.2.4, not section 8.2, and no MUST requires the Credential Issuer to reject a larger `proofs` array. Rejecting it is the hardened behaviour; EUDIPLO enforces it for `attestation` proofs (it counts `attested_keys`), not for `jwt` proofs.',
+    ],
   });
 
 const batch004 = (format: FormatVariant, grant: GrantVariant) =>

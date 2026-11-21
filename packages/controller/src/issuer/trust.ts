@@ -75,10 +75,21 @@ export function policyExpectation(expect: IssuerExpectation, state: TrustListSta
   if (!expect.codes.includes('POLICY') || expect.policy !== 'ICS-15') return undefined;
   const last = state.trustLists?.at(-1);
   const [fault] = last?.action.faults ?? [];
+  // `PP_Inf_SM_TrustMechanisms_004_UF` (spec review 2026-11-20): after a version of `TL-WP` whose seal fails, the
+  // Provider keeps the last valid version (`keep`: the previous list applies, `ISS`) or uses none until a valid one
+  // arrives (`discard`: fail-closed, `REJ`). No specification prescribes either; undeclared means `keep`.
+  if (fault === 'trust-list.seal-bitflip' || fault === 'trust-list.sealed-by-ca-x') {
+    const declared = String(issuerIcsValue(ics, 'ICS-15.invalid_version') ?? 'keep').trim().toLowerCase();
+    const discard = declared.startsWith('discard');
+    return {
+      expect: { ...expect, codes: expect.codes.map((code) => (code === 'POLICY' ? (discard ? 'REJ' : 'ISS') : code)) },
+      reason: `ICS-15.invalid_version declares ${discard ? 'discard' : 'keep'}: after the version with ${fault} the declared policy gives ${discard ? 'REJ' : 'ISS'}`,
+    };
+  }
   const grace = issuerIcsValue(ics, 'ICS-15.next_update_grace') ?? 'PT0S';
   const beyond = fault === 'trust-list.stale-after-grace';
   const within = fault === 'trust-list.stale-within-grace';
-  if (!beyond && !within) throw new Error('POLICY (ICS-15) needs an earlier trust-list step with a stale list');
+  if (!beyond && !within) throw new Error('POLICY (ICS-15) needs an earlier trust-list step with a stale list or a broken seal');
   const codes = expect.codes.map((code) => (code === 'POLICY' ? (beyond ? 'REJ' : 'ISS') : code));
   return {
     expect: { ...expect, codes },

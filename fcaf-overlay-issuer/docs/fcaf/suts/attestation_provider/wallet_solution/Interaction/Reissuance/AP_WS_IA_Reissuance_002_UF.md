@@ -2,13 +2,14 @@
 
 ## Objective
 
-- `SD+PA+Q`: Verify that the QEAA Provider rejects a refresh token presented with a DPoP proof of another key than the one it is bound to.
-- `SD+PA+PB`: Verify that the PuB-EAA Provider rejects a refresh token presented with a DPoP proof of another key than the one it is bound to.
-- `SD+PA+E`: Verify that the non-qualified EAA Provider rejects a refresh token presented with a DPoP proof of another key than the one it is bound to.
+- `SD+PA+Q`: Verify that the QEAA Provider rejects a refresh token presented by another Wallet Unit than the one it was issued to.
+- `SD+PA+PB`: Verify that the PuB-EAA Provider rejects a refresh token presented by another Wallet Unit than the one it was issued to.
+- `SD+PA+E`: Verify that the non-qualified EAA Provider rejects a refresh token presented by another Wallet Unit than the one it was issued to.
 
 ## References
 
 - [ARF] Annex 2, ISSU_65
+- [RFC 6749] sections 6 and 10.4
 - [RFC 9449] section 5
 
 ## Profile applicability
@@ -38,7 +39,7 @@ EUDI_specific | EUDI_required
 ## Test Scenario
 
 1. `CW-1` runs `SCN-I` for `SUBJ-1` without mutation; the token response carries a refresh token.
-2. `CW-1` sends a token request with `grant_type` `refresh_token` and the refresh token of step 1, its WIA and a fresh PoP, and a DPoP proof of its original DPoP key; then a nonce request and a credential request with the new access token and a key proof of a fresh attested key. The DPoP proof of the refresh token request is signed with a newly generated P-256 key, carried in its `jwk` header, instead of the original DPoP key (fault `dpop.refresh-other-key`).
+2. `CW-2` sends a token request with `grant_type` `refresh_token` and the refresh token `CW-1` received in step 1, with its own client authentication: its `client_id`, its WIA and a fresh PoP, and a DPoP proof of a DPoP key of its own.
 
 ## Expected results
 
@@ -50,6 +51,6 @@ EUDI_specific | EUDI_required
 
 ## Comments
 
-The catalogue names the DPoP key of `CW-2`; any key other than the bound one is the same stimulus, and a fresh key keeps `CW-2` out of the step.
+The Wallet Unit authenticates with its WIA (a confidential client), so RFC 9449 section 5 does not bind its refresh token to the DPoP key: "Refresh tokens issued to confidential clients ... are not bound to the DPoP proof public key", they are bound to the client (RFC 6749 sections 6 and 10.4). The test therefore presents the refresh token as another client, `CW-2`, as the catalogue words the stimulus; a refresh with the same client and a new DPoP key is not a fault (spec review 2026-11-20, issuer catalogue section 8.3).
 
 Variants (issuer catalogue section 2.3), each executed when the Provider's ICS puts it in the profiles named: `SD+PA+Q` (`P-Q`, `P-SD`, `P-PA`, `P-REISS`), `SD+PA+PB` (`P-PB`, `P-SD`, `P-PA`, `P-REISS`), `SD+PA+E` (`P-E`, `P-SD`, `P-PA`, `P-REISS`).

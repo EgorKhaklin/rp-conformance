@@ -78,7 +78,7 @@ async function startCaptureEndpoint() {
  * The reason the reference validator gives for each fault: several faults fail the same check, so the reason shows that
  * each fails it for its own defect and not, say, for a signature the fault layer broke on the way.
  */
-const NO_ANCHOR = /does not chain to an anchor of TL-WP for its purpose/;
+const NO_ANCHOR = /does not chain to an anchor of TL-WP/;
 const REASONS: Partial<Record<IssuerFaultId, RegExp>> = {
   'wia.missing': /no WIA/,
   'wia.signature-bitflip': /WIA signature does not verify/,
@@ -86,7 +86,6 @@ const REASONS: Partial<Record<IssuerFaultId, RegExp>> = {
   'wia.signer-pp-a': NO_ANCHOR,
   'wia.signer-ac-a': NO_ANCHOR,
   'wia.signer-wp-w': NO_ANCHOR,
-  'wia.signer-ka-ca': /CA-WP-A-KA/,
   'wia.exp-past': /WIA expired/,
   'wia.nbf-future': /WIA not yet valid/,
   'wia.typ-jwt': /WIA typ is JWT/,
@@ -108,7 +107,6 @@ const REASONS: Partial<Record<IssuerFaultId, RegExp>> = {
   'ka.signer-ca-x': /CA-CA-X/,
   'ka.signer-pp-a': /CA-PP-A/,
   'ka.signer-wp-w': /CA-WP-W/,
-  'ka.signer-wia-ca': /CN=CA-WP-A,/,
   'ka.exp-past': /KA expired/,
   'ka.nonce-other-session': /KA nonce .* is not the c_nonce/,
   'ka.nonce-missing': /KA has no nonce/,
@@ -258,9 +256,9 @@ describe('issuer request faults (level 1)', () => {
     const days = (exp: unknown) => Math.round(((exp as number) * 1000 - Date.now()) / 86_400_000);
     const wiaOf = (sent: Sent) => decodeJws(sent.clientAttestation!).payload as { client_status: { exp: number } };
     const kaOf = (sent: Sent) => decodeJws(decodeJws(sent.proof!).header[KEY_ATTESTATION_HEADER] as string).payload as Record<string, any>;
-    expect(days(wiaOf(await issue('CW-1', 'wia.maintenance-30-days')).client_status.exp)).toBe(30);
+    expect(days(wiaOf(await issue('CW-1', 'wia.maintenance-31-days')).client_status.exp)).toBe(31);
     expect(days(wiaOf(await issue('CW-1', 'wia.maintenance-tomorrow')).client_status.exp)).toBe(1);
-    expect(days(kaOf(await issue('CW-1', 'ka.maintenance-30-days')).key_storage_status.exp)).toBe(30);
+    expect(days(kaOf(await issue('CW-1', 'ka.maintenance-31-days')).key_storage_status.exp)).toBe(31);
     const other = await issue('CW-1', 'ka.other-unit');
     expect(kaOf(other).key_storage_status.status.status_list.idx).toBe(twp.units['CW-2'].kaStatus.idx);
     expect(decodeJws(other.clientAttestation!).payload.sub).toBe(twp.units['CW-1'].clientId);

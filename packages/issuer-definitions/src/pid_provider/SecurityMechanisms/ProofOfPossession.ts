@@ -77,9 +77,18 @@ function proofOfPossession(format: FormatVariant, grant: GrantVariant): IssuerTe
       ? [
           testCase(format, grant, {
             id: id('007_UF'),
-            objective: `Verify that the PID Provider rejects a key proof whose \`iss\` differs from the \`client_id\` ${where}.`,
-            references: [F1],
-            steps: [faultStep(format, grant, 'proof.iss-other', invalidProof)],
+            objective: `Record how the PID Provider treats a key proof whose \`iss\` differs from the \`client_id\` ${where}.`,
+            references: [F1, '[OpenID4VCI] Appendix F.4'],
+            relevancy: relevancy.genericOptional,
+            steps: [
+              faultStep(format, grant, 'proof.iss-other', {
+                codes: ['INFO'],
+                text: 'Whether the Provider rejects the request (`invalid_proof`) or issues the PID is recorded; HTTP 5xx fails. The proof violates Appendix F.1 ("The value of this claim MUST be the `client_id` of the Client making the Credential request"), but the checks a Credential Issuer MUST make in Appendix F.4 do not include `iss`.',
+              }),
+            ],
+            comments: [
+              'Informational since the spec review of 2026-11-20 (issuer catalogue section 8.3): F.1 binds the wallet, and F.4 lists no `iss` check. Rejecting the proof is the hardened behaviour.',
+            ],
           }),
         ]
       : []),

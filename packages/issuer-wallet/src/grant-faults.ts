@@ -41,7 +41,7 @@ export function applyAuthorizationFault(id: GrantFaultId | undefined, params: Au
     case 'authorization.authorization-details-unknown':
       return { ...params, authorization_details: JSON.stringify([{ type: 'openid_credential', credential_configuration_id: UNKNOWN_CONFIGURATION }]) };
     case 'authorization.scope-unknown':
-      return { ...params, authorization_details: undefined, scope: UNKNOWN_SCOPE };
+      return { ...params, scope: params.scope ? `${params.scope} ${UNKNOWN_SCOPE}` : UNKNOWN_SCOPE };
     default:
       return params;
   }

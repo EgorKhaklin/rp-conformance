@@ -75,7 +75,6 @@ export interface SessionFaultInfo {
 
 const TB = 'PP_WS_SM_TokenBinding';
 const BATCH = 'PP_WS_IA_Batch';
-const RE = 'PP_WS_IA_Reissuance';
 const ENC = 'PP_WS_SH_Encoding';
 const CRYPT = 'PP_WS_SH_Encryption';
 const DEF = 'PP_WS_IA_Deferred';
@@ -104,13 +103,6 @@ export const SESSION_FAULTS = {
     text: 'the DPoP proof of its token request carries no `nonce` claim, and the Conformance Wallet does not retry with the `DPoP-Nonce` before the first answer',
     testCases: [`${TB}_006_UF`],
     requiresDpopNonce: true,
-  },
-  'dpop.refresh-other-key': {
-    point: 'dpop',
-    request: 'refresh',
-    target: 'dpop-binding',
-    text: 'the DPoP proof of its refresh token request is signed with a newly generated P-256 key, carried in its `jwk` header, instead of the DPoP key the refresh token is bound to',
-    testCases: [`${RE}_002_UF`],
   },
   'access-token.expired': {
     point: 'credential-request',

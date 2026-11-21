@@ -8,8 +8,8 @@
 
 ## References
 
-- [ARF] Annex 2, WUA_32, ISSU_12c
-- [TS3] section 2.4.1
+- [ARF] Annex 2, ISSU_12c
+- [TS3] sections 2.4.1 and 2.4.3
 
 ## Profile applicability
 
@@ -44,5 +44,7 @@ EUDI_specific | EUDI_required
 1. Either the Provider issues no credential and no token and answers with HTTP 4xx and an OAuth error object, or it issues an attestation that passes every check of `ISS` and whose `exp` is no later than the `exp` of the WIA's `client_status` claim (`maintenance-period`); never HTTP 5xx.
 
 ## Comments
+
+An EUDI/TS3 requirement: TS3 section 2.4.3 "The technical validity period of an attestation SHALL end before the `client_status.exp` of the WIA" and ARF ISSU_12c. WUA_32 (communicating a minimum remaining period) is not the rule tested here.
 
 Variants (issuer catalogue section 2.3), each executed when the Provider's ICS puts it in the profiles named: `SD+PA+Q` (`P-Q`, `P-SD`, `P-PA`), `SD+PA+PB` (`P-PB`, `P-SD`, `P-PA`), `SD+PA+E` (`P-E`, `P-SD`, `P-PA`).

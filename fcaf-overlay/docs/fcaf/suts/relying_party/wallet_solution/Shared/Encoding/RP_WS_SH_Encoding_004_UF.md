@@ -31,12 +31,14 @@ EUDI_generic | EUDI_required
 
 ## Expected results
 
-1. The Relying Party rejects the presentation: its verification result reports a failure and releases no attribute value from the presentation, and the endpoint receiving the Authorization Response does not answer with HTTP status 5xx.
+1. The Relying Party rejects the presentation: its verification result reports a failure and releases no attribute value from the presentation, and the endpoint receiving the Authorization Response does not answer with HTTP status 5xx. Via the DC API, the Relying Party's page receiving HTTP 4xx, or its request forwarding the response failing with a network error, also counts as the rejection: the verification result need not report a failure.
 2. The Relying Party accepts the presentation: its verification result reports success and releases exactly the attributes requested in `default_query_pid`, with the values of the newly issued credential.
 
 ## Comments
 
 The maximum response size is the value the Relying Party declares in its ICS (RP.P.11). The padding is a member of the encrypted payload, so a Relying Party without a size limit decrypts the response and accepts it.
+
+Via the DC API the response reaches the Relying Party through its own page. A back end that refuses the oversized body (for example HTTP 413 from its body parser) may do so before setting CORS headers, so the page sees only a network error, and the transaction stays open. Either is a rejection; the step does not require a failed verification result (spec review 2026-11-20, catalogue section 8.3).
 
 The last step shows that the Relying Party stays available: a Relying Party that crashed or exhausted its resources on the previous step cannot accept it.
 

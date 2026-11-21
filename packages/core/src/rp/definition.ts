@@ -302,7 +302,9 @@ export type PolicyReference =
     }
   | { item: 'RP.R.7'; ageSeconds: number }
   | { item: 'RP.R.8' }
-  | { item: 'RP.P.12' };
+  | { item: 'RP.P.12' }
+  /** `RP.T.4`: whether the Relying Party keeps the last valid version of a trust list after a new version fails its seal. */
+  | { item: 'RP.T.4' };
 
 /** An expected result of an RP test case. */
 export interface Expectation extends ExpectationOf<ExpectationCode> {
@@ -310,6 +312,12 @@ export interface Expectation extends ExpectationOf<ExpectationCode> {
   policy?: PolicyReference;
   /** For `CONF`: the request checks the captured requests must pass. */
   checks?: RequestCheck[];
+  /**
+   * For `REJ` via the W3C Digital Credentials API: the page's request that forwards the response failing with a network
+   * error also counts as a rejection, whatever the verification result says (`RP_WS_SH_Encoding_004_UF`: a server that
+   * refuses an oversized body with HTTP 413 before its CORS headers are set leaves the page only a network error).
+   */
+  forwardFailureRejects?: true;
 }
 
 /** One step of an RP test case. */

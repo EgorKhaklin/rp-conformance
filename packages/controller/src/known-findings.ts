@@ -17,7 +17,17 @@ export interface KnownFinding {
   reference?: string;
   /** Where the evidence of the run that found it is, for a finding not yet reported upstream. */
   evidence?: string;
+  /**
+   * What the FAIL rests on (spec review of 2026-11-20): `confirmed`, a requirement of the base specification the product
+   * implements; `profile`, a requirement of the EUDI profile (ARF, TS3, PID Rulebook) only, which the base specification
+   * does not make.
+   */
+  basis?: FindingBasis;
 }
+
+/** What a known finding rests on: the base specification (`confirmed`), or the EUDI profile only (`profile`). */
+export type FindingBasis = 'confirmed' | 'profile';
+export const FINDING_BASES: readonly FindingBasis[] = ['confirmed', 'profile'];
 
 /** Reads a YAML list of known findings (`testCase`, optional `flows`, `finding`, optional `reference`). */
 export async function loadKnownFindings(path: string): Promise<KnownFinding[]> {
@@ -28,6 +38,7 @@ export async function loadKnownFindings(path: string): Promise<KnownFinding[]> {
     if (f.flows && (!Array.isArray(f.flows) || f.flows.some((flow) => !FLOWS.includes(flow)))) {
       throw new Error(`${path}: entry ${i + 1} names an unknown flow (flows: ${FLOWS.join(', ')})`);
     }
+    if (f.basis !== undefined && !FINDING_BASES.includes(f.basis)) throw new Error(`${path}: entry ${i + 1}: basis is ${String(f.basis)}, not one of ${FINDING_BASES.join(', ')}`);
   }
   return findings;
 }
@@ -37,7 +48,8 @@ export function knownFindingOf(findings: KnownFinding[], testCase: string, flow:
   return findings.find((f) => f.testCase === testCase && (!f.flows || f.flows.includes(flow)));
 }
 
-export const describeFinding = (finding: KnownFinding) => `${finding.finding}${finding.reference ? ` (${finding.reference})` : ''}`;
+export const describeFinding = (finding: KnownFinding) =>
+  `${finding.basis === 'profile' ? '[EUDI profile] ' : ''}${finding.finding}${finding.reference ? ` (${finding.reference})` : ''}`;
 
 export interface RunOutcome {
   /** Whether the run passes: no run error, no INCONCLUSIVE or REVIEW, and every FAIL a known finding. */

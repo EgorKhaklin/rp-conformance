@@ -76,7 +76,9 @@ const validOfPpI = (format: FormatWording) =>
 
 const pathReferences = (format: FormatWording) => [
   '[RFC5280] section 6.1',
-  ...(format === sdJwtVc ? ['[SD-JWT VC] section 2.5', '[HAIP] section 6.1.1'] : ['[ISO/IEC 18013-5] section 9.3.1']),
+  // RFC 7515 section 4.1.6: "The recipient MUST validate the certificate chain according to RFC 5280" binds the `x5c`
+  // of the SD-JWT VC to RFC 5280. The ISO/IEC 18013-5 clause was not available to the spec review of 2026-11-20.
+  ...(format === sdJwtVc ? ['[RFC7515] section 4.1.6', '[SD-JWT VC] section 2.5', '[HAIP] section 6.1.1'] : ['[ISO/IEC 18013-5] section 9.3.1 (not verified)']),
 ];
 
 /** The objectives of the certificate path, for both formats (IssuerIntegrity_030 to _037). */
@@ -277,7 +279,7 @@ export const definitions = [
     number: 25,
     format: mdoc,
     objective: 'Verify that the Relying Party rejects a credential in mdoc format of a document type that was not requested.',
-    references: ['[OpenID4VP] section 8.6, B.2.3'],
+    references: ['[OpenID4VP] section 8.6, 14.9, B.2.3'],
     steps: [rejected('mdoc.doctype-other')],
   }),
   issuerIntegrity({
@@ -290,9 +292,18 @@ export const definitions = [
   issuerIntegrity({
     number: 27,
     format: mdoc,
-    objective: 'Verify that the Relying Party rejects a credential in mdoc format whose signing certificate is not a document signer certificate.',
-    references: ['[ISO/IEC 18013-5] section 9.3.1, Annex B'],
-    steps: [rejected('mdoc.ds-no-eku')],
+    objective: 'Record whether the Relying Party accepts a credential in mdoc format whose signing certificate, under the right anchor, is not an ISO/IEC 18013-5 document signer certificate (no extended key usage `1.0.18013.5.1.2`).',
+    references: ['[ISO/IEC 18013-5] Annex B (not verified)', '[ETSI TS 119 412-6] clause 4'],
+    relevancy: relevancy.genericOptional,
+    steps: [
+      step({
+        ...presentationStep.credentialFault('mdoc.ds-no-eku'),
+        expect: { codes: ['INFO'], text: 'Whether the Relying Party accepts or rejects the presentation is recorded; HTTP 5xx fails.' },
+      }),
+    ],
+    comments: [
+      'Informational since the spec review of 2026-11-20 (catalogue section 8.3): ETSI TS 119 412-6 clause 4, the certificate profile of PID Providers, requires no extended key usage (it allows key usage type C "Due to the requirements of ISO/IEC 18013-5"), and the ISO/IEC 18013-5 Annex B profile of the document signer was not available to the review. The test certificate is a plain end-entity certificate, so it differs from a document signer in more than the extended key usage.',
+    ],
   }),
   issuerIntegrity({
     number: 28,

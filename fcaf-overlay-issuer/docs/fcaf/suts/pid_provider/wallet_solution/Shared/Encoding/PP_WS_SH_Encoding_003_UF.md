@@ -2,7 +2,7 @@
 
 ## Objective
 
-Verify that the PID Provider does not dereference a `jku`, `x5u` or `kid` URL in the header of a proof, WIA or KA, and rejects the request.
+Verify that the PID Provider does not dereference a `jku`, `x5u` or `kid` URL in the header of a proof, WIA or KA.
 
 ## References
 
@@ -42,13 +42,15 @@ EUDI_generic | EUDI_required
 
 ## Expected results
 
-1. The Provider issues no credential and no token for the request and answers with HTTP 4xx and an OAuth or OpenID4VCI error object; never HTTP 5xx. The Test Status Provider logs no request for the URL the fault points to during the step.
-2. The Provider issues no credential and no token for the request and answers with HTTP 4xx and an OAuth or OpenID4VCI error object; never HTTP 5xx. The Test Status Provider logs no request for the URL the fault points to during the step.
-3. The Provider issues no credential and no token for the request and answers with HTTP 4xx and an OAuth or OpenID4VCI error object; never HTTP 5xx. The Test Status Provider logs no request for the URL the fault points to during the step.
-4. The Provider issues no credential and no token for the request and answers with HTTP 4xx and an OAuth or OpenID4VCI error object; never HTTP 5xx. The Test Status Provider logs no request for the URL the fault points to during the step.
-5. The Provider issues no credential and no token for the request and answers with HTTP 4xx and an OAuth or OpenID4VCI error object; never HTTP 5xx. The Test Status Provider logs no request for the URL the fault points to during the step.
-6. The Provider issues no credential and no token for the request and answers with HTTP 4xx and an OAuth or OpenID4VCI error object; never HTTP 5xx. The Test Status Provider logs no request for the URL the fault points to during the step.
+1. The Test Status Provider logs no request for the URL the fault points to during the step. Whether the Provider rejects the request or issues the PID (ignoring the header) is recorded; both conform.
+2. The Test Status Provider logs no request for the URL the fault points to during the step. Whether the Provider rejects the request or issues the PID (ignoring the header) is recorded; both conform.
+3. The Test Status Provider logs no request for the URL the fault points to during the step. Whether the Provider rejects the request or issues the PID (ignoring the header) is recorded; both conform.
+4. The Test Status Provider logs no request for the URL the fault points to during the step. Whether the Provider rejects the request or issues the PID (ignoring the header) is recorded; both conform.
+5. The Test Status Provider logs no request for the URL the fault points to during the step. Whether the Provider rejects the request or issues the PID (ignoring the header) is recorded; both conform.
+6. The Test Status Provider logs no request for the URL the fault points to during the step. Whether the Provider rejects the request or issues the PID (ignoring the header) is recorded; both conform.
 
 ## Comments
+
+RFC 8725 section 3.10 warns against "blindly following a "jku" (JWK set URL) or "x5u" (X.509 URL) header" and says applications "SHOULD protect against such attacks"; it does not require rejecting a JWS that carries one. The verdict is therefore NOFETCH alone (spec review 2026-11-20, issuer catalogue section 8.3).
 
 Variant `SD+PA` (`P-PID`, `P-SD`, `P-PA`) (issuer catalogue section 2.3); it applies when the Provider's ICS puts it in these profiles.

@@ -85,7 +85,7 @@ export function evaluateIssued(observation: IssuanceObservation, named: string[]
  * request, so a token issued for an earlier, valid request of the step (the token request before a faulty proof) is
  * not a token "for the request". The error code is recorded; `REJ:<code>` requires that code.
  */
-export function evaluateRejected(observation: IssuanceObservation, code?: string): Evaluation {
+export function evaluateRejected(observation: IssuanceObservation, code?: string, errorObjectOptional = false): Evaluation {
   const failed = serverError(observation);
   if (failed) return { verdict: 'FAIL', reason: `the Provider answered with a server error: ${describe(failed)}` };
   if (observation.credentials.length > 0) return { verdict: 'FAIL', reason: `the Provider issued ${observation.credentials.length} credential(s)` };
@@ -98,6 +98,7 @@ export function evaluateRejected(observation: IssuanceObservation, code?: string
   if (authorization && end.status >= 300 && end.status < 400 && end.error) return { verdict: 'PASS', reason: `rejected at authorization: redirect with error ${end.error}` };
   if (end.status < 400) return { verdict: 'FAIL', reason: `the Provider did not reject the request: ${describe(end)}` };
   if (authorization && !code) return { verdict: 'PASS', reason: `rejected at authorization: HTTP ${end.status}${end.error ? `, error ${end.error}` : ' (error page)'}` };
+  if (!end.error && errorObjectOptional && !code) return { verdict: 'PASS', reason: `rejected at ${end.step}: HTTP ${end.status} (no error object, which this step does not require)` };
   if (!end.error) return { verdict: 'FAIL', reason: `HTTP ${end.status} at ${end.step} without an OAuth or OpenID4VCI error object` };
   if (code && end.error !== code) return { verdict: 'FAIL', reason: `rejected at ${end.step} with error ${end.error}, expected ${code}` };
   return { verdict: 'PASS', reason: `rejected at ${end.step}: HTTP ${end.status}, error ${end.error}` };
@@ -136,7 +137,7 @@ export function evaluateIssuance(expectation: IssuerExpectation, observation: Is
     // `CONF` on the authorization response (`authorization-response-*`, issue 20) needs no credential.
     if (code === 'CONF' && expectation.checks?.length && expectation.checks.every((c) => c.startsWith('authorization-response-'))) return evaluateConformance(observation, expectation.checks);
     if (code === 'ISS' || code === 'CONF') return evaluateIssued(observation, expectation.checks);
-    if (code === 'REJ') return evaluateRejected(observation);
+    if (code === 'REJ') return evaluateRejected(observation, undefined, expectation.errorObjectOptional === true);
     if (code.startsWith('REJ:')) return evaluateRejected(observation, code.slice('REJ:'.length));
     if (code === 'INFO') return serverError(observation) ? { verdict: 'FAIL', reason: outcomeOf(observation) } : { verdict: 'PASS', reason: `recorded: ${outcomeOf(observation)}` };
     return { verdict: 'INCONCLUSIVE', reason: `expected result ${code} is not implemented for an issuance step` };

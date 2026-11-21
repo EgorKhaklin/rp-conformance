@@ -4,7 +4,7 @@
 // refreshes, then `SCN-I` shows what it trusts. After each test case the harness publishes the default `TL-WP` again
 // under a higher sequence number. Each runs in `SD` and `MD` and in both grants: the Provider checks the WIA at the
 // token endpoint in `PA`, at PAR in `AC`.
-import { defineIssuerTestCase, type FormatVariant, type GrantVariant, type IssuerStepDefinition, relevancy, type WalletUnit } from '@rp-conformance/core';
+import { defineIssuerTestCase, type FormatVariant, type GrantVariant, type IssuerExpectation, type IssuerStepDefinition, relevancy, type WalletUnit } from '@rp-conformance/core';
 import { inspected, inspectStep, trustListStep, unitIssuance } from '../../inspection';
 import { rejected } from '../../pid_provider/SecurityMechanisms/attestations';
 import { FORMAT_NAMES, GRANT_NAMES, issuance, pidProfile, preconditions, technologyOf } from '../../wording';
@@ -19,6 +19,13 @@ const refused = (format: FormatVariant, grant: GrantVariant, unit: WalletUnit, w
   text: `The adapter creates a credential offer for \`SUBJ-1\`, PID configuration in ${FORMAT_NAMES[format]} format, ${GRANT_NAMES[grant]}; \`${unit}\` runs \`SCN-I\` without mutation (${why}).`,
   run: issuance(format, grant, { walletUnit: unit }),
   expect: rejected('invalid_client'),
+});
+
+/** `PP_Inf_SM_TrustMechanisms_004_UF`: the issuance after a version of `TL-WP` whose seal fails, as ICS-15 declares. */
+const afterBadSeal = (format: FormatVariant): IssuerExpectation => ({
+  codes: ['POLICY'],
+  policy: 'ICS-15',
+  text: `As the Provider declares in ICS-15.invalid_version: \`keep\` (the previous \`TL-WP\` stays in force) gives \`ISS\` of the ${FORMAT_NAMES[format]} PID; \`discard\` (no list is used until a valid version arrives) gives \`REJ\`. Undeclared counts as \`keep\`.`,
 });
 
 const trust = (
@@ -67,15 +74,17 @@ export const definitions = FORMATS.flatMap((format) => (['PA', 'AC'] as GrantVar
     steps: [refused(format, grant, 'CW-C', '`WP-C` is not on the default `TL-WP` yet'), trustListStep('`WP-C` added as a granted Wallet Provider', { add: ['WP-C'] }), unitIssuance(format, 'CW-C', { grant, why: '`WP-C` is now on `TL-WP`' })],
   }),
   trust('PP_Inf_SM_TrustMechanisms_004_UF', format, grant, {
-    objective: `Verify that a \`TL-WP\` with an invalid seal, or sealed by an untrusted scheme operator, is not used and the previous list stays in force: with \`WP-A\` removed in the bad version, \`CW-1\` still gets the ${FORMAT_NAMES[format]} PID.`,
+    objective: `Verify that a \`TL-WP\` with an invalid seal, or sealed by an untrusted scheme operator, is not used, and that the Provider then acts as it declares (ICS-15.invalid_version): with \`keep\` the previous list stays in force and \`CW-1\` still gets the ${FORMAT_NAMES[format]} PID; with \`discard\` it uses no list and issues none.`,
     references: ['[ETSI TS 119 602]', '[ARF] Annex 2, WPNot_04'],
     steps: [
       trustListStep('`WP-A` removed', { remove: ['WP-A'], faults: ['trust-list.seal-bitflip'] }),
-      unitIssuance(format, 'CW-1', { grant, why: 'the list with the broken seal must not apply; the previous one does' }),
+      { ...unitIssuance(format, 'CW-1', { grant, why: 'the list with the broken seal must not apply' }), expect: afterBadSeal(format) },
       trustListStep('`WP-A` removed', { remove: ['WP-A'], faults: ['trust-list.sealed-by-ca-x'] }),
-      unitIssuance(format, 'CW-1', { grant, why: 'the list sealed under `CA-X` must not apply; the previous one does' }),
+      { ...unitIssuance(format, 'CW-1', { grant, why: 'the list sealed under `CA-X` must not apply' }), expect: afterBadSeal(format) },
     ],
-    comments: ['"The previous list stays in force": the Provider keeps the last list whose seal it verified while the new one is unusable.'],
+    comments: [
+      'The bad version removes `WP-A`, so a Provider that used it would refuse `CW-1`. A Provider that keeps the previous list issues the PID; one that discards the list and uses none until a valid version arrives (fail-closed) refuses it. Both conform: ETSI TS 119 602 and the ARF require the seal to be verified before a list is used, not a last-known-good list, so steps 2 and 4 are `POLICY` (ICS-15.invalid_version) since the spec review of 2026-11-20 (issuer catalogue section 8.3). For EUDIPLO the adapter\'s `refreshTrust` (`DELETE /api/cache/trust-list`) itself empties the cache, so `keep` could not be observed through it in any case.',
+    ],
   }),
   trust('PP_Inf_SM_TrustMechanisms_005_UF', format, grant, {
     objective: `Verify that a \`TL-WP\` older than the one in use (rollback) is not used: a version with a lower sequence number in which \`WP-W\` is granted gives \`CW-W\` of \`WP-W\` no ${FORMAT_NAMES[format]} PID.`,

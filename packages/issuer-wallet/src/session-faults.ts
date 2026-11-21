@@ -106,7 +106,6 @@ export function applySessionFault(fault: SessionFaultId | undefined, context: Se
       onTarget((r) => setHeader(r, 'Authorization', (headerOf(r, 'Authorization') ?? '').replace(/^\S+ /, 'Bearer ')));
       break;
     case 'dpop.other-key':
-    case 'dpop.refresh-other-key':
       onTarget(resignDpop);
       break;
     case 'dpop.htm-wrong':

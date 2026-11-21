@@ -65,7 +65,9 @@ async function selfValidate(definition: TestCaseDefinition, flow: Flow) {
         const [fault] = faultsOf(action);
         outcomes.push({
           step: i + 1,
-          expected: step.expect.codes.join('+'),
+          // POLICY RP.T.4 (a trust list whose new version failed its seal): the reference validator keeps the last valid
+          // version, as the reference Relying Party declares (`Keep`), so it accepts.
+          expected: step.expect.codes.map((c) => (c === 'POLICY' && step.expect.policy?.item === 'RP.T.4' ? 'ACC' : c)).join('+'),
           failures: result.failures,
           target: fault && (faultInfo(fault).target ?? undefined),
           stale: result.credential?.trustListStale,
@@ -97,6 +99,9 @@ describe('executable definitions against the reference validator', () => {
         continue;
       }
       expect(outcome.stale ?? false, `${label}: trust-list-stale`).toBe(outcome.expected.split('+').includes('STALE'));
+      // INFO only records the outcome: no verdict, so nothing to compare (RP_Inf_SM_TrustMechanisms_006_UF,
+      // RP_WS_SM_IssuerIntegrity_027_UF).
+      if (outcome.expected === 'INFO') continue;
       if (outcome.late || !rejects(outcome.expected.split('+'), outcome.target)) {
         expect(outcome.failures, label).toEqual([]);
       } else {

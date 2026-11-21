@@ -2,9 +2,9 @@
 
 ## Objective
 
-- `SD+PA+Q`: Verify that the QEAA Provider rejects an unknown `notification_id`, or an unknown event.
-- `SD+PA+PB`: Verify that the PuB-EAA Provider rejects an unknown `notification_id`, or an unknown event.
-- `SD+PA+E`: Verify that the non-qualified EAA Provider rejects an unknown `notification_id`, or an unknown event.
+- `SD+PA+Q`: Verify that the QEAA Provider rejects an unknown `notification_id`, and record how it answers an unknown event.
+- `SD+PA+PB`: Verify that the PuB-EAA Provider rejects an unknown `notification_id`, and record how it answers an unknown event.
+- `SD+PA+E`: Verify that the non-qualified EAA Provider rejects an unknown `notification_id`, and record how it answers an unknown event.
 
 ## References
 
@@ -47,8 +47,10 @@ EUDI_generic | EUDI_optional
     - `SD+PA+PB`: The Provider issues the credential (HTTP 200) in SD-JWT VC format (`dc+sd-jwt`). Every credential passes format, `issuer-trust` to `PB-T` on `TL-PUB`, `issuer-signature`, `disclosures`, `validity`, `holder-binding` (bound to a proof key the KA attests) and `status-reference`, and the Status List Token it references passes the status list checks.
     - `SD+PA+E`: The Provider issues the credential (HTTP 200) in SD-JWT VC format (`dc+sd-jwt`). Every credential passes format, `issuer-trust` to `EP-T` under the anchor `CA-EP-T` that the rulebook of `default_credential_A` defines (`TA-EAA`), `issuer-signature`, `disclosures`, `validity`, `holder-binding` (bound to a proof key the KA attests) and `status-reference`, and the Status List Token it references passes the status list checks.
 2. The Provider issues no credential and answers with HTTP 4xx and an OAuth or OpenID4VCI error object with `error` `invalid_notification_id` or `invalid_notification_request`; never HTTP 5xx.
-3. The Provider issues no credential and answers with HTTP 4xx and an OAuth or OpenID4VCI error object with `error` `invalid_notification_id` or `invalid_notification_request`; never HTTP 5xx.
+3. The answer is recorded. OpenID4VCI 1.0 section 11.3 prescribes HTTP 400 with an error object only "When the `notification_id` value is invalid"; for an unknown `event` it names `invalid_notification_request` as a code that SHOULD be used, without requiring an error response, so no verdict is given on it.
 
 ## Comments
+
+Step 3 is informational (spec review 2026-11-20, issuer catalogue section 8.3): the MUST of section 11.3 is scoped to an invalid `notification_id`, which step 2 tests.
 
 Variants (issuer catalogue section 2.3), each executed when the Provider's ICS puts it in the profiles named: `SD+PA+Q` (`P-Q`, `P-SD`, `P-PA`, `P-NOT`), `SD+PA+PB` (`P-PB`, `P-SD`, `P-PA`, `P-NOT`), `SD+PA+E` (`P-E`, `P-SD`, `P-PA`, `P-NOT`).

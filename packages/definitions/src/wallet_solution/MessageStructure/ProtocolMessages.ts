@@ -48,6 +48,6 @@ export const definitions = [
     objective: 'Verify that the Relying Party sends a signed request with response mode `dc_api.jwt` through the W3C Digital Credentials API.',
     references: ['[OpenID4VP] section A.2, A.3.2', '[HAIP] section 5.2', '[ARF] Annex 2, OIA_08, OIA_08a'],
     checks: ['dc-api-request'],
-    rule: 'The request uses the protocol `openid4vp-v1-signed` or `openid4vp-v1-multisigned`, carries `response_mode` `dc_api.jwt` and `expected_origins`, and carries no `response_uri`.',
+    rule: 'The request uses the protocol `openid4vp-v1-signed` or `openid4vp-v1-multisigned`, and carries `response_mode` `dc_api.jwt` and `expected_origins`. A `response_uri` is recorded in the check detail, not failed: OpenID4VP 1.0 Appendix A.2 allows additional parameters, which the Wallet MUST ignore (spec review 2026-11-20, catalogue section 8.3).',
   }),
 ];

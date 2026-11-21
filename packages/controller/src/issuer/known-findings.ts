@@ -2,6 +2,7 @@
 // The reference run reports them as known and marks their test cases not validated; they do not fail the run.
 import { readFile } from 'node:fs/promises';
 import { parse } from 'yaml';
+import { FINDING_BASES, type FindingBasis } from '../known-findings';
 import type { IssuerRunReport } from './runner';
 
 export interface IssuerKnownFinding {
@@ -12,6 +13,8 @@ export interface IssuerKnownFinding {
   finding: string;
   /** Where the finding is tracked, for example an upstream issue. */
   reference?: string;
+  /** `confirmed` (base specification) or `profile` (EUDI profile only), as for the RP suite's known findings. */
+  basis?: FindingBasis;
 }
 
 /** Reads a YAML list of known findings (`testCase`, optional `variants`, `finding`, optional `reference`). */
@@ -21,6 +24,7 @@ export async function loadIssuerKnownFindings(path: string): Promise<IssuerKnown
   for (const [i, f] of findings.entries()) {
     if (typeof f?.testCase !== 'string' || typeof f.finding !== 'string') throw new Error(`${path}: entry ${i + 1} needs testCase and finding`);
     if (f.variants && (!Array.isArray(f.variants) || f.variants.some((v) => typeof v !== 'string'))) throw new Error(`${path}: entry ${i + 1}: variants is not a list`);
+    if (f.basis !== undefined && !FINDING_BASES.includes(f.basis)) throw new Error(`${path}: entry ${i + 1}: basis is ${String(f.basis)}, not one of ${FINDING_BASES.join(', ')}`);
   }
   return findings;
 }
@@ -29,7 +33,8 @@ export function issuerKnownFindingOf(findings: IssuerKnownFinding[], testCase: s
   return findings.find((f) => f.testCase === testCase && (!f.variants || f.variants.includes(variant)));
 }
 
-export const describeIssuerFinding = (finding: IssuerKnownFinding) => `${finding.finding}${finding.reference ? ` (${finding.reference})` : ''}`;
+export const describeIssuerFinding = (finding: IssuerKnownFinding) =>
+  `${finding.basis === 'profile' ? '[EUDI profile] ' : ''}${finding.finding}${finding.reference ? ` (${finding.reference})` : ''}`;
 
 /** As `runOutcome` on the RP side: the run passes with no run error, no INCONCLUSIVE or REVIEW, and only known FAILs. */
 export function issuerRunOutcome(report: IssuerRunReport, findings: IssuerKnownFinding[]) {

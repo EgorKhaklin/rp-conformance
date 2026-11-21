@@ -28,3 +28,4 @@ RP.R.8: "Yes"   # refuses a Status List Token iat in the future
 RP.T.1: PT1H
 RP.T.2: PT1H    # grace period G: a stale list is used and signalled as trust-list-stale
 RP.T.3: "Yes"
+RP.T.4: Keep    # a version whose seal fails is not loaded; the last valid one stays in use

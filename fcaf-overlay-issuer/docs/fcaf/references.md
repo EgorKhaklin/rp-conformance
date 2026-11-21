@@ -56,6 +56,7 @@ The syntax follows that used for the EUDI Wallet Architecture and Reference Fram
 | [ISO/IEC 18013-5 ed2] | draft | ISO/IEC 18013-5 second edition (draft), including the status list and identifier list mechanisms for the MSO. |
 | [RFC8392] | - | [RFC 8392](https://datatracker.ietf.org/doc/html/rfc8392): CBOR Web Token (CWT). |
 | [RFC8725] | - | [RFC 8725](https://datatracker.ietf.org/doc/html/rfc8725): JSON Web Token Best Current Practices. |
+| [GDPR] | - | [Regulation (EU) 2016/679](https://eur-lex.europa.eu/eli/reg/2016/679/oj): General Data Protection Regulation. |
 | [Attestation-Based Client Auth] | draft | Same as [IETF draft-attestation-based-client-auth]: OAuth 2.0 Attestation-Based Client Authentication. |
 | [ETSI EN 319 411-1] | - | ETSI EN 319 411-1: Electronic Signatures and Trust Infrastructures (ESI); Policy and security requirements for Trust Service Providers issuing certificates; Part 1: General requirements. |
 | [Issuer catalogue] | draft 0.2 | [PID Provider and Attestation Provider functional conformance tests: test catalogue](https://github.com/cre8/rp-conformance/blob/main/issuer-test-catalogue.md) of the rp-conformance project, with its decisions. |
@@ -74,3 +75,4 @@ The syntax follows that used for the EUDI Wallet Architecture and Reference Fram
 | [TokenStatusList] | - | Same as [Token Status List]. |
 | [TS3] | - | EUDI Wallet Technical Specification 3: Wallet Unit Attestations, with the Wallet Instance Attestation and the key attestation, in the [EUDI Wallet standards and technical specifications](https://github.com/eu-digital-identity-wallet/eudi-doc-standards-and-technical-specifications). |
 | [ETSI TS 119 412-6] | - | ETSI TS 119 412-6: Electronic Signatures and Trust Infrastructures (ESI); Certificate profile requirements for PID, Wallet, EAA, QEAA and PSBEAA providers. |
+| [RFC 9111] | - | [RFC 9111](https://datatracker.ietf.org/doc/html/rfc9111): HTTP Caching. |

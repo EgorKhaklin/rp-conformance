@@ -28,3 +28,4 @@ RP.R.7: None    # checks only that iat is present (status-list-verifier.service.
 RP.R.8: "Yes"   # Status List JWT verification refuses an iat in the future ("JWT is not yet valid")
 RP.T.1: PT5M    # trust list cache
 RP.T.2: PT0S
+RP.T.4: Discard  # a list whose seal fails is discarded with the cached one (trust-store.service.ts); fail-closed by design, and the adapter's refreshTrust (DELETE /api/cache/trust-list) empties the cache itself

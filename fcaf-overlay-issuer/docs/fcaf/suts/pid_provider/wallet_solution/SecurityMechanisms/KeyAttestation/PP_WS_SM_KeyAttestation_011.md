@@ -2,12 +2,12 @@
 
 ## Objective
 
-Verify that the PID Provider issues the PID in SD-JWT VC format with an expiry no later than the end of the KA's revocation maintenance period, when that period ends in 30 days.
+Verify that the PID Provider issues the PID in SD-JWT VC format with an expiry no later than the end of the KA's revocation maintenance period, when that period ends in 31 days.
 
 ## References
 
 - [ARF] Annex 2, ISSU_12c, WUA_30
-- [TS3] section 2.4.1
+- [TS3] sections 2.4.1, 2.4.2 and 2.4.3
 
 ## Profile applicability
 
@@ -33,7 +33,7 @@ EUDI_specific | EUDI_required
 
 ## Test Scenario
 
-1. The adapter creates a credential offer for `SUBJ-1` and the PID configuration in SD-JWT VC format (pre-authorized code flow). `CW-1` runs `SCN-I`: token request with WIA, PoP and DPoP proof, nonce request, credential request with an `openid4vci-proof+jwt` that carries the KA in its `key_attestation` header, all valid, and the `exp` member of the `key_storage_status` claim of its KA, the end of the revocation maintenance period, is 30 days from now.
+1. The adapter creates a credential offer for `SUBJ-1` and the PID configuration in SD-JWT VC format (pre-authorized code flow). `CW-1` runs `SCN-I`: token request with WIA, PoP and DPoP proof, nonce request, credential request with an `openid4vci-proof+jwt` that carries the KA in its `key_attestation` header, all valid, and the `exp` member of the `key_storage_status` claim of its KA, the end of the revocation maintenance period, is 31 days from now (the minimum TS3 section 2.4.2 guarantees a Wallet Unit can present).
 
 ## Expected results
 
@@ -42,5 +42,7 @@ EUDI_specific | EUDI_required
 ## Comments
 
 PID only. The WIA keeps its maintenance period of more than a year, so only the KA bounds the expiry.
+
+An EUDI/TS3 requirement (TS3 section 2.4.3, ARF ISSU_12c). The stimulus is 31 days, the remaining period TS3 section 2.4.2 guarantees; it was 30 days before the spec review of 2026-11-20.
 
 Variant `SD+PA` (`P-PID`, `P-SD`, `P-PA`) (issuer catalogue section 2.3); it applies when the Provider's ICS puts it in these profiles.

@@ -2,13 +2,14 @@
 
 ## Objective
 
-- `SD+AC+Q`: Verify that the QEAA Provider rejects a key proof whose `iss` differs from the `client_id` at the credential endpoint in the authorization code flow with PAR and PKCE.
-- `SD+AC+PB`: Verify that the PuB-EAA Provider rejects a key proof whose `iss` differs from the `client_id` at the credential endpoint in the authorization code flow with PAR and PKCE.
-- `SD+AC+E`: Verify that the non-qualified EAA Provider rejects a key proof whose `iss` differs from the `client_id` at the credential endpoint in the authorization code flow with PAR and PKCE.
+- `SD+AC+Q`: Record how the QEAA Provider treats a key proof whose `iss` differs from the `client_id` at the credential endpoint in the authorization code flow with PAR and PKCE.
+- `SD+AC+PB`: Record how the PuB-EAA Provider treats a key proof whose `iss` differs from the `client_id` at the credential endpoint in the authorization code flow with PAR and PKCE.
+- `SD+AC+E`: Record how the non-qualified EAA Provider treats a key proof whose `iss` differs from the `client_id` at the credential endpoint in the authorization code flow with PAR and PKCE.
 
 ## References
 
 - [OpenID4VCI] Appendix F.1
+- [OpenID4VCI] Appendix F.4
 
 ## Profile applicability
 
@@ -18,7 +19,7 @@
 
 ## EUDI-wallet relevancy
 
-EUDI_generic | EUDI_required
+EUDI_generic | EUDI_optional
 
 ## Technology
 
@@ -39,8 +40,10 @@ EUDI_generic | EUDI_required
 
 ## Expected results
 
-1. The Provider issues no credential and no token for the request and answers with HTTP 4xx and an OAuth or OpenID4VCI error object with `error` `invalid_proof`; never HTTP 5xx.
+1. Whether the Provider rejects the request (`invalid_proof`) or issues the attestation is recorded; HTTP 5xx fails. The proof violates Appendix F.1 ("The value of this claim MUST be the `client_id` of the Client making the Credential request"), but the checks a Credential Issuer MUST make in Appendix F.4 do not include `iss`.
 
 ## Comments
+
+Informational since the spec review of 2026-11-20 (issuer catalogue section 8.3): F.1 binds the wallet, and F.4 lists no `iss` check. Rejecting the proof is the hardened behaviour.
 
 Variants (issuer catalogue section 2.3), each executed when the Provider's ICS puts it in the profiles named: `SD+AC+Q` (`P-Q`, `P-SD`, `P-AC`), `SD+AC+PB` (`P-PB`, `P-SD`, `P-AC`), `SD+AC+E` (`P-E`, `P-SD`, `P-AC`).

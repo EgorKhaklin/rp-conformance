@@ -7,8 +7,7 @@ Verify that every claim the rulebook of `default_credential_A` allows is individ
 ## References
 
 - [ARF] Annex 2, PID_21
-- [ARF] Annex 2, ARB_30
-- [RFC9901] section 4
+- [RFC9901] section 4.2.2
 
 ## Profile applicability
 

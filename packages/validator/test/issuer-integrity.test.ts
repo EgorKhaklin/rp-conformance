@@ -105,9 +105,10 @@ describe('PP_WS_SM_IssuerIntegrity checks', () => {
     expect(checkSelectiveDisclosure(clear)).toMatchObject({ status: 'fail', detail: expect.stringContaining('in the clear') });
   });
 
-  it('fails salt-entropy for 64-bit salts and for a repeated salt', async () => {
+  it('records 64-bit SD-JWT VC salts (128 bits is RECOMMENDED) and fails a repeated salt', async () => {
     const credential = inspectIssued('dc+sd-jwt', await sdJwt(), 'sd', 1);
-    expect(checkIssuerIntegrity({ ...credential, salts: credential.salts.map(() => ({ value: 'bfd93fb4ac923e53', bytes: 8 })) }, ['salt-entropy'])[0]?.status).toBe('fail');
+    const short = checkIssuerIntegrity({ ...credential, salts: credential.salts.map((_, i) => ({ value: `bfd93fb4ac923e${String(i).padStart(2, '0')}`, bytes: 8 })) }, ['salt-entropy'])[0];
+    expect(short).toMatchObject({ status: 'pass', detail: expect.stringContaining('below the RECOMMENDED minimum') });
     expect(checkIssuerIntegrity({ ...credential, salts: [credential.salts[0]!, credential.salts[0]!] }, ['salt-entropy'])[0]?.status).toBe('fail');
     // A hex salt counts 4 bits per character.
     expect(inspectIssued('dc+sd-jwt', await sdJwt(), 'sd', 1).salts.every((s) => s.bytes >= 16)).toBe(true);

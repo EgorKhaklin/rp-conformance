@@ -1,14 +1,19 @@
 # mdoc: dates are issued as text strings, not as `full-date` (tag 1004)
 
+Basis: **EUDI profile only**, the PID Rulebook v1.7 (17 July 2026) section 3.1.2 and ARF Annex 2 PID_09 ("SHALL encode
+each attribute or metadata in the PID as specified in the third column of the tables"; PID_09 still links the table as
+"Section 4.2.1 of the PID Rulebook", which v1.7 numbers 3.1.2). The `full-date` type itself is RFC 8943. Whether
+ISO/IEC 18013-5 requires it for its own date elements was not verified (the standard was not available to the review).
+
 Not reported upstream yet; this is the issue text prepared for it. Found by `PP_WS_DM_PidMdoc_002` [MD+PA] of the issuer
 suite against `ghcr.io/eudiplo/eudiplo@sha256:1a1f53b77b69cfeaf573f6950de6a70947b909181654a6de252f8207e1b138a7`
-(`9.1.0-main.ae0792a`) on 2026-11-20; the source of `main` at `0aefcb2a4` (2026-11-19) is unchanged in this respect.
+(`9.1.0-main.ae0792a`).
 
 ## What happens
 
-EUDIPLO issues every date element of an mdoc as a CBOR text string. For the PID (`eu.europa.ec.eudi.pid.1`) that
-violates the PID Rulebook (ARF Annex 3.01, section 4.2): `birth_date` must be a `full-date` (CBOR tag 1004, RFC 8943,
-ISO/IEC 18013-5 section 7.2.1), `expiry_date` and `issuance_date` a `tdate` (tag 0) or `full-date`.
+EUDIPLO issues every date element of an mdoc as a CBOR text string. For the PID (`eu.europa.ec.eudi.pid.1`) the PID
+Rulebook v1.7 section 3.1.2 gives `birth_date` the encoding `full-date` ("`full-date = #6.1004(tstr)`", CBOR tag 1004,
+RFC 8943), and `expiry_date` and `issuance_date` "`tdate` or `full-date`" (tag 0 or 1004).
 
 The issued `IssuerSigned` of the `mso_mdoc` PID configuration, element by element, decoded (claims from the offer,
 `credentialClaims` `inline`):

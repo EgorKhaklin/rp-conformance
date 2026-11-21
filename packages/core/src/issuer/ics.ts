@@ -102,7 +102,12 @@ export const ISSUER_ICS_ITEMS = {
     question: '`T_proof`, `T_skew` (each at most 5 minutes), lifetime of pre-authorized codes, `c_nonce` and access tokens',
     profiles: [],
   },
-  'ICS-15': { question: '`T_refresh` for `TL-WP` and the grace period after its `NextUpdate`', profiles: [], policy: true },
+  'ICS-15': {
+    question:
+      '`T_refresh` for `TL-WP`, the grace period after its `NextUpdate`, and whether the previous `TL-WP` stays in force after a version whose seal fails (`keep`) or no list is used until a valid version arrives (`discard`)',
+    profiles: [],
+    policy: true,
+  },
   'ICS-16': {
     question:
       'Minimum number of entries per status list (herd privacy, VCR_18), at least 10 000 (decision 4); declared timestamp precision for batch issuance (ISSU_36)',

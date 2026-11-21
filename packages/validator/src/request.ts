@@ -188,7 +188,9 @@ export async function validateRequests(captured: CapturedRequest[], options: Req
         const p = payload();
         if (p.response_mode !== 'dc_api.jwt') fail(`response_mode is ${String(p.response_mode)}, not dc_api.jwt`);
         if (!Array.isArray(p.expected_origins) || p.expected_origins.length === 0) fail('the request carries no expected_origins');
-        if (p.response_uri !== undefined) fail('the DC API request carries a response_uri');
+        // OpenID4VP 1.0 Appendix A.2: "Additional request parameters MAY be defined and used" and "The Wallet MUST ignore
+        // any unrecognized parameters"; a response_uri is recorded, not failed (spec review 2026-11-20).
+        if (p.response_uri !== undefined) return 'dc_api.jwt with expected_origins; also carries a response_uri, which a Wallet ignores over the DC API (recorded)';
       });
       await recorder.run('expected-origins', ['signed-request'], () => {
         const skip = flowOnly('dc-api');

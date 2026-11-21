@@ -27,8 +27,12 @@ def pages(root: pathlib.Path) -> dict[str, str]:
         # The directory, linked from the README, becomes a generated list of its pages.
         "adapters/issuer-eudiplo/upstream-findings": "issuer/eudiplo/upstream-findings/index.md",
     }
-    for finding in sorted((root / "adapters/issuer-eudiplo/upstream-findings").glob("*.md")):
-        out[f"adapters/issuer-eudiplo/upstream-findings/{finding.name}"] = f"issuer/eudiplo/upstream-findings/{finding.name}"
+    findings = root / "adapters/issuer-eudiplo/upstream-findings"
+    for finding in sorted([*findings.glob("*.md"), *findings.glob("suggestions/*.md")]):
+        name = finding.relative_to(findings).as_posix()
+        # The folder's README, where there is one, is its index page instead of the generated list.
+        target = "index.md" if name == "README.md" else name
+        out[f"adapters/issuer-eudiplo/upstream-findings/{name}"] = f"issuer/eudiplo/upstream-findings/{target}"
     return out
 
 
@@ -66,6 +70,8 @@ def main(root: pathlib.Path, docs: pathlib.Path) -> None:
     mapping = pages(root)
     for source, target in mapping.items():
         path = root / source
+        if path.is_dir() and (path / "README.md").exists():
+            continue
         if path.is_dir():
             items = [
                 f"- [{p.read_text(encoding='utf-8').splitlines()[0].lstrip('# ').strip()}]({p.name})"

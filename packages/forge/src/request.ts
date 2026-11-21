@@ -78,9 +78,8 @@ export async function buildRequest(options: RequestBuildOptions): Promise<BuiltR
     client_id: clientId,
     ...(dcApi
       ? {
-          response_mode: 'dc_api.jwt',
+          response_mode: fault === 'request.dc-api-response-mode-unencrypted' ? 'dc_api' : 'dc_api.jwt',
           expected_origins: fault === 'request.expected-origins-other' ? [origin, 'https://other.example'] : [origin],
-          ...(fault === 'request.dc-api-response-uri' ? { response_uri: `${options.baseUrl}/oid4vp/${id}/response` } : {}),
         }
       : {
           response_mode: fault === 'request.response-mode-direct-post' ? 'direct_post' : 'direct_post.jwt',

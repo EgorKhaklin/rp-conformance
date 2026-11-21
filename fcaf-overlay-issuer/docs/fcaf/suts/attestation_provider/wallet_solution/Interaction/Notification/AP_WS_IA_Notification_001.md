@@ -2,9 +2,9 @@
 
 ## Objective
 
-- `SD+PA+Q`: Verify that the QEAA Provider accepts the notification events `credential_accepted`, `credential_failure` and `credential_deleted` with HTTP 204.
-- `SD+PA+PB`: Verify that the PuB-EAA Provider accepts the notification events `credential_accepted`, `credential_failure` and `credential_deleted` with HTTP 204.
-- `SD+PA+E`: Verify that the non-qualified EAA Provider accepts the notification events `credential_accepted`, `credential_failure` and `credential_deleted` with HTTP 204.
+- `SD+PA+Q`: Verify that the QEAA Provider accepts the notification events `credential_accepted`, `credential_failure` and `credential_deleted` with HTTP 2xx.
+- `SD+PA+PB`: Verify that the PuB-EAA Provider accepts the notification events `credential_accepted`, `credential_failure` and `credential_deleted` with HTTP 2xx.
+- `SD+PA+E`: Verify that the non-qualified EAA Provider accepts the notification events `credential_accepted`, `credential_failure` and `credential_deleted` with HTTP 2xx.
 
 ## References
 
@@ -49,20 +49,22 @@ EUDI_generic | EUDI_optional
     - `SD+PA+Q`: The Provider issues the credential (HTTP 200) in SD-JWT VC format (`dc+sd-jwt`). Every credential passes format, `issuer-trust` to `QP-T` with its granted qualified EAA service on `TL-QEAA`, `issuer-signature`, `disclosures`, `validity`, `holder-binding` (bound to a proof key the KA attests) and `status-reference`, and the Status List Token it references passes the status list checks.
     - `SD+PA+PB`: The Provider issues the credential (HTTP 200) in SD-JWT VC format (`dc+sd-jwt`). Every credential passes format, `issuer-trust` to `PB-T` on `TL-PUB`, `issuer-signature`, `disclosures`, `validity`, `holder-binding` (bound to a proof key the KA attests) and `status-reference`, and the Status List Token it references passes the status list checks.
     - `SD+PA+E`: The Provider issues the credential (HTTP 200) in SD-JWT VC format (`dc+sd-jwt`). Every credential passes format, `issuer-trust` to `EP-T` under the anchor `CA-EP-T` that the rulebook of `default_credential_A` defines (`TA-EAA`), `issuer-signature`, `disclosures`, `validity`, `holder-binding` (bound to a proof key the KA attests) and `status-reference`, and the Status List Token it references passes the status list checks.
-2. The notification endpoint answers HTTP 204.
+2. The notification endpoint answers with HTTP 2xx (OpenID4VCI 1.0 section 11.2: "MUST respond with an HTTP status code in the 2xx range"); whether it is the RECOMMENDED 204 is recorded.
 3. Per variant:
     - `SD+PA+Q`: The Provider issues the credential (HTTP 200) in SD-JWT VC format (`dc+sd-jwt`). Every credential passes format, `issuer-trust` to `QP-T` with its granted qualified EAA service on `TL-QEAA`, `issuer-signature`, `disclosures`, `validity`, `holder-binding` (bound to a proof key the KA attests) and `status-reference`, and the Status List Token it references passes the status list checks.
     - `SD+PA+PB`: The Provider issues the credential (HTTP 200) in SD-JWT VC format (`dc+sd-jwt`). Every credential passes format, `issuer-trust` to `PB-T` on `TL-PUB`, `issuer-signature`, `disclosures`, `validity`, `holder-binding` (bound to a proof key the KA attests) and `status-reference`, and the Status List Token it references passes the status list checks.
     - `SD+PA+E`: The Provider issues the credential (HTTP 200) in SD-JWT VC format (`dc+sd-jwt`). Every credential passes format, `issuer-trust` to `EP-T` under the anchor `CA-EP-T` that the rulebook of `default_credential_A` defines (`TA-EAA`), `issuer-signature`, `disclosures`, `validity`, `holder-binding` (bound to a proof key the KA attests) and `status-reference`, and the Status List Token it references passes the status list checks.
-4. The notification endpoint answers HTTP 204.
+4. The notification endpoint answers with HTTP 2xx (OpenID4VCI 1.0 section 11.2: "MUST respond with an HTTP status code in the 2xx range"); whether it is the RECOMMENDED 204 is recorded.
 5. Per variant:
     - `SD+PA+Q`: The Provider issues the credential (HTTP 200) in SD-JWT VC format (`dc+sd-jwt`). Every credential passes format, `issuer-trust` to `QP-T` with its granted qualified EAA service on `TL-QEAA`, `issuer-signature`, `disclosures`, `validity`, `holder-binding` (bound to a proof key the KA attests) and `status-reference`, and the Status List Token it references passes the status list checks.
     - `SD+PA+PB`: The Provider issues the credential (HTTP 200) in SD-JWT VC format (`dc+sd-jwt`). Every credential passes format, `issuer-trust` to `PB-T` on `TL-PUB`, `issuer-signature`, `disclosures`, `validity`, `holder-binding` (bound to a proof key the KA attests) and `status-reference`, and the Status List Token it references passes the status list checks.
     - `SD+PA+E`: The Provider issues the credential (HTTP 200) in SD-JWT VC format (`dc+sd-jwt`). Every credential passes format, `issuer-trust` to `EP-T` under the anchor `CA-EP-T` that the rulebook of `default_credential_A` defines (`TA-EAA`), `issuer-signature`, `disclosures`, `validity`, `holder-binding` (bound to a proof key the KA attests) and `status-reference`, and the Status List Token it references passes the status list checks.
-6. The notification endpoint answers HTTP 204.
+6. The notification endpoint answers with HTTP 2xx (OpenID4VCI 1.0 section 11.2: "MUST respond with an HTTP status code in the 2xx range"); whether it is the RECOMMENDED 204 is recorded.
 
 ## Comments
 
 Each event is sent for a credential of its own, since a `notification_id` belongs to one credential response.
+
+OpenID4VCI 1.0 section 11.2 requires a 2xx and only RECOMMENDS 204, so another 2xx (EUDIPLO answers 201) passes and is recorded in the check detail (spec review 2026-11-20, issuer catalogue section 8.3).
 
 Variants (issuer catalogue section 2.3), each executed when the Provider's ICS puts it in the profiles named: `SD+PA+Q` (`P-Q`, `P-SD`, `P-PA`, `P-NOT`), `SD+PA+PB` (`P-PB`, `P-SD`, `P-PA`, `P-NOT`), `SD+PA+E` (`P-E`, `P-SD`, `P-PA`, `P-NOT`).

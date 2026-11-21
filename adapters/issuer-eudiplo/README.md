@@ -55,7 +55,8 @@ second in the document signer profile of ISO/IEC 18013-5 Annex B.
 
 EUDIPLO's claim field types are JSON types; it has no date type for mdoc, so the mdoc PID carries `birth_date`,
 `issuance_date` and `expiry_date` as text strings instead of `full-date` (tag 1004): `PP_WS_DM_PidMdoc_002` is a known
-finding, with the issue text in [`upstream-findings/mdoc-full-date.md`](upstream-findings/mdoc-full-date.md). The
+finding against the PID Rulebook v1.7 section 3.1.2 (EUDI profile), with the issue text in
+[`upstream-findings/mdoc-full-date.md`](upstream-findings/mdoc-full-date.md). The
 portrait opt-out (`DM_Portrait_001`) is not offered: the PID configurations have no portrait, and inline JSON claims
 cannot carry the empty byte string an mdoc needs (`ICS-17.portrait_opt_out` No).
 
@@ -107,8 +108,8 @@ fetch the lists EUDIPLO publishes under `/issuers/{tenant}/status-management/sta
 Relying Party does. EUDIPLO answers `Accept: application/statuslist+cwt` with a CWT and anything else with a JWT
 (`ICS-05.token_formats`). It re-signs a list on every change (`immediateUpdate`) and when a fetch finds it expired, so
 every fetch returns a token that has not expired (`PP_RP_SM_Revocation_005`). It sets no cache headers on the status
-list response, a known finding of `PP_RP_IA_Supportive_002` (issue text in
-[`upstream-findings/status-list-cache-headers.md`](upstream-findings/status-list-cache-headers.md)). It publishes no
+list response, which Token Status List does not require of a Status Provider (`PP_RP_IA_Supportive_002` passes since the
+spec review of 2026-11-20). It publishes no
 identifier lists and the adapter configures no mdoc PID, so `PP_WS_SM_Revocation_002` and the `MD` variants of
 `PP_RP_SM_Revocation_001` and `_007` are NOT APPLICABLE.
 
@@ -117,11 +118,14 @@ identifier lists and the adapter configures no mdoc PID, so `PP_WS_SM_Revocation
 - **Chaining** (`PP_WS_SM_Revocation_006`, `_007`): `revokeWithWalletUnit` is on for both PID configurations, and the
   Compose file polls wallet units every 30 s (`WALLET_UNIT_STATUS_CHECK_INTERVAL`). The test case serves `SL-WP-A`
   under a URL of its own, the WIA or KA of the issuance points there, and the Test Wallet Provider then revokes the
-  entry in place. Both fail: EUDIPLO never reads the TS3 status claims (the finding of issue 19).
+  entry in place. Both fail against TS3 1.5 (EUDI profile): EUDIPLO never reads the TS3 1.5 status claims, and
+  `revokeWithWalletUnit` follows the KA only, so a revoked Wallet Instance never chains.
 - **Suspension** (`_005`): status lists have 2 bits per entry; suspend, reinstate and revoke show within a second.
 - **Change of subject data** (`_008`): EUDIPLO keeps no subject record, so `changeSubject` plays the back office. It
   revokes every session issued for the subject, and later offers carry the new data. The test case runs alone, last.
-- **`TL-WP` versions** (`PP_Inf_SM_TrustMechanisms_*`): `refreshTrust` clears EUDIPLO's trust list cache. EUDIPLO keeps
+- **`TL-WP` versions** (`PP_Inf_SM_TrustMechanisms_*`): `refreshTrust` clears EUDIPLO's trust list cache (EUDIPLO has
+  no refresh that keeps the cached list; after a version with a bad seal it uses no list, declared as
+  `ICS-15.invalid_version: discard`, so `_004_UF` passes as `POLICY`). EUDIPLO keeps
   the highest accepted `LoTESequenceNumber` in its database, so the harness publishes the default list again under a
   higher number after each test case. A withdrawn Wallet Provider has no issuance service on the list, which EUDIPLO
   treats as untrusted.
@@ -129,10 +133,13 @@ identifier lists and the adapter configures no mdoc PID, so `PP_WS_SM_Revocation
 
 | Finding | Test cases |
 | --- | --- |
-| A TS3 WIA or KA status is never read, so revocation does not chain (issue 19 finding, [`wallet-attestation-status-claim.md`](upstream-findings/wallet-attestation-status-claim.md)) | `PP_WS_SM_Revocation_006`, `_007` (SD, MD) |
-| Array elements of an SD-JWT VC are never disclosable one by one ([`sd-jwt-array-element-disclosure.md`](upstream-findings/sd-jwt-array-element-disclosure.md)) | `PP_WS_SM_IssuerIntegrity_005` |
-| SD-JWT VC salts have 64 bits ([`sd-jwt-salt-length.md`](upstream-findings/sd-jwt-salt-length.md)) | `PP_WS_SM_IssuerIntegrity_006` (SD) |
-| A `TL-WP` with a bad seal leaves no list in force: every wallet is refused ([`trust-list-last-known-good.md`](upstream-findings/trust-list-last-known-good.md)) | `PP_Inf_SM_TrustMechanisms_004_UF` (SD, MD; PA and AC) |
+| A TS3 1.5 WIA or KA status is never read ([`wallet-attestation-status-claim.md`](upstream-findings/wallet-attestation-status-claim.md)); `revokeWithWalletUnit` follows the KA only ([`wia-revocation-chaining.md`](upstream-findings/wia-revocation-chaining.md)); EUDI profile | `PP_WS_SM_Revocation_006`, `_007` (SD, MD) |
+| Array elements of an SD-JWT VC are never disclosable one by one, PID_21 ([`sd-jwt-array-element-disclosure.md`](upstream-findings/sd-jwt-array-element-disclosure.md)); EUDI profile | `PP_WS_SM_IssuerIntegrity_005` |
+
+SD-JWT VC salts have 64 bits, below the 128 bits RFC 9901 section 9.3 RECOMMENDS; `PP_WS_SM_IssuerIntegrity_006` records
+it (suggestion in [`upstream-findings/suggestions/sd-jwt-salt-length.md`](upstream-findings/suggestions/sd-jwt-salt-length.md)).
+A `TL-WP` with a bad seal leaves EUDIPLO without a list, which conforms (question in
+[`upstream-findings/suggestions/trust-list-last-known-good.md`](upstream-findings/suggestions/trust-list-last-known-good.md)).
 
 Concurrent credential requests of a fresh tenant sometimes fail with `credential_request_denied` "Could not allocate
 status entry after maximum retries". The runner therefore issues one credential at a time, also for test cases that
@@ -163,7 +170,6 @@ Checked against the running image and EUDIPLO's source at `ae0792a`.
 | With `walletAttestationRequired`, the authorization server metadata still lists `none` next to `attest_jwt_client_auth` in `token_endpoint_auth_methods_supported` | A token request without WIA, or without PoP, is still refused with `invalid_client` | none: `PP_WS_SM_ClientAttestation_002_UF` passes |
 | Shortest status list lifetime 60 s (`ttl` minimum, live) | `T_rev` PT1M with `immediateUpdate` | none: `REVOKED(T_rev)` test cases (`PP_WS_SM_Revocation_003`, `PP_RP_SM_Revocation_008`) poll for a minute, `PP_RP_SM_Revocation_005` across one `exp` |
 | Revocation chaining is a poll, and a suspended wallet unit changes nothing | `T_chain` PT7M; a suspended WIA or KA is still rejected at issuance (strict), but suspension does not chain | none (the catalogue chains revocation only) |
-| An unknown `scope` in an authorization request is ignored: the token is issued for the offer's configuration and the PID issued (known finding) | FAIL | `PP_WS_IA_AuthorizationCode_006_UF` |
 | Pre-authorized codes live as long as the session (`SESSION_TTL` 24 h) | The expiry is tested one hour after it: 25 hours, above any reference run's `--max-wait`, so NOT APPLICABLE there | `PP_WS_IA_PreAuthorized_003_UF` |
 | PAR `request_uri` lives 60 s | Its expiry half waits 61 minutes; NOT APPLICABLE in the reference run (default `--max-wait` 0), validated once with `--max-wait PT1H5M` | `PP_WS_IA_AuthorizationCode_004_UF` step 3 |
 
@@ -172,16 +178,21 @@ Known findings of the security mechanism test cases (issue 19), each with its pr
 
 | Finding | Test cases |
 | --- | --- |
-| The status of a TS3 WIA or KA (`client_status.status`, `key_storage_status.status`) is never read; only a top-level `status` claim is, so strict mode never fetches `SL-WP-A` | `PP_WS_SM_ClientAttestation_012_UF`, `_013_UF`, `PP_WS_SM_KeyAttestation_008_UF`, `_009_UF` |
-| WIA and KA are accepted under each other's anchor of the same Wallet Provider | `PP_WS_SM_ClientAttestation_006_UF`, `PP_WS_SM_KeyAttestation_004_UF` |
-| A client attestation PoP `jti` is accepted twice | `PP_WS_SM_ClientAttestation_009_UF` |
-| The PID's expiry is not bounded by the WIA's or KA's revocation maintenance period | `PP_WS_SM_ClientAttestation_015`, `_016_UF`, `PP_WS_SM_KeyAttestation_011` |
-| The `nonce` of a KA in a `jwt` proof is not checked | `PP_WS_SM_KeyAttestation_007_UF` |
-| A key proof with `alg` `none` gets `invalid_credential_request` instead of `invalid_proof` | `PP_WS_SM_ProofOfPossession_002_UF` |
+| The status of a TS3 1.5 WIA or KA (`client_status.status`, `key_storage_status.status`) is never read; only a top-level `status` claim is (OpenID4VCI 1.0, TS3 1.4.1), so strict mode never fetches `SL-WP-A`. EUDI profile | `PP_WS_SM_ClientAttestation_012_UF`, `_013_UF`, `PP_WS_SM_KeyAttestation_008_UF`, `_009_UF` |
+| The PID's expiry is not bounded by the WIA's revocation maintenance period (TS3 1.5 section 2.4.3, ISSU_12c). EUDI profile | `PP_WS_SM_ClientAttestation_016_UF` |
+| A key proof with `alg` `none` is rejected with `invalid_credential_request` instead of `invalid_proof` (OpenID4VCI 1.0 section 8.3.1.2; minor) | `PP_WS_SM_ProofOfPossession_002_UF` |
+
+Not findings since the spec review of 2026-11-20: WIA and KA under each other's anchor of the same Wallet Provider
+(`PP_WS_SM_ClientAttestation_006_UF`, `PP_WS_SM_KeyAttestation_004_UF`: TS3 binds anchors per Wallet Provider, INFO),
+the KA `nonce` in a `jwt` proof (`PP_WS_SM_KeyAttestation_007_UF`: F.4 checks the proof's nonce, INFO), and a replayed
+PoP `jti` (`PP_WS_SM_ClientAttestation_009_UF`: replay detection is a SHOULD, INFO; a suggestion in
+[`upstream-findings/suggestions/`](upstream-findings/suggestions)). With the maintenance period at the 31 days TS3
+guarantees, `PP_WS_SM_ClientAttestation_015` and `PP_WS_SM_KeyAttestation_011` pass.
 
 `PP_WS_SM_ProofOfPossession_009_UF`: EUDIPLO advertises `ES512` for `jwt` proofs, so its P-521 step is NOT APPLICABLE
 and the test case is judged on the off-curve step. `PP_WS_SM_ProofOfPossession_007_UF` (`AC` only) runs since `P-AC`
-(issue 20) and FAILs: a key proof whose `iss` is not the `client_id` is accepted (known finding).
+(issue 20): EUDIPLO accepts a key proof whose `iss` is not the `client_id`, which Appendix F.4 does not require it to
+check (INFO since the spec review).
 `PP_WS_MS_CredentialEndpoint_006_UF` (`AC` only) is NOT APPLICABLE: EUDIPLO issues the configuration ID itself
 (`pid-sd-jwt-vc`) as `credential_identifier` in every token response, so no identifier of another session exists.
 
@@ -197,12 +208,15 @@ Not configured by the adapter although EUDIPLO supports it; each can be added wh
 ## DPoP, batch, re-issuance, deferred, notification and robustness (issue 25)
 
 The test cases of `PP_WS_SM_TokenBinding`, `PP_WS_IA_Batch`, `_Reissuance`, `_Deferred`, `_Notification`,
-`PP_WS_SH_Encoding` and `_Encryption` run against the pinned image; eleven of them fail on behaviour of EUDIPLO that
-[`known-findings.yaml`](known-findings.yaml) records with its evidence: `batch_size` not enforced, a refresh token
-accepted with another DPoP key and after revocation, HTTP 500 for a malformed `transaction_id`, HTTP 201 instead of 204
-at the notification endpoint, error bodies without an OAuth error object (unknown notification event, 413), deeply
-nested JSON and `jku`/`x5u` headers accepted, and no status check of WIA or KA at all: EUDIPLO reads
-`status.status_list`, while TS3 carries the reference in `client_status` and `key_storage_status`.
+`PP_WS_SH_Encoding` and `_Encryption` run against the pinned image. Since the spec review of 2026-11-20, four of them
+fail, as [`known-findings.yaml`](known-findings.yaml) records: HTTP 500 for a malformed `transaction_id`
+(`PP_WS_IA_Deferred_002_UF`, confirmed), and three on the missing status check of a TS3 1.5 WIA or KA (EUDI profile):
+EUDIPLO reads the top-level `status`, while TS3 1.5 carries the reference in `client_status` and `key_storage_status`.
+The others pass or record what the specifications leave open (INFO): `batch_size` exceeded with `jwt` proofs, refresh
+after revocation, HTTP 201 at the notification endpoint (any 2xx is allowed), the error body for an unknown event, 413
+without an OAuth error object, deeply nested JSON, and `jku`/`x5u` headers, which EUDIPLO does not fetch. The refresh
+token is bound to the Wallet Unit's client authentication, as RFC 9449 section 5 allows for a confidential client:
+`PP_WS_IA_Reissuance_002_UF` presents it as another Wallet Unit.
 
 `PP_WS_IA_Reissuance_005_UF` and `PP_WS_SH_Encoding_005_UF` fail on the same missing status check: the revoked Wallet
 Instance and the decompression bomb are served by issue 19's `wallet-event` step in a version of `SL-WP-A` under a URL of
@@ -229,8 +243,10 @@ QEAA tenant publishes an embedded disclosure policy (`embeddedDisclosurePolicy`,
 `changeDisclosurePolicy` changes with `PATCH /api/issuer/credentials/{id}`.
 
 The `AP_*` variants of `PP_*` test cases fail where the `PP_*` test case fails, for the same reason: EUDIPLO's behaviour
-does not depend on the credential type. [`known-findings.yaml`](known-findings.yaml) lists them in its issue 27 block,
-each naming the finding it repeats. Two findings are new:
+does not depend on the credential type. [`known-findings.yaml`](known-findings.yaml) lists them in its Attestation
+Provider block, each naming the finding it repeats and with its basis; the `AP_*` variants of the `PP_*` findings that
+the spec review of 2026-11-20 removed are gone with them, and `AP_WS_SM_Revocation_101` uses the 31-day stimulus of
+`PP_WS_SM_ClientAttestation_015`. Two findings are new (`basis: profile`; they were not part of the review):
 
 | Behaviour | Test cases |
 | --- | --- |

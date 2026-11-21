@@ -2,7 +2,7 @@
 
 ## Objective
 
-Verify that after the PID was revoked, the refresh token no longer gives a credential.
+Record whether, after the PID was revoked, the refresh token still gives a credential.
 
 ## References
 
@@ -43,10 +43,10 @@ EUDI_specific | EUDI_optional
 
 1. The Provider issues the credential (HTTP 200) in SD-JWT VC format (`dc+sd-jwt`). Every credential passes format, `issuer-trust` to `PP-T` on `TL-PID`, `issuer-signature`, `disclosures`, `validity`, `holder-binding` (bound to a proof key the KA attests) and `status-reference`, and the Status List Token it references passes the status list checks.
 2. The adapter reports the revocation.
-3. The Provider issues no credential and no token for the request and answers with HTTP 4xx and an OAuth or OpenID4VCI error object; never HTTP 5xx.
+3. Whether the Provider refuses the refresh or issues a new credential is recorded; HTTP 5xx fails. VCR_04 forbids reversing a revocation of the PID; whether a revoked PID may be replaced through its refresh token is not specified.
 
 ## Comments
 
-The catalogue accepts REJ or the policy of the Provider; no ICS item declares such a policy, so the suite expects REJ.
+Informational since the spec review of 2026-11-20 (issuer catalogue section 8.3): VCR_04 ("SHALL NOT reverse the revocation") does not cover a new credential obtained with the refresh token, and ISSU_65 is about the Wallet Unit, not the revoked PID. Refusing the refresh after a revocation is a design choice of the Provider; a later catalogue may make it a `POLICY` with an ICS item.
 
 Variant `SD+PA` (`P-PID`, `P-SD`, `P-PA`, `P-REISS`, `P-HOOK`) (issuer catalogue section 2.3); it applies when the Provider's ICS puts it in these profiles.

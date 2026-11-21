@@ -2,14 +2,15 @@
 
 ## Objective
 
-- `SD+PA+Q`: Verify that the QEAA Provider, which chains revocation, issues the attestation with an expiry no later than the end of the revocation maintenance period of the WIA and of the KA, when that period ends in 30 days.
-- `SD+PA+PB`: Verify that the PuB-EAA Provider, which chains revocation, issues the attestation with an expiry no later than the end of the revocation maintenance period of the WIA and of the KA, when that period ends in 30 days.
-- `SD+PA+E`: Verify that the non-qualified EAA Provider, which chains revocation, issues the attestation with an expiry no later than the end of the revocation maintenance period of the WIA and of the KA, when that period ends in 30 days.
+- `SD+PA+Q`: Verify that the QEAA Provider, which chains revocation, issues the attestation with an expiry no later than the end of the revocation maintenance period of the WIA and of the KA, when that period ends in 31 days.
+- `SD+PA+PB`: Verify that the PuB-EAA Provider, which chains revocation, issues the attestation with an expiry no later than the end of the revocation maintenance period of the WIA and of the KA, when that period ends in 31 days.
+- `SD+PA+E`: Verify that the non-qualified EAA Provider, which chains revocation, issues the attestation with an expiry no later than the end of the revocation maintenance period of the WIA and of the KA, when that period ends in 31 days.
 
 ## References
 
 - [ARF] Annex 2, ISSU_12d
 - [TS3] section 2.4.1
+- [TS3] section 2.4.2
 
 ## Profile applicability
 
@@ -36,8 +37,8 @@ EUDI_specific | EUDI_required
 
 ## Test Scenario
 
-1. The adapter creates a credential offer for `SUBJ-1` and the attestation configuration in SD-JWT VC format, pre-authorized code. `CW-1` runs `SCN-I`: token request with WIA, PoP and DPoP proof, nonce request, credential request with an `openid4vci-proof+jwt` that carries the KA, all valid except that the `exp` member of the `client_status` claim of its WIA, the end of the revocation maintenance period, is 30 days from now.
-2. The adapter creates a credential offer for `SUBJ-1` and the attestation configuration in SD-JWT VC format, pre-authorized code. `CW-1` runs `SCN-I`: token request with WIA, PoP and DPoP proof, nonce request, credential request with an `openid4vci-proof+jwt` that carries the KA, all valid except that the `exp` member of the `key_storage_status` claim of its KA, the end of the revocation maintenance period, is 30 days from now.
+1. The adapter creates a credential offer for `SUBJ-1` and the attestation configuration in SD-JWT VC format, pre-authorized code. `CW-1` runs `SCN-I`: token request with WIA, PoP and DPoP proof, nonce request, credential request with an `openid4vci-proof+jwt` that carries the KA, all valid except that the `exp` member of the `client_status` claim of its WIA, the end of the revocation maintenance period, is 31 days from now (the minimum TS3 section 2.4.2 guarantees a Wallet Unit can present).
+2. The adapter creates a credential offer for `SUBJ-1` and the attestation configuration in SD-JWT VC format, pre-authorized code. `CW-1` runs `SCN-I`: token request with WIA, PoP and DPoP proof, nonce request, credential request with an `openid4vci-proof+jwt` that carries the KA, all valid except that the `exp` member of the `key_storage_status` claim of its KA, the end of the revocation maintenance period, is 31 days from now (the minimum TS3 section 2.4.2 guarantees a Wallet Unit can present).
 
 ## Expected results
 
@@ -47,5 +48,7 @@ EUDI_specific | EUDI_required
 ## Comments
 
 Each step shortens the maintenance period of one attestation; the other keeps its period of more than a year, so only the shortened one bounds the expiry.
+
+The stimulus is 31 days, the remaining period TS3 section 2.4.2 guarantees a Wallet Unit can always present; it was 30 days before the spec review of 2026-11-20 (as PP_WS_SM_ClientAttestation_015 and PP_WS_SM_KeyAttestation_011).
 
 Variants (issuer catalogue section 2.3), each executed when the Provider's ICS puts it in the profiles named: `SD+PA+Q` (`P-Q`, `P-SD`, `P-PA`, `P-CHAIN`), `SD+PA+PB` (`P-PB`, `P-SD`, `P-PA`, `P-CHAIN`), `SD+PA+E` (`P-E`, `P-SD`, `P-PA`, `P-CHAIN`).

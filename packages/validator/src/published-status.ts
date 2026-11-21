@@ -258,7 +258,10 @@ export async function evaluatePublishedStatus(input: PublishedStatusInput): Prom
     const exp = typeof token.exp === 'number' ? token.exp : undefined;
     const directives = cacheDirectives(first.headers['cache-control']);
     const expires = first.headers.expires ? Date.parse(first.headers.expires) / 1000 : undefined;
-    if (!first.headers['cache-control'] && expires === undefined) failWith('the response sets neither Cache-Control nor Expires');
+    // Token Status List (draft 21) puts no cache-header duty on the Status Provider: section 8.2 only says that "If
+    // caching-related HTTP headers are present", Relying Parties prioritise exp and ttl. Missing headers pass; headers
+    // that are present must not let an HTTP cache (which does not read the token) serve it beyond ttl or exp.
+    if (!first.headers['cache-control'] && expires === undefined) return 'no caching-related headers (none required; Relying Parties follow ttl and exp)';
     if (directives.has('no-store') || directives.has('no-cache')) return `Cache-Control ${first.headers['cache-control']}: never served from a cache`;
     const maxAge = directives.get('s-maxage') ?? directives.get('max-age');
     if (maxAge !== undefined) {

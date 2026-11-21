@@ -2,13 +2,15 @@
 
 ## Objective
 
-- `SD+PA+Q`: Verify that the QEAA Provider rejects oversized requests and deeply nested JSON, and stays available.
-- `SD+PA+PB`: Verify that the PuB-EAA Provider rejects oversized requests and deeply nested JSON, and stays available.
-- `SD+PA+E`: Verify that the non-qualified EAA Provider rejects oversized requests and deeply nested JSON, and stays available.
+- `SD+PA+Q`: Verify that the QEAA Provider rejects an oversized request, records how it handles deeply nested JSON, and stays available.
+- `SD+PA+PB`: Verify that the PuB-EAA Provider rejects an oversized request, records how it handles deeply nested JSON, and stays available.
+- `SD+PA+E`: Verify that the non-qualified EAA Provider rejects an oversized request, records how it handles deeply nested JSON, and stays available.
 
 ## References
 
 - [OWASP API Security Top 10] API4:2023
+- [OpenID4VCI] section 8.2
+- [RFC8259] section 9
 
 ## Profile applicability
 
@@ -41,8 +43,8 @@ EUDI_generic | EUDI_required
 
 ## Expected results
 
-1. The Provider issues no credential and no token for the request and answers with HTTP 4xx and an OAuth or OpenID4VCI error object; never HTTP 5xx.
-2. The Provider issues no credential and no token for the request and answers with HTTP 4xx and an OAuth or OpenID4VCI error object; never HTTP 5xx.
+1. The Provider issues no credential and answers with HTTP 4xx (an OAuth error object is not required: a server may refuse an oversized body before OAuth processing, for example with HTTP 413); never HTTP 5xx.
+2. The outcome is recorded; HTTP 5xx fails. The nested member is unknown, which OpenID4VCI 1.0 section 8.2 says "The Credential Issuer MUST ignore", and RFC 8259 section 9 only allows a parser to limit the nesting depth ("may set limits"), so both rejecting and issuing conform.
 3. Per variant:
     - `SD+PA+Q`: The Provider issues the credential (HTTP 200) in SD-JWT VC format (`dc+sd-jwt`). Every credential passes format, `issuer-trust` to `QP-T` with its granted qualified EAA service on `TL-QEAA`, `issuer-signature`, `disclosures`, `validity`, `holder-binding` (bound to a proof key the KA attests) and `status-reference`, and the Status List Token it references passes the status list checks.
     - `SD+PA+PB`: The Provider issues the credential (HTTP 200) in SD-JWT VC format (`dc+sd-jwt`). Every credential passes format, `issuer-trust` to `PB-T` on `TL-PUB`, `issuer-signature`, `disclosures`, `validity`, `holder-binding` (bound to a proof key the KA attests) and `status-reference`, and the Status List Token it references passes the status list checks.
@@ -51,5 +53,7 @@ EUDI_generic | EUDI_required
 ## Comments
 
 Step 3 shows that the Provider is still available after the two requests.
+
+Spec review 2026-11-20 (issuer catalogue section 8.3): a 413 without an error object is a valid rejection of step 1, and step 2 is informational.
 
 Variants (issuer catalogue section 2.3), each executed when the Provider's ICS puts it in the profiles named: `SD+PA+Q` (`P-Q`, `P-SD`, `P-PA`), `SD+PA+PB` (`P-PB`, `P-SD`, `P-PA`), `SD+PA+E` (`P-E`, `P-SD`, `P-PA`).

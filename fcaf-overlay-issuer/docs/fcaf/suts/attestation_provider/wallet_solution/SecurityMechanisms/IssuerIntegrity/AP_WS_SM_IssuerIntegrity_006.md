@@ -2,14 +2,14 @@
 
 ## Objective
 
-- `SD+PA+Q`, `SD+PA+PB`, `SD+PA+E`: Verify that every disclosure salt of the SD-JWT VC attestation has at least 128 bits and is unique within the credential.
+- `SD+PA+Q`, `SD+PA+PB`, `SD+PA+E`: Verify that every disclosure salt of the SD-JWT VC attestation is unique within the credential, and record whether it reaches the RECOMMENDED 128 bits.
 - `MD+PA+Q`, `MD+PA+PB`, `MD+PA+E`: Verify that the `random` of every IssuerSignedItem of the mdoc attestation has at least 16 bytes and is unique within the credential.
 
 ## References
 
 - [ARF] Annex 2, ISSU_35 (a)
 - [RFC9901] section 9.3
-- [ISO/IEC 18013-5] section 9.1.2.5
+- [ISO/IEC 18013-5] section 9.1.2.5 (not verified)
 
 ## Profile applicability
 
@@ -53,7 +53,7 @@ EUDI_specific | EUDI_required
     - `SD+PA+E`: The Provider issues the credential (HTTP 200) in SD-JWT VC format (`dc+sd-jwt`). Every credential passes format, `issuer-trust` to `EP-T` under the anchor `CA-EP-T` that the rulebook of `default_credential_A` defines (`TA-EAA`), `issuer-signature`, `disclosures`, `validity`, `holder-binding` (bound to a proof key the KA attests) and `status-reference`, and the Status List Token it references passes the status list checks.
     - `MD+PA+E`: The Provider issues the credential (HTTP 200) in mdoc format (`mso_mdoc`). Every credential passes format, `issuer-trust` to `EP-T` under the anchor `CA-EP-T` that the rulebook of `default_credential_A` defines (`TA-EAA`), `issuer-signature`, `disclosures`, `validity`, `holder-binding` (bound to a proof key the KA attests) and `status-reference`, and the Status List Token it references passes the status list checks.
 2. Per variant:
-    - `SD+PA+Q`, `SD+PA+PB`, `SD+PA+E`: The salts are long and unique enough that no disclosure can be guessed. The named checks pass: `salt-entropy` (every disclosure salt, or mdoc `random`, has at least 128 bits, and none repeats within the credential).
+    - `SD+PA+Q`, `SD+PA+PB`, `SD+PA+E`: No salt repeats (RFC 9901 section 9.3: "A new salt MUST be chosen for each claim"); a salt below "The RECOMMENDED minimum length ... 128 bits" is recorded in the check detail, not failed. The named checks pass: `salt-entropy` (every disclosure salt, or mdoc `random`, has at least 128 bits, and none repeats within the credential).
     - `MD+PA+Q`, `MD+PA+PB`, `MD+PA+E`: The `random` values are long and unique enough that no element can be guessed from its digest. The named checks pass: `salt-entropy` (every disclosure salt, or mdoc `random`, has at least 128 bits, and none repeats within the credential).
 
 ## Comments
@@ -61,5 +61,7 @@ EUDI_specific | EUDI_required
 Execute this test case once for each format named and each grant the Provider declares in its ICS (ICS-02, ICS-03).
 
 OIDF `happy-flow` and `batch-issuance` cover this objective partly (issuer catalogue section 7).
+
+Spec review 2026-11-20 (issuer catalogue section 8.3): 128 bits is RECOMMENDED by RFC 9901 section 9.3, and ARF ISSU_35 is about uniqueness, so a shorter SD-JWT VC salt is no conformance failure. The ISO/IEC 18013-5 clause for the mdoc `random` was not available to the review.
 
 Variants (issuer catalogue section 2.3), each executed when the Provider's ICS puts it in the profiles named: `SD+PA+Q` (`P-Q`, `P-SD`, `P-PA`), `MD+PA+Q` (`P-Q`, `P-MD`, `P-PA`), `SD+PA+PB` (`P-PB`, `P-SD`, `P-PA`), `MD+PA+PB` (`P-PB`, `P-MD`, `P-PA`), `SD+PA+E` (`P-E`, `P-SD`, `P-PA`), `MD+PA+E` (`P-E`, `P-MD`, `P-PA`).

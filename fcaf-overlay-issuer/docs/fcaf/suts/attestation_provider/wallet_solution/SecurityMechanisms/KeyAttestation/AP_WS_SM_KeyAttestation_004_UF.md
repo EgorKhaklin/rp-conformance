@@ -2,14 +2,14 @@
 
 ## Objective
 
-- `SD+PA+Q`: Verify that the QEAA Provider rejects a KA signed under an anchor that `TL-WP` does not publish for key attestations at the credential endpoint in the pre-authorized code flow: `CA-X`, `PP-A`, the withdrawn `WP-W`, `WP-A`'s WIA CA.
-- `SD+PA+PB`: Verify that the PuB-EAA Provider rejects a KA signed under an anchor that `TL-WP` does not publish for key attestations at the credential endpoint in the pre-authorized code flow: `CA-X`, `PP-A`, the withdrawn `WP-W`, `WP-A`'s WIA CA.
-- `SD+PA+E`: Verify that the non-qualified EAA Provider rejects a KA signed under an anchor that `TL-WP` does not publish for key attestations at the credential endpoint in the pre-authorized code flow: `CA-X`, `PP-A`, the withdrawn `WP-W`, `WP-A`'s WIA CA.
+- `SD+PA+Q`: Verify that the QEAA Provider rejects a KA signed under an anchor that `TL-WP` does not publish at the credential endpoint in the pre-authorized code flow: `CA-X`, `PP-A`, the withdrawn `WP-W`; and record how it treats a KA under `WP-A`'s WIA CA.
+- `SD+PA+PB`: Verify that the PuB-EAA Provider rejects a KA signed under an anchor that `TL-WP` does not publish at the credential endpoint in the pre-authorized code flow: `CA-X`, `PP-A`, the withdrawn `WP-W`; and record how it treats a KA under `WP-A`'s WIA CA.
+- `SD+PA+E`: Verify that the non-qualified EAA Provider rejects a KA signed under an anchor that `TL-WP` does not publish at the credential endpoint in the pre-authorized code flow: `CA-X`, `PP-A`, the withdrawn `WP-W`; and record how it treats a KA under `WP-A`'s WIA CA.
 
 ## References
 
 - [ARF] Annex 2, ISSU_21, ISSU_28, ISSU_30
-- [TS3] section 3.2
+- [TS3] section 2.2.2.2
 - [ETSI TS 119 602]
 
 ## Profile applicability
@@ -40,15 +40,17 @@ EUDI_specific | EUDI_required
 1. The adapter creates a credential offer for `SUBJ-1` and the attestation configuration in SD-JWT VC format (pre-authorized code flow). `CW-1` runs `SCN-I`: token request with WIA, PoP and DPoP proof, nonce request, credential request with an `openid4vci-proof+jwt` that carries the KA in its `key_attestation` header, all valid except that its KA is signed by a certificate issued by `CA-X`, which no list of the suite contains.
 2. The adapter creates a credential offer for `SUBJ-1` and the attestation configuration in SD-JWT VC format (pre-authorized code flow). `CW-1` runs `SCN-I`: token request with WIA, PoP and DPoP proof, nonce request, credential request with an `openid4vci-proof+jwt` that carries the KA in its `key_attestation` header, all valid except that its KA is signed by a certificate under `PP-A`'s issuance CA in `TL-attestation`.
 3. The adapter creates a credential offer for `SUBJ-1` and the attestation configuration in SD-JWT VC format (pre-authorized code flow). `CW-1` runs `SCN-I`: token request with WIA, PoP and DPoP proof, nonce request, credential request with an `openid4vci-proof+jwt` that carries the KA in its `key_attestation` header, all valid except that its KA is signed by a certificate under the issuance anchor of the withdrawn Wallet Provider `WP-W`.
-4. The adapter creates a credential offer for `SUBJ-1` and the attestation configuration in SD-JWT VC format (pre-authorized code flow). `CW-1` runs `SCN-I`: token request with WIA, PoP and DPoP proof, nonce request, credential request with an `openid4vci-proof+jwt` that carries the KA in its `key_attestation` header, all valid except that its KA is signed by a certificate under `WP-A`'s WIA CA, the anchor `TL-WP` lists for `WP-A`'s Wallet Solution (ServiceName `WP-A Wallet`), not for its key attestations.
+4. The adapter creates a credential offer for `SUBJ-1` and the attestation configuration in SD-JWT VC format (pre-authorized code flow). `CW-1` runs `SCN-I`: token request with WIA, PoP and DPoP proof, nonce request, credential request with an `openid4vci-proof+jwt` that carries the KA in its `key_attestation` header, all valid, and its KA is signed by a certificate under `WP-A`'s WIA CA, the anchor `TL-WP` lists for `WP-A`'s Wallet Solution (ServiceName `WP-A Wallet`), not for its key attestations.
 
 ## Expected results
 
 1. The Provider issues no credential and no token for the request and answers with HTTP 4xx and an OAuth or OpenID4VCI error object with `error` `invalid_proof`; never HTTP 5xx.
 2. The Provider issues no credential and no token for the request and answers with HTTP 4xx and an OAuth or OpenID4VCI error object with `error` `invalid_proof`; never HTTP 5xx.
 3. The Provider issues no credential and no token for the request and answers with HTTP 4xx and an OAuth or OpenID4VCI error object with `error` `invalid_proof`; never HTTP 5xx.
-4. The Provider issues no credential and no token for the request and answers with HTTP 4xx and an OAuth or OpenID4VCI error object with `error` `invalid_proof`; never HTTP 5xx.
+4. Whether the Provider rejects the KA or issues the attestation is recorded; HTTP 5xx fails. Both conform: TS3 section 2.2.2.2 requires a chain to "a trust anchor found on the Trusted List for Wallet Providers", which the WIA CA of `WP-A` is.
 
 ## Comments
+
+Stimulus (d) is informational since the spec review of 2026-11-20 (issuer catalogue section 8.3): TS3 and ARF ISSU_28 and ISSU_30 bind the anchors to the Wallet Provider, not to one of its services, and TS3 section 3.2, which is informative, maps no KA field to a service.
 
 Variants (issuer catalogue section 2.3), each executed when the Provider's ICS puts it in the profiles named: `SD+PA+Q` (`P-Q`, `P-SD`, `P-PA`), `SD+PA+PB` (`P-PB`, `P-SD`, `P-PA`), `SD+PA+E` (`P-E`, `P-SD`, `P-PA`).

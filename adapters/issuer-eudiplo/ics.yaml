@@ -69,6 +69,7 @@ items:
   ICS-14.c_nonce: PT10M                      # source: nonce.service.ts expiresAt now + 10 min
   ICS-14.access_token: PT1M                  # live: the adapter sets token.lifetimeSeconds 60 (EUDIPLO's minimum) on the built-in authorization server; expires_in 60 in the token response
   ICS-15.T_refresh: PT5M                     # source: trust-store.service.ts cacheTtlMs 5 min; refreshTrust clears the cache (DELETE /api/cache/trust-list, live)
+  ICS-15.invalid_version: discard            # source: trust-store.service.ts fails closed when a fetched TL-WP does not verify ("Wallet provider trust lists could not be loaded"); no specification requires keeping the previous list, and refreshTrust (DELETE /api/cache/trust-list) discards the cached list itself
   ICS-15.next_update_grace: PT0S             # source: a list whose NextUpdate has passed is discarded at once, also as wallet provider list, and so is one with a lower LoTESequenceNumber than one accepted before (docs trust/trust-lists.md, EUDIPLO/eudiplo#1441, #1457)
   ICS-16.min_entries: 10000                  # live: status list capacity 10000 (STATUS_CAPACITY default, set explicitly)
   ICS-16.timestamp_precision: PT1H           # source: issuance and expiry times rounded to the hour (credential-time.util.ts)

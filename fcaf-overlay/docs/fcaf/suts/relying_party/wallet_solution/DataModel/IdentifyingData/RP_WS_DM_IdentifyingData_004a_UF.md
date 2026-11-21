@@ -2,7 +2,7 @@
 
 ## Objective
 
-Verify that the Relying Party does not silently accept PID attributes in SD-JWT VC format whose values have the wrong data type.
+Record how the Relying Party handles PID attributes in SD-JWT VC format whose values have the wrong data type.
 
 ## References
 
@@ -37,9 +37,11 @@ EUDI_specific | EUDI_optional
 
 ## Expected results
 
-1. The Relying Party rejects the presentation: its verification result reports a failure and releases no attribute value from the presentation, and the endpoint receiving the Authorization Response does not answer with HTTP status 5xx. Alternatively, it accepts the presentation and its verification result flags `birthdate` as invalid (`attribute-invalid`). It does not accept the presentation without such a flag.
-2. The Relying Party rejects the presentation: its verification result reports a failure and releases no attribute value from the presentation, and the endpoint receiving the Authorization Response does not answer with HTTP status 5xx. Alternatively, it accepts the presentation and its verification result flags `nationalities` as invalid (`attribute-invalid`). It does not accept the presentation without such a flag.
+1. Whether the Relying Party rejects the presentation, flags `birthdate` as invalid (`attribute-invalid`), or accepts it as it is, is recorded; HTTP 5xx fails.
+2. Whether the Relying Party rejects the presentation, flags `nationalities` as invalid (`attribute-invalid`), or accepts it as it is, is recorded; HTTP 5xx fails.
 
 ## Comments
+
+Informational since the spec review of 2026-11-20 (catalogue section 8.3): the PID Rulebook and ISO 8601-1 bind the issuer of the value; neither OpenID4VP 1.0 section 8.6 nor the ARF requires a Relying Party to validate the data type of an attribute. Rejecting the presentation or flagging the attribute invalid is the hardened behaviour.
 
 Execute this test case once for each presentation flow the Relying Party supports (redirects, W3C Digital Credentials API).

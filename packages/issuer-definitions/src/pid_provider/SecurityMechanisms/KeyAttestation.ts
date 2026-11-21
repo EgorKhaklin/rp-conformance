@@ -1,7 +1,7 @@
 // PP_WS_SM_KeyAttestation: the KA at the credential endpoint, in the `key_attestation` header of the key proof and as
 // the `attestation` proof type, issuer catalogue section 5.1.3. One definition per test case and variant; the variants
 // run so far are `SD` × `PA`, as for the positive control `PP_WS_IA_MainInteraction_001`.
-import { type FormatVariant, type GrantVariant, type IssuerTestCaseDefinition, issuerProfiles, relevancy } from '@rp-conformance/core';
+import { type FormatVariant, type GrantVariant, type IssuerExpectation, type IssuerTestCaseDefinition, issuerProfiles, relevancy } from '@rp-conformance/core';
 import { FORMAT_NAMES, GRANT_NAMES, iss, pidProfile } from '../../wording';
 import { faultStep, issuanceStep, maintenanceConf, rejected, revocationStep, STATUS_LIST_FAULTS, STATUS_LIST_HTTP, statusListSteps, validStep, securityTestCase } from './attestations';
 
@@ -10,6 +10,12 @@ const OPENID4VCI = '[OpenID4VCI] Appendix D';
 const testCase = securityTestCase({ relevancy: relevancy.specificRequired });
 
 const invalidProof = rejected('invalid_proof');
+
+/** `PP_WS_SM_KeyAttestation_007_UF` steps 3 and 4: the `nonce` of a KA in a `jwt` proof is not checked by a rule of the Credential Issuer. */
+const jwtNonceInfo: IssuerExpectation = {
+  codes: ['INFO'],
+  text: 'Whether the Provider rejects the request or issues the PID is recorded; HTTP 5xx fails. OpenID4VCI 1.0 Appendix F.4 and TS3 section 2.2.2.2 require the `c_nonce` in the `jwt` proof, which carries it, not in its KA.',
+};
 
 function keyAttestation(format: FormatVariant, grant: GrantVariant): IssuerTestCaseDefinition[] {
   const id = (n: string) => `PP_WS_SM_KeyAttestation_${n}`;
@@ -49,9 +55,18 @@ function keyAttestation(format: FormatVariant, grant: GrantVariant): IssuerTestC
     }),
     testCase(format, grant, {
       id: id('004_UF'),
-      objective: `Verify that the PID Provider rejects a KA signed under an anchor that \`TL-WP\` does not publish for key attestations ${where}: \`CA-X\`, \`PP-A\`, the withdrawn \`WP-W\`, \`WP-A\`'s WIA CA.`,
-      references: ['[ARF] Annex 2, ISSU_21, ISSU_28, ISSU_30', '[TS3] section 3.2', '[ETSI TS 119 602]'],
-      steps: (['ka.signer-ca-x', 'ka.signer-pp-a', 'ka.signer-wp-w', 'ka.signer-wia-ca'] as const).map((fault) => faultStep(format, grant, fault, invalidProof)),
+      objective: `Verify that the PID Provider rejects a KA signed under an anchor that \`TL-WP\` does not publish ${where}: \`CA-X\`, \`PP-A\`, the withdrawn \`WP-W\`; and record how it treats a KA under \`WP-A\`'s WIA CA.`,
+      references: ['[ARF] Annex 2, ISSU_21, ISSU_28, ISSU_30', '[TS3] section 2.2.2.2', '[ETSI TS 119 602]'],
+      steps: [
+        ...(['ka.signer-ca-x', 'ka.signer-pp-a', 'ka.signer-wp-w'] as const).map((fault) => faultStep(format, grant, fault, invalidProof)),
+        faultStep(format, grant, 'ka.signer-wia-ca', {
+          codes: ['INFO'],
+          text: 'Whether the Provider rejects the KA or issues the PID is recorded; HTTP 5xx fails. Both conform: TS3 section 2.2.2.2 requires a chain to "a trust anchor found on the Trusted List for Wallet Providers", which the WIA CA of `WP-A` is.',
+        }),
+      ],
+      comments: [
+        'Stimulus (d) is informational since the spec review of 2026-11-20 (issuer catalogue section 8.3): TS3 and ARF ISSU_28 and ISSU_30 bind the anchors to the Wallet Provider, not to one of its services, and TS3 section 3.2, which is informative, maps no KA field to a service.',
+      ],
     }),
     testCase(format, grant, {
       id: id('005_UF'),
@@ -68,18 +83,19 @@ function keyAttestation(format: FormatVariant, grant: GrantVariant): IssuerTestC
     }),
     testCase(format, grant, {
       id: id('007_UF'),
-      objective: `Verify that the PID Provider, which offers a nonce endpoint, rejects a KA whose \`nonce\` is a \`c_nonce\` of another session, and a KA without \`nonce\`, in the \`key_attestation\` header and as the \`attestation\` proof type, ${where}.`,
-      references: ['[ARF] Annex 2, WUA_10b', '[OpenID4VCI] Appendix D.1 and F.3'],
+      objective: `Verify that the PID Provider, which offers a nonce endpoint, rejects a KA without \`nonce\` sent as the \`attestation\` proof type ${where}, and record how it treats the \`nonce\` of a KA in the \`key_attestation\` header of a \`jwt\` proof.`,
+      references: ['[ARF] Annex 2, WUA_10b', '[OpenID4VCI] Appendix D.1, F.1, F.3 and F.4', '[TS3] section 2.2.2.2'],
       profile: [...pidProfile(format, grant), issuerProfiles['P-DPN']],
       steps: [
         validStep(format, grant, { unit: 'CW-2', why: 'its `c_nonce` is the nonce of another session in the next step' }),
         validStep(format, grant, { why: 'the KA carries the `c_nonce` of this request in its `nonce` claim', action: { keyAttestationNonce: true } }),
-        faultStep(format, grant, 'ka.nonce-other-session', rejected(['invalid_nonce', 'invalid_proof']), { keyAttestationNonce: true }),
-        faultStep(format, grant, 'ka.nonce-missing', rejected(['invalid_nonce', 'invalid_proof']), { keyAttestationNonce: true }),
+        faultStep(format, grant, 'ka.nonce-other-session', jwtNonceInfo, { keyAttestationNonce: true }),
+        faultStep(format, grant, 'ka.nonce-missing', jwtNonceInfo, { keyAttestationNonce: true }),
         faultStep(format, grant, 'ka.nonce-missing', rejected(['invalid_nonce', 'invalid_proof']), { proofType: 'attestation' }),
       ],
       comments: [
-        'A Provider with a nonce endpoint requires the `c_nonce` in the KA both in the `key_attestation` header of a `jwt` proof (OpenID4VCI 1.0 Appendix F.1: "the `nonce` claim in the key attestation MUST be set to a server-provided `c_nonce`") and as the `attestation` proof type (Appendix F.3). The step without `nonce` is run in both proof types; the last one sends the KA as the only proof, of proof type `attestation`.',
+        'As the `attestation` proof type the KA is the key proof, so OpenID4VCI 1.0 Appendix F.4 ("if the server has a Nonce Endpoint, the nonce in the key proof matches the server-provided `c_nonce` value") and TS3 section 2.2.2.2 require its `c_nonce`: step 5 expects the rejection.',
+        'In a `jwt` proof (steps 3 and 4) the nonce that F.4 and TS3 section 2.2.2.2 ("the `jwt` element includes a valid `c_nonce`") require is the proof\'s own, which is valid. Appendix F.1 says the KA\'s `nonce` "MUST be set to a server-provided `c_nonce`", a rule for the wallet that F.4 does not turn into a check of the Credential Issuer; step 4 is the same request as the valid baseline of the area. Both steps are informational since the spec review of 2026-11-20 (issuer catalogue section 8.3).',
       ],
     }),
     testCase(format, grant, {
@@ -119,10 +135,13 @@ function keyAttestation(format: FormatVariant, grant: GrantVariant): IssuerTestC
     }),
     testCase(format, grant, {
       id: id('011'),
-      objective: `Verify that the PID Provider issues the PID in ${FORMAT_NAMES[format]} format with an expiry no later than the end of the KA's revocation maintenance period, when that period ends in 30 days.`,
-      references: ['[ARF] Annex 2, ISSU_12c, WUA_30', '[TS3] section 2.4.1'],
-      steps: [faultStep(format, grant, 'ka.maintenance-30-days', maintenanceConf(format, 'KA'))],
-      comments: ['PID only. The WIA keeps its maintenance period of more than a year, so only the KA bounds the expiry.'],
+      objective: `Verify that the PID Provider issues the PID in ${FORMAT_NAMES[format]} format with an expiry no later than the end of the KA's revocation maintenance period, when that period ends in 31 days.`,
+      references: ['[ARF] Annex 2, ISSU_12c, WUA_30', '[TS3] sections 2.4.1, 2.4.2 and 2.4.3'],
+      steps: [faultStep(format, grant, 'ka.maintenance-31-days', maintenanceConf(format, 'KA'))],
+      comments: [
+        'PID only. The WIA keeps its maintenance period of more than a year, so only the KA bounds the expiry.',
+        'An EUDI/TS3 requirement (TS3 section 2.4.3, ARF ISSU_12c). The stimulus is 31 days, the remaining period TS3 section 2.4.2 guarantees; it was 30 days before the spec review of 2026-11-20.',
+      ],
     }),
     testCase(format, grant, {
       id: id('012_UF'),

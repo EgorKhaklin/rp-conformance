@@ -2,14 +2,15 @@
 
 ## Objective
 
-- `SD+PA+Q`: Verify that the QEAA Provider, which offers a nonce endpoint, rejects a KA whose `nonce` is a `c_nonce` of another session, and a KA without `nonce`, in the `key_attestation` header and as the `attestation` proof type, at the credential endpoint in the pre-authorized code flow.
-- `SD+PA+PB`: Verify that the PuB-EAA Provider, which offers a nonce endpoint, rejects a KA whose `nonce` is a `c_nonce` of another session, and a KA without `nonce`, in the `key_attestation` header and as the `attestation` proof type, at the credential endpoint in the pre-authorized code flow.
-- `SD+PA+E`: Verify that the non-qualified EAA Provider, which offers a nonce endpoint, rejects a KA whose `nonce` is a `c_nonce` of another session, and a KA without `nonce`, in the `key_attestation` header and as the `attestation` proof type, at the credential endpoint in the pre-authorized code flow.
+- `SD+PA+Q`: Verify that the QEAA Provider, which offers a nonce endpoint, rejects a KA without `nonce` sent as the `attestation` proof type at the credential endpoint in the pre-authorized code flow, and record how it treats the `nonce` of a KA in the `key_attestation` header of a `jwt` proof.
+- `SD+PA+PB`: Verify that the PuB-EAA Provider, which offers a nonce endpoint, rejects a KA without `nonce` sent as the `attestation` proof type at the credential endpoint in the pre-authorized code flow, and record how it treats the `nonce` of a KA in the `key_attestation` header of a `jwt` proof.
+- `SD+PA+E`: Verify that the non-qualified EAA Provider, which offers a nonce endpoint, rejects a KA without `nonce` sent as the `attestation` proof type at the credential endpoint in the pre-authorized code flow, and record how it treats the `nonce` of a KA in the `key_attestation` header of a `jwt` proof.
 
 ## References
 
 - [ARF] Annex 2, WUA_10b
-- [OpenID4VCI] Appendix D.1 and F.3
+- [OpenID4VCI] Appendix D.1, F.1, F.3 and F.4
+- [TS3] section 2.2.2.2
 
 ## Profile applicability
 
@@ -53,12 +54,14 @@ EUDI_specific | EUDI_required
     - `SD+PA+Q`: The Provider issues the credential (HTTP 200) in SD-JWT VC format (`dc+sd-jwt`). Every credential passes format, `issuer-trust` to `QP-T` with its granted qualified EAA service on `TL-QEAA`, `issuer-signature`, `disclosures`, `validity`, `holder-binding` (bound to a proof key the KA attests) and `status-reference`, and the Status List Token it references passes the status list checks.
     - `SD+PA+PB`: The Provider issues the credential (HTTP 200) in SD-JWT VC format (`dc+sd-jwt`). Every credential passes format, `issuer-trust` to `PB-T` on `TL-PUB`, `issuer-signature`, `disclosures`, `validity`, `holder-binding` (bound to a proof key the KA attests) and `status-reference`, and the Status List Token it references passes the status list checks.
     - `SD+PA+E`: The Provider issues the credential (HTTP 200) in SD-JWT VC format (`dc+sd-jwt`). Every credential passes format, `issuer-trust` to `EP-T` under the anchor `CA-EP-T` that the rulebook of `default_credential_A` defines (`TA-EAA`), `issuer-signature`, `disclosures`, `validity`, `holder-binding` (bound to a proof key the KA attests) and `status-reference`, and the Status List Token it references passes the status list checks.
-3. The Provider issues no credential for the request and answers with HTTP 4xx and an OAuth or OpenID4VCI error object with `error` `invalid_nonce` or `invalid_proof`; never HTTP 5xx.
-4. The Provider issues no credential for the request and answers with HTTP 4xx and an OAuth or OpenID4VCI error object with `error` `invalid_nonce` or `invalid_proof`; never HTTP 5xx.
+3. Whether the Provider rejects the request or issues the attestation is recorded; HTTP 5xx fails. OpenID4VCI 1.0 Appendix F.4 and TS3 section 2.2.2.2 require the `c_nonce` in the `jwt` proof, which carries it, not in its KA.
+4. Whether the Provider rejects the request or issues the attestation is recorded; HTTP 5xx fails. OpenID4VCI 1.0 Appendix F.4 and TS3 section 2.2.2.2 require the `c_nonce` in the `jwt` proof, which carries it, not in its KA.
 5. The Provider issues no credential for the request and answers with HTTP 4xx and an OAuth or OpenID4VCI error object with `error` `invalid_nonce` or `invalid_proof`; never HTTP 5xx.
 
 ## Comments
 
-A Provider with a nonce endpoint requires the `c_nonce` in the KA both in the `key_attestation` header of a `jwt` proof (OpenID4VCI 1.0 Appendix F.1: "the `nonce` claim in the key attestation MUST be set to a server-provided `c_nonce`") and as the `attestation` proof type (Appendix F.3). The step without `nonce` is run in both proof types; the last one sends the KA as the only proof, of proof type `attestation`.
+As the `attestation` proof type the KA is the key proof, so OpenID4VCI 1.0 Appendix F.4 ("if the server has a Nonce Endpoint, the nonce in the key proof matches the server-provided `c_nonce` value") and TS3 section 2.2.2.2 require its `c_nonce`: step 5 expects the rejection.
+
+In a `jwt` proof (steps 3 and 4) the nonce that F.4 and TS3 section 2.2.2.2 ("the `jwt` element includes a valid `c_nonce`") require is the proof's own, which is valid. Appendix F.1 says the KA's `nonce` "MUST be set to a server-provided `c_nonce`", a rule for the wallet that F.4 does not turn into a check of the Credential Issuer; step 4 is the same request as the valid baseline of the area. Both steps are informational since the spec review of 2026-11-20 (issuer catalogue section 8.3).
 
 Variants (issuer catalogue section 2.3), each executed when the Provider's ICS puts it in the profiles named: `SD+PA+Q` (`P-Q`, `P-SD`, `P-PA`, `P-DPN`), `SD+PA+PB` (`P-PB`, `P-SD`, `P-PA`, `P-DPN`), `SD+PA+E` (`P-E`, `P-SD`, `P-PA`, `P-DPN`).

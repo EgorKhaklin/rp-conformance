@@ -285,13 +285,22 @@ export function checkIssuerIntegrity(credential: InspectedCredential, checks: Ch
           const short = credential.salts.filter((s) => s.bytes < 16);
           const seen = new Set<string>();
           const repeated = credential.salts.filter((s) => (seen.has(s.value) ? true : (seen.add(s.value), false)));
+          // RFC 9901 section 9.3: a new salt per claim is a MUST, 128 bits only "The RECOMMENDED minimum length": a
+          // shorter SD-JWT VC salt is recorded, not failed (spec review 2026-11-20). For the mdoc `random` the suite keeps
+          // the 16-byte minimum it attributes to ISO/IEC 18013-5 section 9.1.2.5 (not verified against the standard).
+          const shortFails = !sd;
+          const shortText = short.length ? `${short.length} of ${credential.salts.length} ${what} value(s) shorter than 128 bits (e.g. ${short[0]?.value}, ${short[0]?.bytes * 8} bits)` : undefined;
           const problems = [
-            ...(short.length ? [`${short.length} of ${credential.salts.length} ${what} value(s) shorter than 128 bits (e.g. ${short[0]?.value}, ${short[0]?.bytes * 8} bits)`] : []),
+            ...(shortText && shortFails ? [shortText] : []),
             ...(repeated.length ? [`${repeated.length} ${what} value(s) repeated`] : []),
             ...(credential.salts.length ? [] : [`no ${what} values`]),
           ];
           const min = Math.min(...credential.salts.map((s) => s.bytes));
-          results.push(problems.length ? failed(check, problems.join('; ')) : pass(check, `${credential.salts.length} ${what} values, unique, at least ${min * 8} bits`));
+          results.push(
+            problems.length
+              ? failed(check, problems.join('; '))
+              : pass(check, `${credential.salts.length} ${what} values, unique, at least ${min * 8} bits${shortText ? `; ${shortText}, below the RECOMMENDED minimum of RFC 9901 section 9.3 (recorded)` : ''}`),
+          );
           break;
         }
         case 'algorithm-advertised': {
