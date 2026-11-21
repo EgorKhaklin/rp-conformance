@@ -1,7 +1,8 @@
-"""Copies the project documents of the issuer suite into the site (scripts/site-build.sh): the issuer catalogue and
-harness design, and the EUDIPLO issuer adapter's README, ICS, known findings and upstream finding texts, below
-docs/issuer/. YAML files become pages with the file in a code block. A relative link to a document that is copied
-points to its copy; any other relative link points to the file on GitHub, so MkDocs finds no broken link.
+"""Copies the project documents of both suites into the site (scripts/site-build.sh), below docs/rp/ for the Relying
+Party suite and docs/issuer/ for the issuer suite: the test catalogue and the harness design, and the EUDIPLO adapter's
+README (where it has one), ICS, known findings and upstream finding texts. YAML files become pages with the file in a
+code block. A relative link to a document that is copied points to its copy; any other relative link points to the
+file on GitHub, so MkDocs finds no broken link.
 
     python3 scripts/site-project-pages.py <repository root> <docs dir>
 """
@@ -15,39 +16,69 @@ REPOSITORY = "https://github.com/cre8/rp-conformance"
 BRANCH = "main"
 LINK = re.compile(r"\]\((?!https?:|mailto:|#)([^)\s]+)\)")
 
+# Site directory -> the suite's documents and its EUDIPLO adapter. The two suites get the same pages.
+SUITES = {
+    "rp": {
+        "documents": {"rp-test-catalogue.md": "rp-test-catalogue.md", "harness-design.md": "harness-design.md"},
+        "adapter": "adapters/eudiplo",
+        "role": "Relying Party",
+        "suite": "Relying Party suite",
+        "flags": "rp-conformance run --adapter eudiplo",
+    },
+    "issuer": {
+        "documents": {
+            "issuer-test-catalogue.md": "issuer-test-catalogue.md",
+            "issuer-harness-design.md": "issuer-harness-design.md",
+        },
+        "adapter": "adapters/issuer-eudiplo",
+        "role": "PID Provider and Attestation Provider",
+        "suite": "issuer suite",
+        "flags": "rp-conformance issuer run --adapter eudiplo",
+    },
+}
+
 
 def pages(root: pathlib.Path) -> dict[str, str]:
     """Repository path -> site path below docs/, for every page copied."""
-    out = {
-        "issuer-test-catalogue.md": "issuer/issuer-test-catalogue.md",
-        "issuer-harness-design.md": "issuer/issuer-harness-design.md",
-        "adapters/issuer-eudiplo/README.md": "issuer/eudiplo/index.md",
-        "adapters/issuer-eudiplo/ics.yaml": "issuer/eudiplo/ics.md",
-        "adapters/issuer-eudiplo/known-findings.yaml": "issuer/eudiplo/known-findings.md",
-        # The directory, linked from the README, becomes a generated list of its pages.
-        "adapters/issuer-eudiplo/upstream-findings": "issuer/eudiplo/upstream-findings/index.md",
-    }
-    findings = root / "adapters/issuer-eudiplo/upstream-findings"
-    for finding in sorted([*findings.glob("*.md"), *findings.glob("suggestions/*.md")]):
-        name = finding.relative_to(findings).as_posix()
-        # The folder's README, where there is one, is its index page instead of the generated list.
-        target = "index.md" if name == "README.md" else name
-        out[f"adapters/issuer-eudiplo/upstream-findings/{name}"] = f"issuer/eudiplo/upstream-findings/{target}"
+    out = {}
+    for site, suite in SUITES.items():
+        adapter = suite["adapter"]
+        for source, target in suite["documents"].items():
+            out[source] = f"{site}/{target}"
+        if (root / adapter / "README.md").exists():
+            out[f"{adapter}/README.md"] = f"{site}/eudiplo/index.md"
+        out[f"{adapter}/ics.yaml"] = f"{site}/eudiplo/ics.md"
+        out[f"{adapter}/known-findings.yaml"] = f"{site}/eudiplo/known-findings.md"
+        # The directory, linked from the README, becomes its README or a generated list of its pages.
+        out[f"{adapter}/upstream-findings"] = f"{site}/eudiplo/upstream-findings/index.md"
+        findings = root / adapter / "upstream-findings"
+        for finding in sorted([*findings.glob("*.md"), *findings.glob("suggestions/*.md")]):
+            name = finding.relative_to(findings).as_posix()
+            # The folder's README, where there is one, is its index page instead of the generated list.
+            target = "index.md" if name == "README.md" else name
+            out[f"{adapter}/upstream-findings/{name}"] = f"{site}/eudiplo/upstream-findings/{target}"
     return out
 
 
-YAML_TITLES = {
-    "adapters/issuer-eudiplo/ics.yaml": (
-        "EUDIPLO ICS",
-        "The Implementation Conformance Statement of EUDIPLO as PID Provider, as the issuer adapter configures the "
-        "reference image: the file the issuer suite runs with (`--ics adapters/issuer-eudiplo/ics.yaml`).",
-    ),
-    "adapters/issuer-eudiplo/known-findings.yaml": (
-        "EUDIPLO known findings",
-        "The FAILs of the issuer suite against EUDIPLO that are analysed and reported upstream: the reference run and "
-        "the nightly run report them as known findings (`--known-findings adapters/issuer-eudiplo/known-findings.yaml`).",
-    ),
-}
+def yaml_titles() -> dict[str, tuple[str, str]]:
+    """Repository path of a YAML file -> title and introduction of its page."""
+    out = {}
+    for suite in SUITES.values():
+        adapter, role, name, flags = suite["adapter"], suite["role"], suite["suite"], suite["flags"]
+        out[f"{adapter}/ics.yaml"] = (
+            "EUDIPLO ICS",
+            f"The Implementation Conformance Statement of EUDIPLO as {role}, as the adapter configures the reference "
+            f"image: the file the {name} runs with (`{flags} --ics {adapter}/ics.yaml`).",
+        )
+        out[f"{adapter}/known-findings.yaml"] = (
+            "EUDIPLO known findings",
+            f"The FAILs of the {name} against EUDIPLO that are analysed and accepted as findings of EUDIPLO: the runs "
+            f"against it report them as known findings (`--known-findings {adapter}/known-findings.yaml`).",
+        )
+    return out
+
+
+YAML_TITLES = yaml_titles()
 
 
 def rewrite_links(text: str, source: str, mapping: dict[str, str]) -> str:
@@ -79,8 +110,8 @@ def main(root: pathlib.Path, docs: pathlib.Path) -> None:
             ]
             text = (
                 "# EUDIPLO upstream findings\n\n"
-                "Issue texts prepared for the known findings of the issuer suite against EUDIPLO. They are not filed by "
-                "this project; each names the test cases that show the finding.\n\n" + "\n".join(items) + "\n"
+                "Issue texts prepared for the known findings against EUDIPLO. They are not filed by this project; each "
+                "names the test cases that show the finding.\n\n" + "\n".join(items) + "\n"
             )
         elif source in YAML_TITLES:
             title, intro = YAML_TITLES[source]

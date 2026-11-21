@@ -24,13 +24,14 @@ It also adds the tests a PID Provider must pass when it issues PIDs with OpenID4
 | [(ap_ws) Wallet Solution](fcaf/suts/attestation_provider/wallet_solution/ap_ws.md) | Test cases on what a QEAA, PuB-EAA or non-qualified EAA Provider receives from and issues to a Wallet Unit, including configurations that are not device-bound, revocation chaining by policy and the rulebook of the attestation |
 | [Defaults: PID Provider testing](fcaf/defaults.md#pid-provider-testing) | Test roles, trust configuration, Wallet Units and subjects, `default_configuration_PP_1`, expected result codes |
 | [ICS (PID and Attestation Provider)](fcaf/ics-issuer.md) | The Provider ICS items and the profiles they select |
-| [Issuer suite](issuer/index.md) | Status of the issuer suite, its catalogue and harness design, and EUDIPLO as reference issuer with its ICS and known findings |
+| [Relying Party suite](rp/index.md) | The Relying Party suite, its catalogue and harness design, and EUDIPLO as reference verifier with its ICS and known findings |
+| [Issuer suite](issuer/index.md) | The issuer suite, its catalogue and harness design, and EUDIPLO as reference issuer with its ICS and known findings |
 
 Everything else is the FCAF itself; of its pages only the defaults, the references, the navigation and the SUT overview are extended.
 
 ## The harness
 
-The test cases are rendered from executable definitions. The [harness](https://github.com/cre8/rp-conformance) runs them unattended against a Relying Party or a PID Provider through an adapter: a Conformance Wallet, status list and trust list servers, and an artifact forge that injects exactly one fault per test step, both over redirects and over the W3C Digital Credentials API; for a PID Provider an issuance client with a Test Wallet Provider and a Test Registrar. The [README](https://github.com/cre8/rp-conformance#readme) shows how to run it, the [test catalogue](https://github.com/cre8/rp-conformance/blob/main/rp-test-catalogue.md) traces every test objective to the ARF, and the [harness design](https://github.com/cre8/rp-conformance/blob/main/harness-design.md) describes its parts; the [issuer suite](issuer/index.md) has its own catalogue and design.
+The test cases are rendered from executable definitions. The [harness](https://github.com/cre8/rp-conformance) runs them unattended against a Relying Party or a PID Provider through an adapter: a Conformance Wallet, status list and trust list servers, and an artifact forge that injects exactly one fault per test step, both over redirects and over the W3C Digital Credentials API; for a PID Provider an issuance client with a Test Wallet Provider and a Test Registrar. The [README](https://github.com/cre8/rp-conformance#readme) shows how to run it, and each suite has its test catalogue, which traces every test objective to the ARF, and its harness design: [Relying Party suite](rp/index.md), [issuer suite](issuer/index.md).
 
 ## Licence
 
