@@ -18,7 +18,8 @@
 # findings against the EUDI profile only (`basis: profile`: ARF, TS3, PID Rulebook; EUDIPLO conforms to the base
 # specification) remain. Findings whose test was wrong are gone with their tests corrected; findings without a MUST are
 # no longer FAILs (INFO or POLICY), and the texts kept for them are suggestions in upstream-findings/suggestions/.
-# Nothing is reported upstream yet: `reference` names the prepared issue text in upstream-findings/.
+# The confirmed findings were reported upstream on 2026-11-21 and `reference` names the issue; the profile-only ones are
+# not reported, and `reference` names the prepared issue text in upstream-findings/.
 
 # --- confirmed -------------------------------------------------------------------------------------------------------
 
@@ -28,14 +29,14 @@
   finding: >-
     A deferred credential request with an unknown transaction_id that is not a UUID is answered HTTP 500 instead of
     invalid_transaction_id (OpenID4VCI 1.0 section 9.3): the value reaches PostgreSQL's uuid column unchecked
-  reference: upstream-findings/deferred-transaction-id-500.md
+  reference: EUDIPLO/eudiplo#1618
 - testCase: PP_WS_SM_ProofOfPossession_002_UF
   variants: [SD+PA]
   basis: confirmed
   finding: >-
     A key proof with alg none is rejected, but with invalid_credential_request instead of invalid_proof (OpenID4VCI 1.0
     section 8.3.1.2; the code is a SHOULD); HS256 and ES256K get invalid_proof. Minor
-  reference: upstream-findings/proof-alg-none-error.md
+  reference: EUDIPLO/eudiplo#1619
 
 # --- EUDI profile only ----------------------------------------------------------------------------------------------
 
@@ -141,12 +142,12 @@
   variants: [SD+PA+Q, SD+PA+PB, SD+PA+E]
   basis: confirmed
   finding: As PP_WS_IA_Deferred_002_UF (the same behaviour for default_credential_A)
-  reference: upstream-findings/deferred-transaction-id-500.md
+  reference: EUDIPLO/eudiplo#1618
 - testCase: AP_WS_SM_ProofOfPossession_002_UF
   variants: [SD+PA+Q, SD+PA+PB, SD+PA+E]
   basis: confirmed
   finding: As PP_WS_SM_ProofOfPossession_002_UF (the same behaviour for default_credential_A)
-  reference: upstream-findings/proof-alg-none-error.md
+  reference: EUDIPLO/eudiplo#1619
 - testCase: AP_WS_SM_ClientAttestation_012_UF
   variants: [SD+PA+Q, SD+PA+PB, SD+PA+E]
   basis: profile
