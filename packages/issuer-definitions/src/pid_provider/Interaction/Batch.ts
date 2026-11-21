@@ -2,7 +2,7 @@
 // signed by another attested key of one KA.
 import { defineIssuerTestCase, type FormatVariant, type GrantVariant, ICS_BATCH_SIZE, relevancy } from '@rp-conformance/core';
 import { iss, issuance, preconditions, rej, technologyOf } from '../../wording';
-import { both, conf, FORMAT, faultStep, GRANT, MAIN, profileOf, rejAny, ufPreconditions } from '../session';
+import { both, conf, FORMAT, faultStep, GRANT, MAIN, profileOf, ufPreconditions } from '../session';
 
 const BATCH_SCN = '`CW-1` runs `SCN-I` for `SUBJ-1` without mutation, with a KA that attests `batch_size` keys (ICS-08) and a credential request with `batch_size` key proofs, each signed by another of these keys and carrying the KA.';
 const batch = (format: FormatVariant, grant: GrantVariant) => issuance(format, grant, { batchSize: ICS_BATCH_SIZE });

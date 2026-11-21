@@ -32,5 +32,6 @@ pnpm rp-conformance run --adapter eudiplo --only RP_WS_DM_IdentifyingData_001b
 
 FAIL in both flows: `place_of_birth.locality` and `place_of_birth.country` missing, `place_of_birth` released as `{}`
 (`artifacts/RP_WS_DM_IdentifyingData_001b/<flow>/step-1/rp-result.json`). Until 2026-11-20 the suite flattened released
-attributes in a way that dropped empty objects, which hid the same defect in other test cases that present
-`place_of_birth` in mdoc format without requesting it; it now reports them too.
+attributes in a way that dropped empty objects, so a `{}` released for an element the query did not request went
+unnoticed; with that fixed, no other test case of the run against EUDIPLO shows it (the other mdoc presentations carry
+no map element).
