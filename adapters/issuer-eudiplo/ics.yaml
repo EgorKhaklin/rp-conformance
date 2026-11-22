@@ -103,6 +103,7 @@ categories:
       ICS-17: seeds SUBJ-1 and SUBJ-2          # default_credential_A claims inline with each offer (ATTESTATION_TEST_SUBJECTS)
       ICS-18: reject                           # walletAttestationStatusCheckMode strict
       ICS-19: "Yes"                            # embeddedDisclosurePolicy allowList [https://rp.rp-test] on every configuration, published as disclosure_policy; changeDisclosurePolicy PATCHes another relying party
+      ICS-19.EDP.SD: qeaa-sd-jwt-vc-edp        # only AP_WS_SM_Revocation_102 issues from it and changes its embedded disclosure policy
   PB:
     profiles: [P-PB, P-SD, P-MD, P-PA, P-AC, P-DB, P-NDB, P-REV, P-SHORT, P-SUSP, P-HOOK, P-CHAIN, P-BATCH, P-REISS, P-DEF, P-NOT, P-ENC, P-DPN]
     items:

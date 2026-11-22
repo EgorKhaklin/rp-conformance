@@ -2,7 +2,8 @@
 // `AP_WS_MS_Metadata_100` to `_103`, `AP_WS_SM_KeyAttestation_100` to `_103`, `AP_WS_SM_Revocation_100` to `_103` and
 // `AP_WS_DM_Rulebook_100` to `_102`. One definition per test case and variant; every test case runs in the categories
 // its `Var` column allows, `Q`, `PB` and `E` unless it names some. The attestation is FCAF `default_credential_A`; a
-// configuration that is not device-bound is named in the ICS under `ICS-04.NDB.SD` (ICS-04, `P-NDB`).
+// configuration that is not device-bound is named in the ICS under `ICS-04.NDB.SD` (ICS-04, `P-NDB`), and the
+// configuration whose embedded disclosure policy `AP_WS_SM_Revocation_102` changes under `ICS-19.EDP.SD` (ICS-19, `P-EDP`).
 import {
   type AttestationCategory,
   ATTESTATION_CATEGORIES,
@@ -29,6 +30,11 @@ import { apIdOf, CATEGORY_WORDING, reword } from './variants';
 const CONTROL = 'AP_WS_IA_MainInteraction_001';
 /** The configuration of the attestation that is not device-bound (ICS-04, `P-NDB`); SD-JWT VC, since an mdoc always is. */
 export const NDB_CONFIGURATION = 'ICS-04.NDB.SD';
+/**
+ * The configuration `AP_WS_SM_Revocation_102` issues from and changes the embedded disclosure policy of (ICS-19,
+ * `P-EDP`): one no other test case issues from, since EDP_11 revokes every attestation issued under the old policy.
+ */
+export const EDP_CONFIGURATION = 'ICS-19.EDP.SD';
 
 /** Preconditions of every `AP_*` test case (catalogue sections 3.3 to 3.5, for an Attestation Provider). */
 export const apPreconditions = [
@@ -316,7 +322,11 @@ const revocation = [
     profile: ['P-EDP', 'P-REV'],
     technology: [...technologyOf('SD'), 'Token Status List'],
     steps: () => [
-      validIssuance('SD'),
+      {
+        text: `${scnI('SD', 'the attestation configuration with an embedded disclosure policy that only this test case issues from (`ICS-19.EDP.SD`)')} with an \`openid4vci-proof+jwt\` that carries the KA, all valid.`,
+        run: issuance('SD', 'PA', { configurations: [EDP_CONFIGURATION] }),
+        expect: issAp('SD'),
+      },
       {
         text: 'The adapter changes the embedded disclosure policy of the configuration of step 1 (`changeDisclosurePolicy`) and reports when the Provider has done so (`OBS-ADM`).',
         run: { kind: 'issuer-event', event: 'change-disclosure-policy', ofStep: 1 },
@@ -324,7 +334,10 @@ const revocation = [
       },
       revokedWithin([1], 'T_rev', 'the reported change of the policy'),
     ],
-    comments: [LONG_RUNNING],
+    comments: [
+      LONG_RUNNING,
+      'The configuration of `ICS-19.EDP.SD` is one no other test case issues from: a Provider that meets EDP_11 revokes every attestation issued under the old policy, which would revoke the attestations of test cases running at the same time.',
+    ],
   }),
   ...(['SD', 'MD'] as const).flatMap((format) =>
     apTestCase({
