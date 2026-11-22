@@ -7,6 +7,7 @@ Verify that the Relying Party rejects a credential in SD-JWT VC format whose cer
 ## References
 
 - [RFC5280] section 6.1
+- [RFC7515] section 4.1.6
 - [SD-JWT VC] section 2.5
 - [HAIP] section 6.1.1
 - [CIR 2024/2982 amended] Annex II

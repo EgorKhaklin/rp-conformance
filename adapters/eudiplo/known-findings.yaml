@@ -3,44 +3,65 @@
 # and reports these FAILs as known findings (report.json, summary.md, junit.xml type "known-finding") without failing.
 # Any other FAIL, an INCONCLUSIVE or REVIEW result, or a harness error fails it. Remove an entry once EUDIPLO fixes it;
 # the run names a known finding whose test case passed.
+#
+# Spec review of 2026-11-20: every finding was checked against the primary specifications and EUDIPLO's source at
+# ae0792a (ghcr.io/eudiplo/eudiplo:main, 9.1.0-main.ae0792a). Each entry says what it rests on: `basis: confirmed`, a
+# requirement of the specification EUDIPLO implements (or a product bug); `basis: profile`, a requirement of the EUDI
+# profile only. Findings whose test was wrong are gone with their tests corrected; findings without a MUST are no
+# longer FAILs (INFO or POLICY), and the texts kept for them are suggestions in upstream-findings/suggestions/. The
+# confirmed findings were reported upstream on 2026-11-21: `reference` names the issue.
 
-- testCase: RP_WS_SM_Validity_005b_UF
-  finding: >-
-    EUDIPLO rejects an expired mdoc but fetches its status list first, against Token Status List section 8.3:
-    @owf/mdoc IssuerAuth.verify runs verifyStatus before the validityInfo check
-  reference: cre8/rp-conformance#4
+# --- confirmed -------------------------------------------------------------------------------------------------------
 
-# Found by the Phase 5 test cases against ghcr.io/eudiplo/eudiplo:main (9.1.0-main.ae0792a, 2026-11-17); not yet
-# reported upstream.
-- testCase: RP_WS_MS_ProtocolMessages_005
-  flows: [dc-api]
-  finding: >-
-    The DC API request object carries a response_uri, which OpenID4VP 1.0 Appendix A.2 excludes for dc_api.jwt
 - testCase: RP_WS_SM_IssuerIntegrity_013_UF
-  finding: EUDIPLO accepts an SD-JWT VC whose vct is not among the vct_values of its query (OpenID4VP section 8.6, 14.9)
-- testCase: RP_WS_SM_IssuerIntegrity_025_UF
-  finding: EUDIPLO accepts an mdoc whose docType is not the doctype_value of its query (OpenID4VP section 8.6, B.2.3)
-- testCase: RP_WS_SM_IssuerIntegrity_027_UF
+  basis: confirmed
   finding: >-
-    EUDIPLO accepts an mdoc signed by a certificate without the document signer extended key usage 1.0.18013.5.1.2
-    (ISO/IEC 18013-5 Annex B)
+    EUDIPLO accepts an SD-JWT VC whose vct is not among the vct_values of its query (OpenID4VP 1.0 sections 8.6, 14.9,
+    Appendix B.3.5)
+  reference: EUDIPLO/eudiplo#1615
+- testCase: RP_WS_SM_IssuerIntegrity_025_UF
+  basis: confirmed
+  finding: >-
+    EUDIPLO accepts an mdoc whose docType is not the doctype_value of its query (OpenID4VP 1.0 sections 8.6, 14.9,
+    Appendix B.2.3): it builds the DeviceRequest it verifies against from the presented docType
+  reference: EUDIPLO/eudiplo#1615
 - testCase: RP_WS_SM_IssuerIntegrity_034a_UF
+  basis: confirmed
   finding: >-
     EUDIPLO accepts an SD-JWT VC whose signing certificate is issued by a certificate with basicConstraints cA false
-    (RFC 5280 section 6.1.4)
+    (and keyCertSign) (RFC 5280 sections 6.1.4 (k), 4.2.1.9, bound by RFC 7515 section 4.1.6)
+  reference: EUDIPLO/eudiplo#1616
+- testCase: RP_WS_SM_IssuerIntegrity_034b_UF
+  basis: confirmed
+  finding: >-
+    EUDIPLO accepts an mdoc whose document signer certificate is issued by a certificate with basicConstraints cA
+    false (RFC 5280 section 6.1.4 (k); overlaps the open EUDIPLO/eudiplo#1448)
+  reference: EUDIPLO/eudiplo#1616
 - testCase: RP_WS_SM_IssuerIntegrity_037a_UF
+  basis: confirmed
   finding: >-
     EUDIPLO accepts an SD-JWT VC whose signing certificate carries an unknown extension marked critical (RFC 5280
-    section 4.2)
-- testCase: RP_Inf_SM_TrustMechanisms_002_UF
+    sections 4.2, 6.1.5 (f), bound by RFC 7515 section 4.1.6)
+  reference: EUDIPLO/eudiplo#1616
+- testCase: RP_WS_SM_IssuerIntegrity_037b_UF
+  basis: confirmed
   finding: >-
-    After retrieving a version of TL-PID whose seal does not verify, EUDIPLO rejects every PID ("trust_list_unavailable")
-    instead of keeping the last valid version in use
-- testCase: RP_Inf_SM_TrustMechanisms_003_UF
+    EUDIPLO accepts an mdoc whose document signer certificate carries an unknown extension marked critical (RFC 5280
+    sections 4.2, 6.1.5 (f))
+  reference: EUDIPLO/eudiplo#1616
+- testCase: RP_WS_DM_IdentifyingData_001b
+  basis: confirmed
   finding: >-
-    After retrieving a version of TL-PID sealed by another key, EUDIPLO rejects every PID ("trust_list_unavailable")
-    instead of keeping the last valid version in use
-- testCase: RP_Inf_SM_TrustMechanisms_006_UF
+    EUDIPLO releases the mdoc element place_of_birth, a CBOR map, as an empty object: getPrettyClaims returns it as a
+    Map, which the session result serialises as {} (a product bug, not a specification clause)
+  reference: EUDIPLO/eudiplo#1617
+
+# --- EUDI profile only ----------------------------------------------------------------------------------------------
+
+- testCase: RP_WS_SM_Validity_005b_UF
+  basis: profile
   finding: >-
-    EUDIPLO uses a list whose LoTEType is that of a Wallet Providers list as TL-PID and accepts a PID of the entity it
-    adds (ETSI TS 119 602, LoTEType)
+    EUDIPLO rejects an expired mdoc but fetches its status list first (@owf/mdoc IssuerAuth.verify runs verifyStatus
+    before the validityInfo check), against Token Status List section 8.3 as the FCAF pins it (draft-20; "MUST NOT" from
+    draft-19). HAIP 1.0 pins draft-14, which has no such rule. Low severity
+  reference: cre8/rp-conformance#4

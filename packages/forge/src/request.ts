@@ -21,6 +21,8 @@ export interface RequestBuildOptions {
   /** The public encryption key in `client_metadata`; default a new key. */
   encryptionJwk?: JsonWebKey & { kid?: string };
   fault?: FaultId;
+  /** Via redirects, how the Conformance Wallet retrieved the request object: also a second GET, or a POST with `wallet_nonce`. */
+  requestUri?: 'twice' | 'post';
 }
 
 export interface BuiltRequest {
@@ -63,7 +65,7 @@ export async function buildRequest(options: RequestBuildOptions): Promise<BuiltR
     }
     case 'request.unregistered-claim': {
       const claims = (first.claims ?? []) as { path: (string | number | null)[] }[];
-      claims.push({ path: first.format === 'mso_mdoc' ? [PID_NAMESPACE, 'nationality'] : ['nationalities'] });
+      claims.push({ path: first.format === 'mso_mdoc' ? [PID_NAMESPACE, 'email_address'] : ['email'] });
       first.claims = claims;
       break;
     }
@@ -76,9 +78,8 @@ export async function buildRequest(options: RequestBuildOptions): Promise<BuiltR
     client_id: clientId,
     ...(dcApi
       ? {
-          response_mode: 'dc_api.jwt',
+          response_mode: fault === 'request.dc-api-response-mode-unencrypted' ? 'dc_api' : 'dc_api.jwt',
           expected_origins: fault === 'request.expected-origins-other' ? [origin, 'https://other.example'] : [origin],
-          ...(fault === 'request.dc-api-response-uri' ? { response_uri: `${options.baseUrl}/oid4vp/${id}/response` } : {}),
         }
       : {
           response_mode: fault === 'request.response-mode-direct-post' ? 'direct_post' : 'direct_post.jwt',
@@ -86,6 +87,7 @@ export async function buildRequest(options: RequestBuildOptions): Promise<BuiltR
           state: fault === 'request.state-short' ? '1' : base64url.encode(randomBytes(16)),
         }),
     nonce,
+    ...(options.requestUri === 'post' && fault !== 'request.wallet-nonce-missing' ? { wallet_nonce: WALLET_NONCE } : {}),
     dcql_query: query,
     client_metadata: {
       jwks: { keys: [fault === 'request.enc-key-private' ? { ...encryptionJwk, d: base64url.encode(randomBytes(32)) } : encryptionJwk] },
@@ -113,16 +115,29 @@ export async function buildRequest(options: RequestBuildOptions): Promise<BuiltR
       : { flow, protocol: 'openid4vp-v1-signed', data: { request: jws }, origin };
     return { captured, nonce, encryptionJwk };
   }
-  const invocation = new URL('openid4vp://');
+  const invocation = new URL(fault === 'request.invocation-scheme-other' ? 'mdoc-openid4vp://' : 'openid4vp://');
   invocation.searchParams.set('client_id', clientId);
   invocation.searchParams.set('request_uri', `${options.baseUrl}/oid4vp/${id}/request`);
+  // The reference Relying Party offers request_uri_method post (ICS RP.P.8) and answers GET as well.
+  invocation.searchParams.set('request_uri_method', 'post');
   if (fault === 'request.unsigned-parameter') invocation.searchParams.set('nonce', nonce);
+  const contentType = fault === 'request.request-uri-content-type-jwt' ? 'application/jwt' : 'application/oauth-authz-req+jwt';
+  const answer = { status: 200, contentType, body: jws };
   return {
-    captured: { flow, invocationUri: invocation.href, requestUri: { status: 200, contentType: 'application/oauth-authz-req+jwt', body: jws } },
+    captured: {
+      flow,
+      invocationUri: invocation.href,
+      requestUri: answer,
+      ...(options.requestUri === 'twice' ? { refetch: fault === 'request.refetch-refused' ? { status: 404, contentType: 'application/json', body: '{"error":"not_found"}' } : answer } : {}),
+      ...(options.requestUri === 'post' ? { walletNonce: WALLET_NONCE } : {}),
+    },
     nonce,
     encryptionJwk,
   };
 }
+
+/** The `wallet_nonce` of the self-validation's POST to `request_uri`. */
+const WALLET_NONCE = 'wallet-nonce-of-the-self-validation';
 
 async function newEncryptionKey(): Promise<JsonWebKey & { kid: string }> {
   const pair = (await globalThis.crypto.subtle.generateKey({ name: 'ECDH', namedCurve: 'P-256' }, true, ['deriveBits'])) as CryptoKeyPair;

@@ -179,13 +179,15 @@ The RP fills these in; profiles in the catalogue refer to them.
 | ICS-08 | Device binding verified per category (OIA_17) | `P-DB` |
 | ICS-09 | `T_skew` and `T_kb` (each at most 5 minutes), transaction lifetime `T_tx` | |
 | ICS-10 | How `OBS-RESULT` is read: API or webhook (required for automated runs); UI only for manual runs | |
-| ICS-11 | Trust list refresh interval `T_refresh` and grace period `G` after a list's `NextUpdate` | |
+| ICS-11 | Trust list refresh interval `T_refresh` and grace period `G` after a list's `NextUpdate`; whether the last valid version stays in use after a version whose seal fails (RP.T.4, §8.3) | used by `POLICY` |
 | ICS-12 | Combined presentation binding: presentation-based, attribute-based, cryptographic | `P-COMB` |
 | ICS-13 | Role: plain RP, intermediary, intermediated RP (Topic 52) | `P-INT` |
 | ICS-14 | Several services with separate access and registration certificates | `P-MS` |
 | ICS-15 | Uses `trusted_authorities` in DCQL | `P-TA` |
 | ICS-16 | Optional checks: issuer registration (`providesAttestations`), CRL/OCSP of issuer certificates | |
 | ICS-17 | Maximum accepted response size and decompressed status list size | |
+| ICS-18 | Sets `request_uri_method=post` and answers a POST with `wallet_nonce` | `P-POST` |
+| ICS-19 | The RP's own front end redeems the response code of a same-device redirect (an RP that is only a back end leaves this to the relying service) | `P-FE` |
 
 ## 5. Catalogue
 
@@ -203,7 +205,7 @@ Columns: **Objective** says what is verified. **Stimulus** is the mutation or in
 | `RP_WS_MS_ProtocolMessages_002` | Request Object payload: `response_type=vp_token`, `response_mode=direct_post.jwt`, https `response_uri`, no `redirect_uri`, `client_id` equal to the outer one, `nonce`, `dcql_query`, `aud` per OID4VP §5.8. | Capture request object | CONF | HAIP 5, 5.1; OID4VP §5.2, §5.8, §8.2, §8.3.1 | RD | G/R |
 | `RP_WS_MS_ProtocolMessages_003` | `nonce` is at least 16 random bytes, base64url, and fresh per request. | 20 consecutive requests | CONF, no repeats | OID4VP §5.2, §13.3 | RD, DC | G/R |
 | `RP_WS_MS_ProtocolMessages_004` | `state`, if used, is fresh and unguessable (≥ 128 bit). | 20 requests | CONF | OID4VP §13.3, §14.3.2 | RD | G/O |
-| `RP_WS_MS_ProtocolMessages_005` | DC API request uses protocol `openid4vp-v1-signed` or `openid4vp-v1-multisigned`, `response_mode=dc_api.jwt`, `expected_origins` present, no `response_uri`. | Capture DC API request | CONF | OID4VP A.2, A.3.2; HAIP 5.2; OIA_08, OIA_08a | DC | G/R |
+| `RP_WS_MS_ProtocolMessages_005` | DC API request uses protocol `openid4vp-v1-signed` or `openid4vp-v1-multisigned`, `response_mode=dc_api.jwt`, `expected_origins` present; a `response_uri` is recorded (INFO, §8.3). | Capture DC API request | CONF | OID4VP A.2 (additional parameters MAY be used, the Wallet MUST ignore unrecognized ones), A.3.2; HAIP 5.2; OIA_08, OIA_08a | DC | G/R |
 | `RP_WS_MS_ProtocolMessages_006` | 18013-7 Annex C request: DeviceRequest with ReaderAuth and registration certificate, EncryptionInfo with a fresh recipient key. *Not executable: the harness has no ISO/IEC 18013-7 Annex C flow.* | Capture request | CONF | OIA_08b; ISO/IEC 18013-7 Annex C; ETSI TS 119 472-2 | DCI | S/R |
 
 ##### RP_WS_MS_Metadata
@@ -230,8 +232,8 @@ Columns: **Objective** says what is verified. **Stimulus** is the mutation or in
 
 | ID | Objective | Stimulus | Expected | References | Var | Rel |
 | --- | --- | --- | --- | --- | --- | --- |
-| `RP_WS_IA_Engagement_001` | Same-device invocation uses `haip-vp://`, `openid4vp://` or a claimed https URL as declared. | Capture | CONF | HAIP 5.1; OID4VP §9 | RD | G/R |
-| `RP_WS_IA_Engagement_002` | Cross-device QR code encodes the same authorization request as same-device. | Decode QR | CONF | OID4VP §5.7; OIA_08c | RD | G/O |
+| `RP_WS_IA_Engagement_001` | Same-device invocation uses `haip-vp://`, `openid4vp://` or a claimed https URL. *Changed: no ICS item declares the scheme, so the test accepts any of the three.* | Capture | CONF | HAIP 5.1; OID4VP §9 | RD | G/R |
+| `RP_WS_IA_Engagement_002` | Cross-device QR code encodes the same authorization request as same-device. *Not executable: the adapter hands the harness one invocation URI per transaction, and the QR code exists only in the Relying Party's user interface.* | Decode QR | CONF | OID4VP §5.7; OIA_08c | RD | G/O |
 | `RP_WS_IA_Engagement_003` | DC API invocation calls the Digital Credentials API with the OpenID4VP protocol identifier. | Capture in browser | CONF | HAIP 5.2; OID4VP A.1 | DC | G/R |
 
 ##### RP_WS_IA_ProtocolFlow
@@ -240,18 +242,18 @@ Columns: **Objective** says what is verified. **Stimulus** is the mutation or in
 | --- | --- | --- | --- | --- | --- | --- |
 | `RP_WS_IA_ProtocolFlow_001` | `request_uri` returns the Request Object with `Content-Type: application/oauth-authz-req+jwt`. | GET `request_uri` | CONF | RFC 9101 §5.2; OID4VP §5.10.1 | RD | G/R |
 | `RP_WS_IA_ProtocolFlow_002` | `request_uri` can be fetched more than once. | Second GET | CONF (OIDF `request-uri-fetched-twice`) | OID4VP §5 | RD | G/R |
-| `RP_WS_IA_ProtocolFlow_003` | `request_uri_method=post` is handled: `wallet_nonce` echoed in the signed request object. | POST with `wallet_metadata`, `wallet_nonce` | CONF (OIDF `request-uri-method-post`) | OID4VP §5.10 | RD | G/O |
-| `RP_WS_IA_ProtocolFlow_004_UF` | `request_uri` of an unknown, expired or completed transaction does not return a request object. | GET stale `request_uri` | 4xx, no request object | OID4VP §5.10.2 | RD | G/R |
+| `RP_WS_IA_ProtocolFlow_003` | `request_uri_method=post` is handled: `wallet_nonce` echoed in the signed request object. *Changed: applies when the RP sets `request_uri_method=post` (ICS-18).* | POST with `wallet_metadata`, `wallet_nonce` | CONF (OIDF `request-uri-method-post`) | OID4VP §5.10 | RD; `P-POST` | G/O |
+| `RP_WS_IA_ProtocolFlow_004_UF` | `request_uri` of an unknown or completed transaction does not return a request object. *Changed: the expired transaction is left to `_011_UF`, which waits out `T_tx` once; the unknown `request_uri` is that of a completed transaction with every part in which two transactions' `request_uri`s differ replaced.* | GET `request_uri` of a completed and of an unknown transaction | 4xx, no request object | OID4VP §5.10, §14.1 | RD | G/R |
 | `RP_WS_IA_ProtocolFlow_005` | Same-device: `response_uri` answers 200 `application/json` with a `redirect_uri` containing a fresh response code (≥ 128 bit). | `SCN-R`, no mutation | CONF | OID4VP §8.2, §14.2; HAIP 5.1 | RD | G/R |
-| `RP_WS_IA_ProtocolFlow_006_UF` | Same-device: the RP does not complete the transaction when the wallet does not follow the redirect back. | `SCN-F`: response posted, redirect not followed | REJ (session not completed, no attributes released to the front end) | HAIP 5.1 | RD | G/R |
-| `RP_WS_IA_ProtocolFlow_007_UF` | Same-device: the RP rejects a redirect back that arrives in a different user session. | `SCN-F`: redirect followed in a fresh browser profile | REJ | HAIP 5.1; OID4VP §14.2 | RD | G/R |
-| `RP_WS_IA_ProtocolFlow_008_UF` | A response code can be redeemed once only. | `SCN-F`: redeem the response code twice | Second redemption REJ | OID4VP §14.2 | RD | G/R |
-| `RP_WS_IA_ProtocolFlow_009_UF` | A forged response code yields no result. | `SCN-F`: random response code | REJ | OID4VP §14.2 | RD | G/R |
+| `RP_WS_IA_ProtocolFlow_006_UF` | Same-device: the RP does not complete the transaction when the wallet does not follow the redirect back. *Changed: observed at the RP's front end (ICS-19), since the back end's result (`OBS-RESULT`) is complete once the response is verified; then the redirect is followed, which must release the result.* | `SCN-F`: response posted, redirect not followed; front end asked in the user agent that started the transaction | No attributes released to the front end | HAIP 5.1 | RD; `P-FE` | G/R |
+| `RP_WS_IA_ProtocolFlow_007_UF` | Same-device: the RP rejects a redirect back that arrives in a different user session. *Changed: observed at the RP's front end (ICS-19).* | `SCN-F`: redirect followed in a fresh browser profile | No attributes released to the front end | HAIP 5.1; OID4VP §14.2 | RD; `P-FE` | G/R |
+| `RP_WS_IA_ProtocolFlow_008_UF` | A response code can be redeemed once only. *Changed: observed at the RP's front end (ICS-19).* | `SCN-F`: redeem the response code twice | Second redemption releases no attributes | OID4VP §14.2 | RD; `P-FE` | G/R |
+| `RP_WS_IA_ProtocolFlow_009_UF` | A forged response code yields no result. *Changed: observed at the RP's front end (ICS-19).* | `SCN-F`: random response code | No attributes released to the front end | OID4VP §14.2 | RD; `P-FE` | G/R |
 | `RP_WS_IA_ProtocolFlow_010` | A wallet error response (`access_denied`, `invalid_request`), unencrypted as permitted, ends the transaction as failed and gets 200 `application/json`. | Error response | CONF, transaction failed | OID4VP §8.2, §8.3.1, §8.5 | RD | G/R |
 | `RP_WS_IA_ProtocolFlow_011_UF` | A response arriving after the transaction lifetime is rejected. | `SCN-F`: send after `T_tx` | REJ | OID4VP §14.1; ICS-09 | RD, DC | G/R |
 | `RP_WS_IA_ProtocolFlow_012_UF` | A second response for a completed transaction is rejected and does not change the first result. | `SCN-F`: resend the identical response | REJ, first result unchanged | OID4VP §14.1, §14.3.2 | RD | G/R |
 | `RP_WS_IA_ProtocolFlow_013_UF` | A response with an unknown or missing `state` (when the RP sent one) is rejected. | `SCN-F` | REJ | OID4VP §14.3.2 | RD | G/O |
-| `RP_WS_IA_ProtocolFlow_014` | DC API error object and cancelled request end the transaction as failed. | `{"error":"access_denied"}` / cancel | CONF | OID4VP A.4 | DC | G/R |
+| `RP_WS_IA_ProtocolFlow_014` | DC API error object ends the transaction as failed. *Changed: the cancelled request is dropped; a rejected `navigator.credentials.get` reaches only the RP's page, and neither OID4VP nor HAIP defines what the page reports to its back end.* | `{"error":"access_denied"}` | REJ | OID4VP A.4 | DC | G/R |
 
 ##### RP_WS_IA_MainInteraction (positive baseline; positive controls for the `_UF` tests)
 
@@ -363,9 +365,9 @@ mdoc:
 | `RP_WS_SM_IssuerIntegrity_022_UF` | IssuerSignedItem with a `digestID` not in `valueDigests` is rejected. | Add item with unknown digestID | REJ | ISO/IEC 18013-5 §9.3.1 | MD | G/R |
 | `RP_WS_SM_IssuerIntegrity_023_UF` | MSO `docType` different from the Document `docType` is rejected. | Mismatch | REJ | ISO/IEC 18013-5 §9.3.1 | MD | G/R |
 | `RP_WS_SM_IssuerIntegrity_024_UF` | Unsupported MSO `digestAlgorithm` is rejected. | `SHA-1` | REJ | HAIP 8 | MD | G/R |
-| `RP_WS_SM_IssuerIntegrity_025_UF` | A `docType` not requested is rejected. | Other doctype | REJ | OID4VP §8.6, B.2.3 | MD | G/R |
+| `RP_WS_SM_IssuerIntegrity_025_UF` | A `docType` not requested is rejected. | Other doctype | REJ | OID4VP §8.6, §14.9, B.2.3 | MD | G/R |
 | `RP_WS_SM_IssuerIntegrity_026_UF` | A chain that only validates to a root embedded in `x5chain` is rejected. | Self-signed IACA `CA-X` in chain | REJ | ISO/IEC 18013-5 §9.3.1; OIA_12 | MD | G/R |
-| `RP_WS_SM_IssuerIntegrity_027_UF` | A document signer certificate without the mdoc DS extended key usage is rejected. | Remove EKU | REJ | ISO/IEC 18013-5 Annex B | MD | G/R |
+| `RP_WS_SM_IssuerIntegrity_027_UF` | Whether a signing certificate that is not an mdoc document signer (no DS extended key usage) is accepted is recorded. | Plain end-entity certificate under the right anchor | INFO (§8.3) | ETSI TS 119 412-6 clause 4 (no EKU required); ISO/IEC 18013-5 Annex B not verified | MD | G/O |
 | `RP_WS_SM_IssuerIntegrity_028_UF` | MSO `validityInfo.signed` outside the DS certificate validity is rejected. | `signed` after DS `notAfter` | REJ | ISO/IEC 18013-5 §9.3.1 | MD | G/R |
 
 Certificate path, both formats:
@@ -376,10 +378,10 @@ Certificate path, both formats:
 | `RP_WS_SM_IssuerIntegrity_031_UF` | Not yet valid issuer signing certificate is rejected. | `notBefore` in the future | REJ | RFC 5280 §6.1.3 | SD, MD | G/R |
 | `RP_WS_SM_IssuerIntegrity_032_UF` | Expired intermediate CA certificate is rejected. | Intermediate `notAfter` in the past | REJ | RFC 5280 §6.1.3 | SD, MD | G/R |
 | `RP_WS_SM_IssuerIntegrity_033_UF` | Incomplete chain is rejected. | Intermediate missing | REJ | RFC 5280 §6.1 | SD, MD | G/R |
-| `RP_WS_SM_IssuerIntegrity_034_UF` | Signing certificate issued by a non-CA certificate is rejected. | Issuer cert with `cA=false` | REJ | RFC 5280 §6.1.4 | SD, MD | G/R |
+| `RP_WS_SM_IssuerIntegrity_034_UF` | Signing certificate issued by a non-CA certificate is rejected. | Issuer cert with `cA=false` (and `keyCertSign`) | REJ | RFC 5280 §6.1.4, §4.2.1.9; RFC 7515 §4.1.6 (SD); ISO/IEC 18013-5 §9.3.1 not verified (MD) | SD, MD | G/R |
 | `RP_WS_SM_IssuerIntegrity_035_UF` | Revoked issuer signing certificate is rejected. *Not executable: optional check, the harness serves no CRLs.* | CRL marks DS / signing cert revoked | REJ | RFC 5280 §6.3; ICS-16 | SD, MD | G/O |
 | `RP_WS_SM_IssuerIntegrity_036_UF` | Key type or size outside ECCG ACM is rejected. | P-192, RSA-1024 | REJ | OIA_03 | SD, MD | S/R |
-| `RP_WS_SM_IssuerIntegrity_037_UF` | Unknown critical extension in the signing certificate is rejected. | Critical private extension | REJ | RFC 5280 §4.2 | SD, MD | G/R |
+| `RP_WS_SM_IssuerIntegrity_037_UF` | Unknown critical extension in the signing certificate is rejected. | Critical private extension | REJ | RFC 5280 §4.2, §6.1.5 (f); RFC 7515 §4.1.6 (SD); ISO/IEC 18013-5 §9.3.1 not verified (MD) | SD, MD | G/R |
 
 ##### RP_WS_SM_Validity (validity period of the credential)
 
@@ -389,12 +391,12 @@ Certificate path, both formats:
 | `RP_WS_SM_Validity_002` | `exp` inside the clock tolerance is accepted. | `exp` = now − `T_skew`/2 | ACC | RFC 7519 §4.1.4; ICS-09 | SD | G/R |
 | `RP_WS_SM_Validity_003_UF` | Not yet valid SD-JWT VC is rejected. | `nbf` = now + `T_skew` + 1 h | REJ | RFC 9901 §7.1 step 6; RFC 7519 §4.1.5 | SD | G/R |
 | `RP_WS_SM_Validity_004` | Handling of an SD-JWT VC issued in the future is recorded. | `iat` = now + `T_skew` + 1 h | INFO | RFC 7519 §4.1.6 (no MUST, §8) | SD | G/U |
-| `RP_WS_SM_Validity_005_UF` | Expired credential whose status is VALID is rejected, and the status list is not fetched. | Expired `CRED-PID`, status 0x00 | REJ, NOFETCH | Token Status List §7.1, §8.3 | SD, MD | G/R |
+| `RP_WS_SM_Validity_005_UF` | Expired credential whose status is VALID is rejected, and the status list is not fetched. | Expired `CRED-PID`, status 0x00 | REJ, NOFETCH | Token Status List §7.1, §8.3 (the no-fetch rule from draft-17, as "MUST NOT" from draft-19; HAIP's draft-14 has only "MUST precede", §8.3) | SD, MD | G/R |
 | `RP_WS_SM_Validity_006_UF` | A credential with an invalid issuer signature causes no status list fetch. | `IssuerIntegrity_001_UF` stimulus | REJ, NOFETCH | Token Status List §8.3 | SD, MD | G/R |
 | `RP_WS_SM_Validity_010_UF` | Expired mdoc is rejected. | `validUntil` = now − `T_skew` − 1 h | REJ | ISO/IEC 18013-5 §9.3.1 | MD | G/R |
 | `RP_WS_SM_Validity_011_UF` | Not yet valid mdoc is rejected. | `validFrom` = now + `T_skew` + 1 h | REJ | ISO/IEC 18013-5 §9.3.1 | MD | G/R |
 | `RP_WS_SM_Validity_012` | Passed `expectedUpdate` alone does not cause rejection. | `expectedUpdate` past, `validUntil` future | ACC | ISO/IEC 18013-5 §9.1.2.4 | MD | G/R |
-| `RP_WS_SM_Validity_020` | PID whose administrative expiry date has passed while the technical validity is fine is handled per declared policy, and the date is passed on. | PID rulebook expiry date in the past | POLICY | PID rulebook; ARF §5 (administrative vs technical validity) | SD, MD | S/U |
+| `RP_WS_SM_Validity_020` | PID whose administrative expiry date has passed while the technical validity is fine is handled per declared policy, and the date is passed on. | PID rulebook expiry date seven days in the past, requested by the RP (`date_of_expiry`, mdoc `expiry_date`) | POLICY (ICS RP.P.12; accepted means the date is released) | PID rulebook; ARF §5 (administrative vs technical validity) | SD, MD | S/U |
 
 ##### RP_WS_SM_TrustMechanisms (trust anchor and its category)
 
@@ -432,7 +434,7 @@ Certificate path, both formats:
 | `RP_WS_SM_Revocation_008_UF` | PID without status but with validity over 24 h is rejected: it carries no revocation information although VCR_01b requires it. | `CRED-PID` without status | NOSTAT (REJ for PID) | VCR_01b, VCR_14 | SD, MD | S/R |
 | `RP_WS_SM_Revocation_009_UF` | mdoc revoked via identifier list is rejected. | Identifier listed in `IL-PP-A` | REJ (OIDF `present-credential-on-identifier-list`) | VCR_11, VCR_12; ISO/IEC 18013-5 second edition | MD | S/R |
 | `RP_WS_SM_Revocation_010` | mdoc not on the identifier list is accepted. | Identifier not listed | ACC | VCR_11, VCR_12 | MD | S/R |
-| `RP_WS_SM_Revocation_011` | An RP that checks mdoc revocation supports both mechanisms (status list and identifier list). | `_002_UF` (MD) and `_009_UF` both pass | CONF | VCR_12 | MD | S/R |
+| `RP_WS_SM_Revocation_011` | An RP that checks mdoc revocation supports both mechanisms (status list and identifier list). | The stimuli of `_002_UF` (MD), `_009_UF` and `_010` | CONF: REJ, REJ, ACC | VCR_12 | MD | S/R |
 
 #### 5.1.4 Layer DM: data model
 
@@ -441,18 +443,18 @@ Certificate path, both formats:
 | ID | Objective | Stimulus | Expected | References | Var | Rel |
 | --- | --- | --- | --- | --- | --- | --- |
 | `RP_WS_DM_IdentifyingData_001` | All mandatory PID attributes are mapped to the right values and types, including non-Latin-1 UTF-8 names. | `CRED-PID` with UTF-8 names | ACC, values exact | PID rulebook; CIR 2024/2977; ARB_06 | SD, MD | S/R |
-| `RP_WS_DM_IdentifyingData_002` | Missing optional or conditional PID attributes that were not required do not cause failure. | PID without optional attributes | ACC | PID rulebook; ARB_09 | SD, MD | S/R |
+| `RP_WS_DM_IdentifyingData_002` | Missing optional or conditional PID attributes that were not required do not cause failure. | PID with no attribute besides the requested ones *(changed: `CRED-PID` already carries no optional attribute, so the stimulus leaves out every unrequested attribute)* | ACC | PID rulebook; ARB_09 | SD, MD | S/R |
 | `RP_WS_DM_IdentifyingData_003_UF` | A requested, required claim that is not disclosed causes rejection. | Omit disclosure of `family_name` | REJ | OID4VP §6.4, §8.6 | SD, MD | G/R |
-| `RP_WS_DM_IdentifyingData_004_UF` | Attribute values with the wrong data type are not accepted silently. | `birthdate` as integer; `nationalities` as string | REJ or attribute flagged invalid | PID rulebook; ISO 8601-1; OID4VP §8.6 | SD, MD | S/O |
+| `RP_WS_DM_IdentifyingData_004_UF` | How attribute values with the wrong data type are handled is recorded; rejecting or flagging them is the hardened behaviour. | `birthdate` as integer; `nationalities` as string | INFO (§8.3) | PID rulebook and ISO 8601-1 (bind the issuer); OID4VP §8.6 (no type validation duty for the RP) | SD, MD | S/O |
 | `RP_WS_DM_IdentifyingData_005` | Age-over attributes are processed as booleans. | `age_over_18` true / false | ACC with correct value | PID rulebook | SD, MD | S/R |
-| `RP_WS_DM_IdentifyingData_006` | Structured address data is processed correctly. | Address object, partly disclosed | ACC with correct values | PID rulebook | SD, MD | S/R |
-| `RP_WS_DM_IdentifyingData_007` | Unknown additional claims are ignored. | Extra private claim | ACC | SD-JWT VC §2.2.2.3 | SD, MD | G/R |
+| `RP_WS_DM_IdentifyingData_006` | Structured address data is processed correctly. | Address object, partly disclosed | ACC with correct values | PID rulebook | SD *(changed: the PID rulebook encodes the mdoc address as separate data elements, so there is no structured address in mdoc)* | S/R |
+| `RP_WS_DM_IdentifyingData_007` | A credential with unknown additional claims is accepted; an always-disclosed claim is not judged when released (§8.3). | Extra private claim, not selectively disclosable | ACC | SD-JWT VC §2.2.2.3; OID4VP §6.4 | SD *(changed: an mdoc element reaches the RP only when the wallet presents it, and an unrequested element is `DM_CredentialMetadata_001_UF`)* | G/R |
 
 ##### RP_WS_DM_CredentialMetadata
 
 | ID | Objective | Stimulus | Expected | References | Var | Rel |
 | --- | --- | --- | --- | --- | --- | --- |
-| `RP_WS_DM_CredentialMetadata_001_UF` | Attributes disclosed but not requested are neither released nor retained. | Wallet discloses extra attributes | NOREL for the extra attributes; requested ones per ICS | OIA_16; OID4VP §15.4.2; GDPR Art. 5(1)(c) | SD, MD | S/O |
+| `RP_WS_DM_CredentialMetadata_001_UF` | Whether attributes disclosed but not requested are released is recorded; not releasing them is the data-minimising behaviour. | Wallet discloses extra attributes | INFO (§8.3) *(retention is not observable at the RP's interfaces and is `RP_TB_001`)* | OID4VP §6.4 (binds the wallet); GDPR Art. 5(1)(c). OIA_16 and OID4VP §15.4.2 do not cover it | SD, MD | S/O |
 | `RP_WS_DM_CredentialMetadata_002_UF` | A claim value violating the query's `values` constraint is rejected. | Query `age_over_18` = true, credential false | REJ | OID4VP §6.3, §14.9, §15.4.1 | SD, MD | G/R |
 
 #### 5.1.5 Layer UC: use cases
@@ -469,7 +471,7 @@ Certificate path, both formats:
 | `RP_WS_UC_Presentation_006` | `credential_sets`: a response satisfying an alternative option is accepted. | Option 2 of 2 | ACC | OID4VP §6.2, §6.4.2 | SD, MD | G/R |
 | `RP_WS_UC_Presentation_007_UF` | `credential_sets`: a response satisfying no option is rejected. | Credentials from neither option | REJ | OID4VP §6.2, §6.4.2 | SD, MD | G/R |
 | `RP_WS_UC_Presentation_008` | An optional credential query may be omitted. | Optional query not answered | ACC | OID4VP §8.1 | SD, MD | G/R |
-| `RP_WS_UC_Presentation_009_UF` | Two mdocs in one DeviceResponse for two queries are handled per declared strictness. | Combined DeviceResponse | POLICY | HAIP 5.3.1 | MD | G/O |
+| `RP_WS_UC_Presentation_009_UF` | Two mdocs in one DeviceResponse for two queries are rejected. | One DeviceResponse with the documents of PID and EAA as the entry of both queries | REJ | HAIP 5.3.1; OID4VP §8.6 | MD | G/O |
 | `RP_WS_UC_Presentation_010` | Combined presentation: PID and EAA with matching identifying attributes are accepted. | Same name and birth date | ACC | ARF §6.6.3.10 | SD, MD; `P-COMB` | S/O |
 | `RP_WS_UC_Presentation_011_UF` | Combined presentation: PID and EAA of different persons are rejected when attribute-based binding is the declared method. | Different names / birth dates | REJ | ARF §6.6.3.10 | SD, MD; `P-COMB` | S/O |
 | `RP_WS_UC_Presentation_012_UF` | Combined presentation spliced from two wallets (each part validly key-bound to a different device key) is handled per the declared binding method. | Splice two wallets' presentations | REJ if cryptographic binding is declared; POLICY otherwise | ARF §6.6.3.10; ACP_01–ACP_04 | SD, MD; `P-COMB` | S/U |
@@ -482,11 +484,11 @@ Certificate path, both formats:
 
 | ID | Objective | Stimulus | Expected | References | Var | Rel |
 | --- | --- | --- | --- | --- | --- | --- |
-| `RP_WS_SH_Encoding_001_UF` | Malformed `response` is rejected cleanly. | Wrong segment count; invalid base64url | REJ, 4xx, no stack trace | RFC 7516 §9 | RD, DC | G/R |
-| `RP_WS_SH_Encoding_002_UF` | Malformed SD-JWT is rejected, as is one whose KB-JWT payload is not valid JSON. | No trailing `~`; empty segment; invalid JSON in a disclosure; `NaN` as the `iat` of the KB-JWT payload | REJ | RFC 9901 §4; RFC 8259 §6 | SD | G/R |
-| `RP_WS_SH_Encoding_003_UF` | Malformed CBOR DeviceResponse is rejected, as is one whose COSE structures break the encoding rules of their format (a repeated header label, an MSO not wrapped in tag 24, a device signature that carries its payload). | Truncated; wrong major type; deep nesting; indefinite lengths; `alg` twice in the protected header of `IssuerAuth`; bare MSO as the `IssuerAuth` payload; `DeviceSignature` with its payload attached | REJ | RFC 8949; RFC 9052 §3; ISO/IEC 18013-5 §8.3.2.1.2.2 | MD | G/R |
-| `RP_WS_SH_Encoding_004_UF` | Oversized response is rejected without exhausting resources. | Response above ICS-17 limit | REJ, RP stays available | ICS-17 | RD, DC | G/R |
-| `RP_WS_SH_Encoding_005_UF` | Duplicate member names in JOSE headers or JWT claims are rejected. | Duplicate `alg`; duplicate `nonce` | REJ | RFC 7515 §4; RFC 7519 §4; FCAF Shared_JSON | SD, RD, DC | G/R |
+| `RP_WS_SH_Encoding_001_UF` | Malformed `response` is rejected cleanly. | Wrong segment count; invalid base64url | REJ; via redirects 4xx without internal details (via the DC API the answer goes to the RP's own page, see `_007`) | RFC 7516 §7.1, §9 | RD, DC | G/R |
+| `RP_WS_SH_Encoding_002_UF` | Malformed SD-JWT, or a KB-JWT whose payload is not valid JSON, is rejected. | No `~` between the last disclosure and the KB-JWT; empty segment; invalid JSON in a disclosure; `NaN` in the KB-JWT payload | REJ | RFC 9901 §4; RFC 8259 §6 | SD | G/R |
+| `RP_WS_SH_Encoding_003_UF` | Malformed CBOR DeviceResponse is rejected, as is one whose COSE structures break the encoding rules of their format. | Truncated; wrong major type; deep nesting; indefinite-length map without its `break`; `alg` twice in the protected header of `IssuerAuth`; bare MSO as the `IssuerAuth` payload; `DeviceSignature` with its payload attached | REJ | RFC 8949 §3.2.1; RFC 9052 §3, §4.1; ISO/IEC 18013-5 §8.3.2.1.2.2 | MD | G/R |
+| `RP_WS_SH_Encoding_004_UF` | Oversized response is rejected without exhausting resources. | Response above ICS-17 limit | REJ (via the DC API also a 4xx or network error at the RP's page, without a failed verification result, §8.3), RP stays available | ICS-17 | RD, DC | G/R |
+| `RP_WS_SH_Encoding_005_UF` | Duplicate member names in JOSE headers or JWT claims are rejected. | Duplicate `alg` in the KB-JWT header; duplicate `nonce` in the KB-JWT payload; the last value is the wrong one | REJ | RFC 7515 §4; RFC 7519 §4; FCAF Shared_JSON | SD, RD, DC | G/R |
 | `RP_WS_SH_Encoding_006_UF` | Excessive `x5c` / `x5chain` length is bounded. | 50 certificates | REJ, RP stays available | RFC 5280 §6.1 | SD, MD | G/R |
 | `RP_WS_SH_Encoding_007` | Error responses to the wallet reveal no internal details. | Any `_UF` above | CONF | OID4VP §15.9 | RD | G/O |
 
@@ -498,12 +500,12 @@ Every objective in this class also applies to class `RP_AP` with the same number
 
 | ID | Objective | Stimulus | Expected | References | Var | Rel |
 | --- | --- | --- | --- | --- | --- | --- |
-| `RP_PP_IA_Supportive_001` | The RP fetches the status list with GET, `Accept: application/statuslist+jwt` or `+cwt`, without authentication and without data identifying the user or transaction. | `SCN-S`, inspect TSP log | CONF | Token Status List §8.1, §12.3; VCR_16 | SD, MD | G/R |
+| `RP_PP_IA_Supportive_001` | The RP fetches the status list with GET of exactly its URI, without authentication and without data identifying the user or transaction; an `Accept` header, if sent, admits `application/statuslist+jwt` or `+cwt`. | `SCN-S`, inspect TSP log | CONF | Token Status List §8.1, §12.3; VCR_16 | SD, MD | G/R |
 | `RP_PP_IA_Supportive_002` | Two presentations referencing the same list within `ttl` cause at most one fetch. | Two transactions | CONF | VCR_15; Token Status List §11.5, §13.7 | SD, MD; `P-CACHE` | S/O |
 | `RP_PP_IA_Supportive_003` | After `ttl` or `exp` has passed, the RP fetches a fresh list before deciding; a revocation set in between is detected. | Revoke between transactions, wait `ttl` | First ACC, second REJ | Token Status List §8.3 step 4d | SD, MD; `P-CACHE` | G/R |
-| `RP_PP_IA_Supportive_004_UF` | Status endpoint unreachable or failing gives no positive status statement, and the RP decides within its declared timeout. | Timeout; connection refused; 404; 500; HTTP 503 with an HTML page instead of a Status List Token | NOSTAT | Token Status List §8.3; VCR_14 | SD, MD | S/R |
-| `RP_PP_IA_Supportive_005_UF` | Redirect loops and redirects to non-https or internal targets are bounded. | 3xx loop; 3xx to `http://127.0.0.1` | NOSTAT, RP stays available | Token Status List §11.4; RFC 9110 §15.4 | SD, MD | G/R |
-| `RP_PP_IA_Supportive_006_UF` | A status `uri` pointing to a loopback, link-local or private address, or with a non-https scheme, is not fetched. | `uri` = `http://169.254.169.254/…` | REJ, no request to that address | Token Status List §6.2; OWASP SSRF | SD, MD | G/R |
+| `RP_PP_IA_Supportive_004_UF` | Status endpoint unreachable or failing gives no positive status statement, and the RP decides within its declared timeout. | Timeout (a valid token after the declared timeout plus 10 s); connection refused; 404; 500; 503 with an HTML page | NOSTAT | Token Status List §8.3; VCR_14 | SD, MD | S/R |
+| `RP_PP_IA_Supportive_005_UF` | Redirect loops are bounded. | 3xx loop (302 to the same URI) | NOSTAT, RP stays available | Token Status List §11.4; RFC 9110 §15.4 | SD, MD | G/R |
+| `RP_PP_IA_Supportive_006_UF` | A credential whose status `uri` points to a link-local address is rejected. | `uri` = `http://169.254.169.254/…` | REJ | Token Status List §6.2; OWASP SSRF | SD, MD | G/R |
 
 ##### RP_PP_SM_Revocation (Status List Token and identifier list validation)
 
@@ -522,7 +524,7 @@ Every objective in this class also applies to class `RP_AP` with the same number
 | `RP_PP_SM_Revocation_011_UF` | Token whose signer chains only to the entity's issuance anchor, which the list does not publish under its revocation service, is not accepted. | `PP-A` list signed (a) with the credential's own signing certificate, (b) with another certificate under `PP-A`'s issuance CA | NOSTAT | §3.2; PPNot_05 | SD, MD | S/R |
 | `RP_PP_SM_Revocation_012_UF` | A token chain that only validates to a root embedded in `x5c` is not accepted. | `x5c` ends in self-signed root | NOSTAT | HAIP 6.1 | SD, MD | G/R |
 | `RP_PP_SM_Revocation_013_UF` | Token signed by an expired or not yet valid certificate is not accepted. | Signer `notAfter` past; `notBefore` future | NOSTAT | RFC 5280 §6.1.3 | SD, MD | G/R |
-| `RP_PP_SM_Revocation_014_UF` | Token `iat` in the future, or older than the declared freshness limit, is handled per policy. | `iat` future; `iat` old | POLICY | Token Status List §8.3 step 4b | SD, MD | G/O |
+| `RP_PP_SM_Revocation_014_UF` | Token `iat` in the future, or older than the declared freshness limit, is handled per policy. | `iat` = now + `T_skew` + 1 h; `iat` 30 days ago, `exp` in the future | POLICY (ICS RP.R.8, RP.R.7) | Token Status List §8.3 step 4b | SD, MD | G/O |
 | `RP_PP_SM_Revocation_015_UF` | `lst` that is not valid base64url or not valid DEFLATE/ZLIB is rejected without failure. | Corrupt `lst` | NOSTAT, no crash | Token Status List §4.1, §8.3 step 5, §11.1 | SD, MD | G/R |
 | `RP_PP_SM_Revocation_016_UF` | A decompression bomb is rejected without exhausting resources. | `lst` inflating beyond ICS-17 | NOSTAT, RP stays available | Token Status List §11.1; ICS-17 | SD, MD | G/R |
 | `RP_PP_SM_Revocation_017_UF` | `bits` outside {1, 2, 4, 8} is rejected. | `bits` = 3 | NOSTAT | Token Status List §4.1 | SD, MD | G/R |
@@ -538,12 +540,12 @@ Every objective in this class also applies to class `RP_AP` with the same number
 | ID | Objective | Stimulus | Expected | References | Var | Rel |
 | --- | --- | --- | --- | --- | --- | --- |
 | `RP_Inf_SM_TrustMechanisms_001` | The RP loads the PID Provider LoTE, validates its JAdES seal against the configured scheme operator certificate, and uses its anchors. | `SCN-T`, valid list | ACC for `CRED-PID` | OIA_15a, OIA_15b; ETSI TS 119 602; TLPub_05, TLPub_07 | — | S/R |
-| `RP_Inf_SM_TrustMechanisms_002_UF` | A LoTE with an invalid seal is not used. | Corrupt seal, list adds `PP-C` | `PP-C` credential REJ; the last valid list stays in use until its `NextUpdate` + `G` | OIA_15a; ETSI TS 119 602 | — | S/R |
+| `RP_Inf_SM_TrustMechanisms_002_UF` | A LoTE with an invalid seal is not used. | Corrupt seal, list adds `PP-C` | `PP-C` credential REJ; then POLICY (RP.T.4): `Keep` the last valid list (ACC), or `Discard` it (REJ) (§8.3) | OIA_15a; ETSI TS 119 602 (no last-known-good rule) | — | S/R |
 | `RP_Inf_SM_TrustMechanisms_003_UF` | A LoTE sealed by a key other than the scheme operator's is not used. | Sealed by `CA-X` | As `_002_UF` | ETSI TS 119 602 | — | S/R |
 | `RP_Inf_SM_TrustMechanisms_004` | Within the grace period after `NextUpdate`, a stale LoTE is still used and the RP signals it. | New version adding `PP-C` whose `NextUpdate` lies `G`/2 in the past | `PP-C` credential ACC, "trust list stale" signalled | ETSI TS 119 602; OIA_15a; ICS-11 | `G` > 0 | S/R |
 | `RP_Inf_SM_TrustMechanisms_012_UF` | After the grace period, anchors from a stale LoTE are no longer used. | New version adding `PP-C` whose `NextUpdate` lies `G` + 1 h in the past | `PP-C` credential REJ | ETSI TS 119 602; OIA_15a; ICS-11 | — | S/R |
 | `RP_Inf_SM_TrustMechanisms_005_UF` | A rollback to an older list version is ignored. | Lower `LoTESequenceNumber` / older `ListIssueDateTime`, re-adding `PP-W` | `PP-W` credential stays REJ | ETSI TS 119 602 | — | S/R |
-| `RP_Inf_SM_TrustMechanisms_006_UF` | A list of the wrong LoTE type is not used for PID anchors. | List of `LoTEType` Wallet Providers list served at the PID list location, sealed by its scheme operator, adding `PP-C` | `PP-C` credential REJ | OIA_15 note; ETSI TS 119 602 (`LoTEType`) | — | S/R |
+| `RP_Inf_SM_TrustMechanisms_006_UF` | Whether a list of the wrong LoTE type is used for PID anchors is recorded. | List of `LoTEType` Wallet Providers list served at the PID list location, sealed by its scheme operator, adding `PP-C` (itself not conforming to TS 119 602 Annex E) | INFO (§8.3) | OIA_15 note; ETSI TS 119 602 clause 6.3.3, Annexes D, E | — | S/O |
 | `RP_Inf_SM_TrustMechanisms_007` | Lists are refreshed at least by `NextUpdate` or `T_refresh`, and changes reach every RP Instance. *Not executable: needs several RP Instances; the harness observes one.* | Change list; observe each instance | CONF | OIA_15a | — | S/R |
 | `RP_Inf_SM_TrustMechanisms_008` | The RP navigates LOTL → national Trusted List, validates the TL with the LOTL pointer certificate, and extracts QEAA service anchors with type and status. | `SCN-T` | ACC for `CRED-Q` | OIA_13, OIA_15b; ETSI TS 119 612 | `P-Q` | S/R |
 | `RP_Inf_SM_TrustMechanisms_009_UF` | A national Trusted List signed with a certificate not in the LOTL pointer is not used. | New TL version, signed by `CA-X`, that grants `QP-N` a qualified service | `QP-N` credential REJ (the last valid TL stays in use, see `_002_UF`) | ETSI TS 119 612 | `P-Q` | S/R |
@@ -630,15 +632,40 @@ These objectives can reuse the OIDF `vp1finalverifier` modules as execution vehi
 ### 8.2 Remaining notes
 
 - **Combined presentations.** No cryptographic binding scheme (ACP) is specified yet; `UC_Presentation_012_UF` stays a placeholder.
+- **Combined DeviceResponse (2026-11-19).** `UC_Presentation_009_UF` expected POLICY "per declared strictness", but no ICS item declares a strictness, and HAIP 1.0 section 5.3.1 leaves no choice: each mdoc is returned in a separate DeviceResponse matching its credential query. A VP Token that fails a check of the VP Token as a whole is rejected (OpenID4VP 1.0 section 8.6), so the row now expects REJ.
+- **Attribute-based binding (2026-11-19).** `UC_Presentation_010` and `_011_UF` apply to a Relying Party that declares attribute-based binding (ICS-12, item RP.P.10 of the overlay ICS). `default_credential_A` carries no identifying attributes, so they present a variant of `default_credential_eaa` that also carries family name, given name and birth date, requested by `default_query_pid_eaa_identifying`.
 - **Spec versions.** HAIP pins SD-JWT VC draft-13 and Token Status List draft-14; the FCAF pins draft-16 and draft-20. The catalogue follows the FCAF.
 - **ISO/IEC 18013-5 second edition** (status list and identifier list for mdoc) is not published; section references for `MD` revocation tests follow the draft.
-- **Stale trust lists.** A test cannot move the RP's clock, so `RP_Inf_SM_TrustMechanisms_004` and `_012_UF` publish a new version whose `NextUpdate` has already passed, the state a list reaches when no newer version appears. Every version the RP must not use adds an entity (`PP-C`, or a qualified service of `QP-N`), so an RP that used it would accept that entity's credential, while the last valid version stays in use (`_002_UF`).
+- **Stale trust lists.** A test cannot move the RP's clock, so `RP_Inf_SM_TrustMechanisms_004` and `_012_UF` publish a new version whose `NextUpdate` has already passed, the state a list reaches when no newer version appears. Every version the RP must not use adds an entity (`PP-C`, or a qualified service of `QP-N`), so an RP that used it would accept that entity's credential; whether the last valid version then stays in use is the RP's declared policy (RP.T.4, `_002_UF`, §8.3).
 - **Certificate path.** The issuance anchors follow the IACA profile (path length 0). `IssuerIntegrity_032_UF` to `_034_UF` use the entity `PP-I` on `TL-PID`, whose anchor allows one intermediate CA.
 - **Decision 6 conflicts with a SHOULD** in SD-JWT VC. For the upstream contribution this needs a reference the EC accepts, for example a HAIP or ETSI TS 119 472-2 profile statement.
+
+### 8.3 Corrections after the spec review of the EUDIPLO findings (2026-11-20)
+
+Before any finding was reported upstream, every FAIL against EUDIPLO was checked against the primary specifications and
+EUDIPLO's source. Where the test demanded more than a specification does, the test changed; where no specification has
+a MUST, the result is informational (`INFO`) or follows a declared policy (`POLICY`), and the row states the true
+normative strength. The upstream texts are in `adapters/eudiplo/upstream-findings/`.
+
+| Test case | Change | Why |
+| --- | --- | --- |
+| `MS_ProtocolMessages_005` | A `response_uri` in a DC API request is recorded, not failed; the request fault of the check is now `dc_api` instead of `dc_api.jwt`. | OpenID4VP 1.0 Appendix A.2: "Additional request parameters MAY be defined and used", and "The Wallet MUST ignore any unrecognized parameters". |
+| `SH_Encoding_004_UF` | Via the DC API, a 4xx or a network error of the RP page's forwarding request counts as rejection; a failed verification result is not required. | A back end that refuses an oversized body (HTTP 413) before setting CORS headers leaves its page only a network error; that is a rejection. |
+| `DM_IdentifyingData_007a` | Acceptance only: claims the credential discloses with every presentation are not compared with the requested ones, like the technical claims. | A claim that is not selectively disclosable cannot be withheld (OpenID4VP 1.0 section 6.4). |
+| `DM_IdentifyingData_004a_UF`, `_004b_UF` | INFO. | No specification requires a Relying Party to validate attribute data types; the PID Rulebook binds the issuer. |
+| `DM_CredentialMetadata_001a_UF`, `_001b_UF` | INFO; references corrected. | OpenID4VP 1.0 section 6.4 binds the wallet; OIA_16 (unique elements and timestamps) and section 15.4.2 (what a Verifier requests) do not say what an RP does with unrequested claims. |
+| `SM_IssuerIntegrity_027_UF` | INFO, `G/O`. | ETSI TS 119 412-6 clause 4 requires no EKU for PID signers; the ISO/IEC 18013-5 Annex B profile could not be verified; the test certificate differs from a document signer in more than the EKU. |
+| `RP_Inf_SM_TrustMechanisms_002_UF`, `_003_UF` | Step 3 is `POLICY` (new ICS item RP.T.4: `Keep` or `Discard`). | No specification requires a last-known-good list; fail-closed conforms. |
+| `RP_Inf_SM_TrustMechanisms_006_UF` | INFO, `S/O`. | The test list itself violates ETSI TS 119 602 Annex E (PID services in a Wallet Providers list); no clause requires refusing a list for its `LoTEType`, and the type does not turn its entries into PID Providers. |
+| `SM_IssuerIntegrity_034_UF`, `_037_UF` | References: RFC 7515 section 4.1.6 binds the `x5c` of an SD-JWT VC to RFC 5280; RFC 5280 section 6.1.5 (f) for the critical extension of the end-entity certificate; ISO/IEC 18013-5 section 9.3.1 marked not verified. | The FAILs stand; the references now name the binding clauses. |
+| `SM_IssuerIntegrity_025_UF` | Reference: OpenID4VP section 14.9 added. | |
+| `SM_Validity_005_UF` | Reference: the no-fetch rule of Token Status List section 8.3 is in draft-17 and later ("MUST NOT" from draft-19); HAIP 1.0 pins draft-14, which has only "MUST precede". | The catalogue follows the FCAF's draft-20. |
+| (evaluation of `ACC`) | Released attributes that are empty objects are no longer dropped when compared. | An RP that releases an mdoc map as `{}` (`DM_IdentifyingData_001b`) is visible in every test case, not only where the map is requested. |
 
 ## 9. Next steps
 
 1. Done (2026-11-06): the baseline covers the `SM_Validity`, `SM_Revocation`, `RP_PP_SM_Revocation`, `SM_TrustMechanisms` and `SM_SessionEncryption` objectives plus the positive controls `RP_WS_IA_MainInteraction_001a` and `_001b`: 121 test cases in the FCAF format, one file per test case, in [fcaf-overlay](fcaf-overlay/README.md). The README lists the objectives left out and why.
 2. Design the harness: draft in [harness-design.md](harness-design.md) (2026-11-06), with four decisions open in its §12.
 3. Contact the FCAF maintainers about adding the Relying Party SUT before opening a pull request.
-4. Write the remaining objectives as test cases. Done for `SM_SessionBinding` and `SM_DeviceBinding` (2026-11-13), `SM_IssuerIntegrity`, `RP_Inf_SM_TrustMechanisms` and the request-side areas `MS_ProtocolMessages`, `MS_Metadata`, `MS_CredentialFormats` and `SM_RpIntegrity` (2026-11-17): 97 executable test cases, see "Beyond the baseline" in the [overlay README](fcaf-overlay/README.md). Not written: the proximity objectives (`SessionBinding_010`, `DeviceBinding_012`, `RpIntegrity_010`, `_011`), `IssuerIntegrity_035` (CRL; optional, the harness serves no CRLs), `RP_Inf_SM_TrustMechanisms_007` (needs several RP Instances), `_010` and `_011` (aggregates of other test cases), `MS_ProtocolMessages_006` (ISO/IEC 18013-7 Annex C), `RpIntegrity_008` (several services) and `_009` (intermediaries). Still open: `IA_Engagement`, `IA_ProtocolFlow`, `MainInteraction_002` to `_005`, `DM_*`, `UC_*`, `SH_*`, `RP_PP_IA_Supportive` and the test book.
+4. Write the remaining objectives as test cases. Done for `SM_SessionBinding` and `SM_DeviceBinding` (2026-11-13), `SM_IssuerIntegrity`, `RP_Inf_SM_TrustMechanisms` and the request-side areas `MS_ProtocolMessages`, `MS_Metadata`, `MS_CredentialFormats` and `SM_RpIntegrity` (2026-11-17): 97 executable test cases, see "Beyond the baseline" in the [overlay README](fcaf-overlay/README.md). Not written: the proximity objectives (`SessionBinding_010`, `DeviceBinding_012`, `RpIntegrity_010`, `_011`), `IssuerIntegrity_035` (CRL; optional, the harness serves no CRLs), `RP_Inf_SM_TrustMechanisms_007` (needs several RP Instances), `_010` and `_011` (aggregates of other test cases), `MS_ProtocolMessages_006` (ISO/IEC 18013-7 Annex C), `RpIntegrity_008` (several services) and `_009` (intermediaries). Done for `IA_Engagement` and `IA_ProtocolFlow` (2026-11-19, issue 29): 16 executable test cases; not written: `IA_Engagement_002` (the QR code exists only in the RP's user interface). Done for `MainInteraction_002` to `_005`, `DM_IdentifyingData` and `DM_CredentialMetadata` (2026-11-19, issue 30): 24 executable test cases; `DM_IdentifyingData_006` and `_007` are written for SD-JWT VC only (see their rows). Done for `UC_Presentation` `_001` to `_011` (2026-11-19, issue 31): 21 executable test cases; not executable today: `UC_Presentation_012_UF` (no cryptographic binding scheme for combined presentations is specified, §8.2) and `_020`, `_021` (intermediaries: they need a second, intermediated Relying Party behind the SUT, `P-INT`). Still open: the test book.
+5. Issue 32 (2026-11-20): `SH_Encoding`, `RP_PP_IA_Supportive`, `RP_PP_SM_Revocation_014_UF` and `_031`, `SM_Revocation_011`, `SM_Validity_004` and `_020` are written as 27 executable test cases; see the [overlay README](fcaf-overlay/README.md). Rows changed to make them executable: `SH_Encoding_001_UF` (4xx and the answer's content via redirects only), `_002_UF` (`NaN` in the KB-JWT payload added), `_003_UF` (an indefinite-length map without `break`, since well-formed indefinite lengths are valid CBOR), `_005_UF` (where the duplicates are), `RP_PP_IA_Supportive_001` (`Accept` is a SHOULD), `_004_UF` (503 with an HTML page added), `_005_UF` and `_006_UF` (see below), `SM_Revocation_011` (`_010` added, so a Relying Party that refuses every identifier list does not pass), `SM_Validity_020` (the RP must request the expiry date), `RP_PP_SM_Revocation_014_UF` (concrete times). Not executable today: the redirect to a plain-HTTP or internal target of `RP_PP_IA_Supportive_005_UF` and the absence of a request to the link-local address in `_006_UF`, because the harness serves its status lists over HTTP from a loopback or private address the Relying Party must be allowed to reach and sees no request to an address it does not serve; and `SM_TrustMechanisms_017_UF`, because no specification says how a Relying Party obtains the registration certificate of an attestation provider during a presentation, so the harness has no channel to hand one over. `SM_Validity_020` is rendered as `EUDI_specific | EUDI_optional`: `S/U` is not one of the five FCAF relevancy values.

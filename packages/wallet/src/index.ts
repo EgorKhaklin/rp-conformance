@@ -1,22 +1,22 @@
 // The Conformance Wallet. It started from EUDIPLO's headless E2E wallet (apps/client/e2e/support/wallet.ts), which
 // answers signed OpenID4VP requests with direct_post.jwt, and adds what a conformance run needs: trust in the
 // request signer per TL-AC, findings on the request, and evidence of every exchange.
-import { createHash, X509Certificate } from 'node:crypto';
+import { createHash, randomBytes, X509Certificate } from 'node:crypto';
 import { type CallbackContext, type Jwk, setGlobalConfig } from '@openid4vc/oauth2';
 import { Openid4vpClient } from '@openid4vc/openid4vp';
-import { type CapturedRequest, type CredentialFormat, type FaultId, faultInfo } from '@rp-conformance/core';
+import { type CapturedRequest, type DcqlQuery, type FaultId, faultInfo } from '@rp-conformance/core';
 import {
   base64url,
   buildAuthorizationResponse,
   buildDcApiResponse,
   buildPresentation,
+  buildVpToken,
   type EcKeyPair,
   generateEcKeyPair,
   generateSecp256k1KeyPair,
   type HeldCredential,
   jwkThumbprint,
   type Oid4vpHandover,
-  requestedElements,
   type Secp256k1KeyPair,
   verifyEs256,
 } from '@rp-conformance/forge';
@@ -52,6 +52,8 @@ export interface PresentationEvidence {
   /** The encryption key from the request's `client_metadata`. */
   encryptionKey?: JWK;
   presentation?: string;
+  /** The `vp_token` the wallet sent, with every presentation of a combined presentation. */
+  vpToken?: Record<string, string[]>;
   /** The `response` parameter, when there is one. */
   responseJwe?: string;
   /** Every form parameter posted to `response_uri`. */
@@ -73,11 +75,17 @@ export interface ConformanceWalletOptions {
   allowInsecureUrls?: boolean;
   /** Follow `redirect_uri` after the response (default true). */
   followRedirect?: boolean;
+  /**
+   * The key the presented credentials are bound to; default a fresh one. The issuer suite presents a credential a
+   * Provider issued to the key of its proof (`PP_RP_SM_Revocation_008`).
+   */
+  holderKey?: EcKeyPair;
 }
 
 const hash: CallbackContext['hash'] = (data, alg) => createHash(alg.replace('-', '').toLowerCase()).update(data).digest();
 
 const SUPPORTED_ENC = ['A128GCM', 'A256GCM'];
+const SUPPORTED_ENC_VALUES = SUPPORTED_ENC;
 
 export type { HeldCredential };
 
@@ -93,7 +101,37 @@ export interface ResponseOptions {
   /** `T_skew` and `T_kb`, seconds, for the KB-JWT time faults; default 0 and 300. */
   skewSeconds?: number;
   kbMaxAgeSeconds?: number;
+  /** For `response.oversized`: the maximum response size the Relying Party declares (ICS RP.P.11), bytes. */
+  maxResponseBytes?: number;
+  /** Via redirects, whether the wallet opens the `redirect_uri`; default the wallet's option (true). */
+  followRedirect?: boolean;
+  /** Epoch milliseconds before which the wallet does not send the response (ProtocolFlow_011, a late response). */
+  sendAt?: number;
+  /** A combined presentation (UC_Presentation): further credentials, each for the credential query it names. */
+  alongside?: HeldCredential[];
 }
+
+/** How the Conformance Wallet retrieves the request object of a started transaction (ProtocolFlow_002, _003). */
+export interface StartOptions {
+  /** `twice`: a second GET after the first; `post`: one POST with `wallet_metadata` and `wallet_nonce`. */
+  requestUri?: 'twice' | 'post';
+}
+
+/** The metadata the Conformance Wallet posts to `request_uri` (OpenID4VP 1.0 section 5.10.1 and 10). */
+export const WALLET_METADATA = {
+  vp_formats_supported: {
+    'dc+sd-jwt': { 'sd-jwt_alg_values': ['ES256'], 'kb-jwt_alg_values': ['ES256'] },
+    mso_mdoc: { issuerauth_alg_values: [-7], deviceauth_alg_values: [-7] },
+  },
+  request_object_signing_alg_values_supported: ['ES256'],
+  authorization_encryption_alg_values_supported: ['ECDH-ES'],
+  authorization_encryption_enc_values_supported: SUPPORTED_ENC_VALUES,
+};
+
+const waitUntil = async (at: number | undefined) => {
+  const ms = (at ?? 0) - Date.now();
+  if (ms > 0) await new Promise((resolve) => setTimeout(resolve, ms));
+};
 
 type Finding = (severity: WalletFinding['severity'], code: string, message: string) => void;
 
@@ -139,27 +177,89 @@ export class ConformanceWallet {
   static async create(options: ConformanceWalletOptions): Promise<ConformanceWallet> {
     if (options.allowInsecureUrls) setGlobalConfig({ allowInsecureUrls: true });
     const anchors = options.accessCertificateAnchors.map((a) => (typeof a === 'string' ? parseCertificate(a) : a));
-    return new ConformanceWallet(await generateEcKeyPair(), generateSecp256k1KeyPair(), options, anchors);
+    return new ConformanceWallet(options.holderKey ?? (await generateEcKeyPair()), generateSecp256k1KeyPair(), options, anchors);
   }
 
   /**
    * Resolves the request behind `invocationUri` and records its encryption key, without answering it (SessionEncryption
    * transaction T1).
    */
-  async start(invocationUri: string): Promise<PresentationEvidence> {
+  async start(invocationUri: string, options: StartOptions = {}): Promise<PresentationEvidence> {
     const evidence: PresentationEvidence = { invocationUri, findings: [] };
+    let walletNonce: string | undefined;
+    let refetch: HttpExchange | undefined;
     try {
-      await this.resolve(invocationUri, evidence);
+      if (options.requestUri === 'post') {
+        walletNonce = base64url.encode(randomBytes(16));
+        await this.resolve(invocationUri, evidence, { walletNonce });
+      } else {
+        await this.resolve(invocationUri, evidence);
+        if (options.requestUri === 'twice') refetch = await this.fetchRequestUri(invocationUri);
+      }
     } catch (error) {
       evidence.error = (error as Error).message;
+      if (options.requestUri === 'twice' && evidence.requestFetch && !refetch) refetch = await this.fetchRequestUri(invocationUri).catch(() => undefined);
     }
     const fetched = evidence.requestFetch;
     evidence.captured = {
       flow: 'redirect',
       invocationUri,
       ...(fetched ? { requestUri: { status: fetched.status, contentType: fetched.contentType, body: fetched.body } } : {}),
+      ...(refetch ? { refetch: { status: refetch.status, contentType: refetch.contentType, body: refetch.body } } : {}),
+      ...(walletNonce ? { walletNonce } : {}),
     };
     return evidence;
+  }
+
+  /**
+   * Retrieves the `request_uri` of an invocation URI, or `requestUri` itself, once more with GET, as a wallet that
+   * resolves an invocation again does (ProtocolFlow_002, _004); nothing is verified.
+   */
+  async fetchRequestUri(invocationUriOrRequestUri: string): Promise<HttpExchange> {
+    const requestUri = requestUriOf(invocationUriOrRequestUri) ?? invocationUriOrRequestUri;
+    const exchange: HttpExchange = { method: 'GET', url: requestUri };
+    try {
+      const response = await fetch(requestUri, { headers: { accept: 'application/oauth-authz-req+jwt' } });
+      exchange.status = response.status;
+      exchange.contentType = response.headers.get('content-type');
+      exchange.body = await response.text();
+    } catch (error) {
+      exchange.error = (error as Error).message;
+    }
+    return exchange;
+  }
+
+  /**
+   * Answers the request behind `invocationUri` (redirect flow) with an Authorization Error Response instead of a
+   * presentation: `error` and the request's `state`, posted unencrypted to `response_uri` (OpenID4VP 1.0 section 8.5;
+   * encryption of an error response is optional). The redirect is not followed.
+   */
+  async respondWithError(invocationUri: string, error: string): Promise<PresentationEvidence> {
+    const evidence: PresentationEvidence = { invocationUri, findings: [] };
+    try {
+      const request = await this.resolve(invocationUri, evidence);
+      const form: Record<string, string> = { error, ...(typeof request.state === 'string' ? { state: request.state } : {}) };
+      evidence.responseForm = form;
+      const responseUri = request.response_uri as string;
+      evidence.response = await post(responseUri, form);
+    } catch (e) {
+      evidence.error = (e as Error).message;
+    }
+    return evidence;
+  }
+
+  /** Resolves a DC API request and answers it with an error object in `data` (OpenID4VP 1.0 Appendix A.4). */
+  async respondWithErrorDcApi(call: DcApiCall, error: string): Promise<{ evidence: PresentationEvidence; answer?: DcApiAnswer }> {
+    const evidence: PresentationEvidence = { invocationUri: call.pageUrl, dcApi: { origin: call.origin, requests: call.requests }, findings: [] };
+    try {
+      const { protocol } = await this.resolveDcApi(call, evidence);
+      const data = { error };
+      evidence.responseData = data;
+      return { evidence, answer: { protocol, data } };
+    } catch (e) {
+      evidence.error = (e as Error).message;
+      return { evidence };
+    }
   }
 
   /**
@@ -185,6 +285,7 @@ export class ConformanceWallet {
       evidence.responseJwe = form.response;
 
       const responseUri = request.response_uri as string;
+      await waitUntil(options.sendAt);
       const exchange: HttpExchange = { method: 'POST', url: responseUri };
       evidence.response = exchange;
       const response = await fetch(responseUri, { method: 'POST', body: new URLSearchParams(form) });
@@ -192,7 +293,7 @@ export class ConformanceWallet {
       exchange.contentType = response.headers.get('content-type');
       exchange.body = await response.text();
 
-      if (response.ok && this.options.followRedirect !== false) {
+      if (response.ok && (options.followRedirect ?? this.options.followRedirect) !== false) {
         let redirectUri: unknown;
         try {
           redirectUri = (JSON.parse(exchange.body) as { redirect_uri?: unknown }).redirect_uri;
@@ -255,6 +356,7 @@ export class ConformanceWallet {
       };
       const input = await this.responseInput(request, credential, binding, evidence, options);
       const data = await buildDcApiResponse(input, responseFaultOf(options));
+      await waitUntil(options.sendAt);
       evidence.responseData = data;
       if (typeof data.response === 'string') evidence.responseJwe = data.response;
       return { evidence, answer: { protocol, data } };
@@ -275,39 +377,45 @@ export class ConformanceWallet {
     evidence: PresentationEvidence,
     options: ResponseOptions,
   ) {
-    const query = request.dcql_query as { credentials: { id: string; format: CredentialFormat; claims?: { path: (string | number | null)[] }[] }[] };
-    const credentialQuery = query.credentials.find((c) => c.format === credential.format);
-    if (!credentialQuery) throw new Error(`the request asks for no credential in ${credential.format} format`);
+    const query = request.dcql_query as DcqlQuery;
+    if (!query?.credentials) throw new Error('the request has no dcql_query');
     if (!evidence.encryptionKey) throw new Error('client_metadata has no encryption key');
-    if (options.fault === 'presentation.replay') {
-      if (!options.replayedPresentation) throw new Error('presentation.replay needs the presentation of another transaction');
-      evidence.presentation = options.replayedPresentation;
-    } else {
-      evidence.presentation = await buildPresentation(
-        credential,
-        {
-          disclose: [...new Set((credentialQuery.claims ?? []).map((claim) => String(claim.path[0])))],
-          elements: requestedElements(credentialQuery.claims),
-        },
-        {
-          audience: binding.audience,
-          clientId: binding.clientId,
-          nonce: request.nonce as string,
-          handover: binding.handover,
-          jwkThumbprint: await jwkThumbprint(evidence.encryptionKey as JsonWebKey),
-        },
-        { holder: this.holderKey, secp256k1: this.secp256k1Key },
-        {
-          fault: options.fault && faultInfo(options.fault).point === 'presentation' ? options.fault : undefined,
-          skewSeconds: options.skewSeconds ?? 0,
-          kbMaxAgeSeconds: options.kbMaxAgeSeconds ?? 300,
-        },
-      );
-    }
+    if (options.fault === 'presentation.replay' && !options.replayedPresentation) throw new Error('presentation.replay needs the presentation of another transaction');
+    const thumbprint = await jwkThumbprint(evidence.encryptionKey as JsonWebKey);
+    const pointOf = (fault: FaultId | undefined) => (fault ? faultInfo(fault).point : undefined);
+    const built = await buildVpToken(
+      query,
+      [credential, ...(options.alongside ?? [])],
+      async (held, requested, primary) => {
+        if (primary && options.fault === 'presentation.replay') return options.replayedPresentation as string;
+        return buildPresentation(
+          held,
+          requested,
+          { audience: binding.audience, clientId: binding.clientId, nonce: request.nonce as string, handover: binding.handover, jwkThumbprint: thumbprint },
+          { holder: this.holderKey, secp256k1: this.secp256k1Key },
+          {
+            // The presentation fault applies to the step's own credential, and only to its entry.
+            fault: primary && pointOf(options.fault) === 'presentation' ? options.fault : undefined,
+            skewSeconds: options.skewSeconds ?? 0,
+            kbMaxAgeSeconds: options.kbMaxAgeSeconds ?? 300,
+          },
+        );
+      },
+      pointOf(options.fault) === 'vp-token' ? options.fault : undefined,
+    );
+    evidence.presentation = built.presentation;
+    evidence.vpToken = built.vpToken;
     const metadata = request.client_metadata as { encrypted_response_enc_values_supported?: string[] };
     const enc = options.enc ?? metadata.encrypted_response_enc_values_supported?.find((e) => SUPPORTED_ENC.includes(e)) ?? 'A128GCM';
-    const payload = { vp_token: { [credentialQuery.id]: [evidence.presentation] }, ...(binding.state ? { state: binding.state } : {}) };
-    return { payload, recipient: evidence.encryptionKey, enc, walletKey: this.holderKey, otherTransactionKey: options.otherTransactionKey };
+    const payload = { vp_token: built.vpToken, ...(binding.state ? { state: binding.state } : {}) };
+    return {
+      payload,
+      recipient: evidence.encryptionKey,
+      enc,
+      walletKey: this.holderKey,
+      otherTransactionKey: options.otherTransactionKey,
+      maxResponseBytes: options.maxResponseBytes,
+    };
   }
 
   /** An OpenID4VP client whose `verifyJwt` trusts a request signer only under a `TL-AC` anchor, recording the request. */
@@ -365,15 +473,40 @@ export class ConformanceWallet {
     return verified && path.ok ? jwk : undefined;
   }
 
-  /** Fetches and verifies the request of the redirect flow; refuses it on an error finding. */
-  private async resolve(invocationUri: string, evidence: PresentationEvidence): Promise<Record<string, unknown>> {
+  /**
+   * Fetches and verifies the request of the redirect flow; refuses it on an error finding. The wallet retrieves
+   * `request_uri` with GET, as a wallet that does not support `request_uri_method` `post` does (OpenID4VP 1.0 section
+   * 5.10), unless `post` names the `wallet_nonce` to post (ProtocolFlow_003); then the request object must echo it.
+   */
+  private async resolve(invocationUri: string, evidence: PresentationEvidence, post?: { walletNonce: string }): Promise<Record<string, unknown>> {
     const finding: Finding = (severity, code, message) => evidence.findings.push({ severity, code, message });
     const client = this.client(evidence, finding);
     const parsed = client.parseOpenid4vpAuthorizationRequest({ authorizationRequest: invocationUri });
+    const { request_uri_method: _method, ...params } = parsed.params as Record<string, unknown>;
+    if (post) {
+      // The library posts only wallet_metadata (0.9.2), so the wallet fetches the request object itself and passes it by value.
+      const requestUri = String(params.request_uri ?? '');
+      const exchange: HttpExchange = { method: 'POST', url: requestUri };
+      evidence.requestFetch = exchange;
+      const response = await fetch(requestUri, {
+        method: 'POST',
+        headers: { accept: 'application/oauth-authz-req+jwt', 'content-type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({ wallet_metadata: JSON.stringify(WALLET_METADATA), wallet_nonce: post.walletNonce }),
+      });
+      exchange.status = response.status;
+      exchange.contentType = response.headers.get('content-type');
+      exchange.body = await response.text();
+      if (!response.ok) throw new Error(`POST ${requestUri}: HTTP ${response.status}`);
+      delete params.request_uri;
+      params.request = exchange.body;
+    }
     const { authorizationRequestPayload: request, client: resolvedClient } = await client.resolveOpenId4vpAuthorizationRequest({
-      authorizationRequestPayload: parsed.params as never,
+      authorizationRequestPayload: params as never,
       responseMode: { type: 'direct_post' },
     });
+    if (post && (request as Record<string, unknown>).wallet_nonce !== post.walletNonce) {
+      finding('warning', 'wallet-nonce', 'the request object does not carry the wallet_nonce the wallet posted');
+    }
     this.checkRequest(request as Record<string, unknown>, evidence, finding, resolvedClient);
     return this.accept(request as Record<string, unknown>, evidence);
   }
@@ -490,3 +623,22 @@ export class ConformanceWallet {
   }
 }
 
+
+/** The `request_uri` of an invocation URI, if it carries one. */
+function requestUriOf(invocationUri: string): string | undefined {
+  try {
+    return new URL(invocationUri).searchParams.get('request_uri') ?? undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** Posts a form and records the exchange. */
+async function post(url: string, form: Record<string, string>): Promise<HttpExchange> {
+  const exchange: HttpExchange = { method: 'POST', url };
+  const response = await fetch(url, { method: 'POST', body: new URLSearchParams(form) });
+  exchange.status = response.status;
+  exchange.contentType = response.headers.get('content-type');
+  exchange.body = await response.text();
+  return exchange;
+}

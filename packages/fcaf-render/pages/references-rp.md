@@ -4,3 +4,5 @@
 | [ISO/IEC 18013-5 ed2] | draft | ISO/IEC 18013-5 second edition (draft), including the status list and identifier list mechanisms for the MSO. |
 | [RFC8392] | - | [RFC 8392](https://datatracker.ietf.org/doc/html/rfc8392): CBOR Web Token (CWT). |
 | [RFC8725] | - | [RFC 8725](https://datatracker.ietf.org/doc/html/rfc8725): JSON Web Token Best Current Practices. |
+| [RFC9052] | - | [RFC 9052](https://datatracker.ietf.org/doc/html/rfc9052): CBOR Object Signing and Encryption (COSE): Structures and Process. |
+| [GDPR] | - | [Regulation (EU) 2016/679](https://eur-lex.europa.eu/eli/reg/2016/679/oj): General Data Protection Regulation. |

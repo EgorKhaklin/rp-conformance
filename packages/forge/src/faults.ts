@@ -11,6 +11,8 @@ import { base64url, derEcdsaSignature, type EcKeyPair, randomSerial, sha256, sig
 import { decodeJws, flipBitInSegment, resignJws } from './jose';
 import { type CertifiedKey, createEndEntity, createSelfSignedCa, createSelfSignedSigner, type TestEntity, type TestPki } from './pki';
 import { foreignSigner, isSignerFault } from './signers';
+import { isRobustSdJwtCredentialFault, robustResponse, robustSdJwtCredential } from './robustness';
+import { isPolicyCredentialFault, isPolicyStatusListFault, policySdJwtCredential, policyStatusListJwt } from './policy-faults';
 
 const HOUR = 3600;
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -190,6 +192,8 @@ const join = (parts: SdJwtParts) => `${[parts.jwt, ...parts.disclosures].join('~
 /** Applies a credential fault to an issued SD-JWT VC (issuer-signed JWT `~` disclosures `~`, without KB-JWT). */
 export async function applyCredentialFault(fault: FaultId, sdJwt: string, ctx: CredentialFaultContext): Promise<string> {
   ensurePoint(fault, 'credential', 'dc+sd-jwt');
+  if (isRobustSdJwtCredentialFault(fault)) return robustSdJwtCredential(sdJwt, fault, ctx.signer);
+  if (isPolicyCredentialFault(fault)) return policySdJwtCredential(sdJwt, ctx.signer, ctx.now, ctx.skewSeconds);
   const [issuerJwt, ...rest] = sdJwt.split('~');
   const parts: SdJwtParts = { jwt: issuerJwt, disclosures: rest.filter(Boolean) };
   // A signer fault is applied when the credential is issued (forgePresentation).
@@ -260,8 +264,6 @@ export interface StatusListFaultContext {
 export interface ServedStatusList {
   body: string | Uint8Array;
   contentType: string;
-  /** The HTTP status the Test Status Provider answers with; 200 when left out. */
-  status?: number;
 }
 
 const STATUS_LIST_JWT = 'application/statuslist+jwt';
@@ -357,6 +359,7 @@ async function secp256k1Signer(ctx: StatusListFaultContext) {
 export async function applyStatusListFault(fault: FaultId, token: string, ctx: StatusListFaultContext): Promise<ServedStatusList> {
   ensurePoint(fault, 'status-list', 'jwt');
   const jwt = (body: string) => ({ body, contentType: STATUS_LIST_JWT });
+  if (isPolicyStatusListFault(fault)) return jwt(await policyStatusListJwt(fault, token, ctx.signer, ctx.now, ctx.skewSeconds));
   const resign = async (change: Parameters<typeof resignJws>[1], key = ctx.signer.key.privateKey) => jwt(await resignJws(token, change, key));
   const removeFromList = (member: string) => resign(({ payload }) => void delete (payload.status_list as Record<string, unknown>)[member]);
   const setLst = (lst: string) => resign(({ payload }) => void ((payload.status_list as Record<string, unknown>).lst = lst));
@@ -370,12 +373,6 @@ export async function applyStatusListFault(fault: FaultId, token: string, ctx: S
     }
     case 'status-list.bare-list':
       return { body: JSON.stringify(decodeJws(token).payload.status_list), contentType: 'application/json' };
-    case 'status-list.html-error-page':
-      return {
-        body: '<!doctype html><html><head><title>503 Service Unavailable</title></head><body><h1>Service Unavailable</h1></body></html>',
-        contentType: 'text/html',
-        status: 503,
-      };
     case 'status-list.exp-past':
       return resign(({ payload }) => void (payload.exp = now - ctx.skewSeconds - HOUR));
     case 'status-list.sub-other':
@@ -445,6 +442,8 @@ export interface ResponseInput {
   walletKey: EcKeyPair;
   /** For `response.other-transaction-key`: the encryption key recorded for another transaction. */
   otherTransactionKey?: JWK;
+  /** For `response.oversized`: the maximum response size the Relying Party declares (ICS RP.P.11), bytes. */
+  maxResponseBytes?: number;
 }
 
 /** Encrypts a response payload as `direct_post.jwt` or `dc_api.jwt` (ECDH-ES unless `alg` says otherwise). */
@@ -499,6 +498,8 @@ export async function buildDcApiResponse(input: ResponseInput, fault?: FaultId):
 async function buildEncryptedResponse(input: ResponseInput, fault?: FaultId): Promise<Record<string, string>> {
   const encrypted = (jwe: string) => ({ response: jwe });
   const valid = () => encryptResponse(input.payload, input.recipient, { enc: input.enc });
+  const robust = await robustResponse(fault, input.payload, (payload) => encryptResponse(payload, input.recipient, { enc: input.enc }), input.maxResponseBytes);
+  if (robust) return robust;
   switch (fault) {
     case undefined:
       return encrypted(await valid());
@@ -542,6 +543,12 @@ async function buildEncryptedResponse(input: ResponseInput, fault?: FaultId): Pr
       };
     case 'response.extra-member':
       return encrypted(await encryptResponse({ ...input.payload, foo: 'bar' }, input.recipient, { enc: input.enc }));
+    case 'response.state-other':
+      return encrypted(await encryptResponse({ ...input.payload, state: base64url.encode(randomBytes(16)) }, input.recipient, { enc: input.enc }));
+    case 'response.state-missing': {
+      const { state: _state, ...payload } = input.payload;
+      return encrypted(await encryptResponse(payload, input.recipient, { enc: input.enc }));
+    }
     default:
       throw new Error(`fault ${fault} is not implemented`);
   }

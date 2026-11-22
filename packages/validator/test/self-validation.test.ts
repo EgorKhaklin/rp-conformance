@@ -84,6 +84,7 @@ const validate = (presentation: string, overrides: Partial<Parameters<typeof val
     kbMaxAgeSeconds: 300,
     requireStatus: true,
     maxStatusListBytes: 1 << 20,
+    requestedClaims: [{ path: ['family_name'] }, { path: ['given_name'] }, { path: ['birthdate'] }],
     fetchStatusList: async (uri) => {
       const response = await fetch(uri);
       return { status: response.status, body: await response.text() };

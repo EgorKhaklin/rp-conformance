@@ -3,13 +3,14 @@
 // `null` marks a variant that must pass every check. `text` is the FCAF wording of the difference, so a test case
 // names a fault and describes it in one place. The implementations are in packages/forge/src/faults.
 import type { CheckId } from './checks';
-import type { Flow } from './definition';
+import type { DefaultQueryId } from './rp/adapter';
+import type { Flow } from './rp/definition';
 
 /**
  * Where a fault is applied: the issued credential, the status list or identifier list the Test Status Provider serves,
  * the presentation the Conformance Wallet builds for the request (KB-JWT, DeviceAuth), or the Authorization Response.
  */
-export type FaultPoint = 'credential' | 'status-list' | 'identifier-list' | 'presentation' | 'response' | 'trust-list' | 'request';
+export type FaultPoint = 'credential' | 'status-list' | 'identifier-list' | 'presentation' | 'response' | 'trust-list' | 'request' | 'vp-token';
 
 /** The artifact format a fault applies to: a credential format, or the format of a status or identifier list. */
 export type FaultFormat = 'dc+sd-jwt' | 'mso_mdoc' | 'jwt' | 'cwt' | 'lote' | 'trusted-list';
@@ -33,6 +34,11 @@ export interface FaultInfo {
    * the certificate path with an intermediate CA need `PP-I`, whose signers are under one.
    */
   issuer?: string;
+  /**
+   * The default query a presentation with the fault must answer, when it is not `default_query_pid`: the attribute
+   * variants of the PID are presented for the query that requests the changed attributes (`RP_WS_DM_*`).
+   */
+  query?: DefaultQueryId;
 }
 
 const credential = (target: CheckId | null, text: string): FaultInfo => ({ point: 'credential', format: 'dc+sd-jwt', target, text });
@@ -45,6 +51,7 @@ const lote = (target: CheckId | null, text: string): FaultInfo => ({ point: 'tru
 const trustedList = (target: CheckId | null, text: string): FaultInfo => ({ point: 'trust-list', format: 'trusted-list', target, text });
 const request = (target: CheckId, text: string, flow?: Flow): FaultInfo => ({ point: 'request', target, text, ...(flow ? { flow } : {}) });
 const kbJwt = (target: CheckId, text: string, flow?: Flow): FaultInfo => ({ point: 'presentation', format: 'dc+sd-jwt', target, text, ...(flow ? { flow } : {}) });
+const vpToken = (target: CheckId, text: string): FaultInfo => ({ point: 'vp-token', target, text });
 const deviceAuth = (target: CheckId, text: string, flow?: Flow): FaultInfo => ({ point: 'presentation', format: 'mso_mdoc', target, text, ...(flow ? { flow } : {}) });
 
 /** Wording shared by faults of both formats. */
@@ -70,6 +77,77 @@ const SHARED_TEXT = {
   keyRsa1024: 'its signing certificate, issued under the same anchor, holds a 1024-bit RSA key, with which it is signed (RSASSA-PKCS1-v1_5 with SHA-256)',
   criticalExtension: 'its signing certificate additionally carries a private extension (OID 1.3.6.1.4.1.55555.1.1) marked critical',
 };
+
+const UTF8_NAMES = 'its `family_name` is `Παπαδοπούλου` and its `given_name` is `Łucja`, values with characters outside Latin-1 (ISO/IEC 8859-1)';
+const withQuery = (info: FaultInfo, query: DefaultQueryId): FaultInfo => ({ ...info, query });
+const pidAttributes = (target: CheckId | null, text: string): FaultInfo => ({ point: 'presentation', target, text });
+
+/** The attribute variants of the PID and the presentation variants of the data model test cases. */
+const DATA_MODEL_FAULTS = {
+  'credential.pid-mandatory-utf8': withQuery(
+    credential(
+      null,
+      `${UTF8_NAMES}, and it carries every mandatory attribute of the PID rulebook: besides \`family_name\`, \`given_name\`, \`birthdate\`, \`place_of_birth\` and \`nationalities\` also \`date_of_expiry\`, \`issuing_authority\` and \`issuing_country\``,
+    ),
+    'default_query_pid_mandatory',
+  ),
+  'credential.pid-requested-only': credential(
+    null,
+    'it carries no attribute besides `family_name`, `given_name` and `birthdate`: it has neither `place_of_birth` nor `nationalities`',
+  ),
+  'credential.birthdate-integer': credential('claims', 'its `birthdate` is the integer `19640812` instead of the string `1964-08-12`'),
+  'credential.nationalities-string': withQuery(
+    credential('claims', 'its `nationalities` is the string `DE` instead of an array of country codes'),
+    'default_query_pid_mandatory',
+  ),
+  'credential.age-over-18-true': withQuery(
+    credential(null, 'it also carries the claim `age_equal_or_over` whose member `18` is `true`'),
+    'default_query_pid_age_over_18',
+  ),
+  'credential.age-over-18-false': withQuery(
+    credential(null, 'it also carries the claim `age_equal_or_over` whose member `18` is `false`'),
+    'default_query_pid_age_over_18',
+  ),
+  'credential.age-over-18-false-required-true': withQuery(
+    credential('claims', 'it also carries the claim `age_equal_or_over` whose member `18` is `false`, while the query allows only the value `true`'),
+    'default_query_pid_age_over_18_true',
+  ),
+  'credential.address-structured': withQuery(
+    credential(
+      null,
+      'it also carries the claim `address` with the members `street_address`, `house_number`, `locality`, `postal_code` and `country`, each of them selectively disclosable within the disclosure of `address`',
+    ),
+    'default_query_pid_address',
+  ),
+  'credential.private-claim': credential(
+    null,
+    'its Issuer-signed JWT additionally carries the claim `rp_conformance_private_claim` with the value `unknown`, which no specification defines and which is not selectively disclosable',
+  ),
+  'mdoc.pid-mandatory-utf8': withQuery(
+    mdoc(null, `${UTF8_NAMES}; like \`default_credential_pid\` it carries every mandatory attribute of the PID rulebook`),
+    'default_query_pid_mandatory_mdoc',
+  ),
+  'mdoc.pid-requested-only': mdoc(null, 'its namespace `eu.europa.ec.eudi.pid.1` holds no element besides `family_name`, `given_name` and `birth_date`'),
+  'mdoc.birth-date-integer': mdoc('claims', 'its element `birth_date` is the integer `19640812` instead of the `full-date` `1964-08-12`'),
+  'mdoc.nationality-string': withQuery(
+    mdoc('claims', 'its element `nationality` is the text string `DE` instead of an array of country codes'),
+    'default_query_pid_mandatory_mdoc',
+  ),
+  'mdoc.age-over-18-true': withQuery(mdoc(null, 'it also carries the element `age_over_18` with the value `true`'), 'default_query_pid_age_over_18_mdoc'),
+  'mdoc.age-over-18-false': withQuery(mdoc(null, 'it also carries the element `age_over_18` with the value `false`'), 'default_query_pid_age_over_18_mdoc'),
+  'mdoc.age-over-18-false-required-true': withQuery(
+    mdoc('claims', 'it also carries the element `age_over_18` with the value `false`, while the query allows only the value `true`'),
+    'default_query_pid_age_over_18_true_mdoc',
+  ),
+  'presentation.family-name-withheld': pidAttributes(
+    'claims',
+    'the Conformance Wallet does not disclose the requested attribute `family_name`: the SD-JWT VC carries no disclosure of it, the mdoc no `IssuerSignedItem` for it',
+  ),
+  'presentation.unrequested-disclosed': pidAttributes(
+    null,
+    'the Conformance Wallet also discloses the attributes `place_of_birth` and `nationalities` (SD-JWT VC) or `place_of_birth` and `nationality` (mdoc), which the query does not request',
+  ),
+} as const satisfies Record<string, FaultInfo>;
 
 export const FAULTS = {
   // Credential (SD-JWT VC), after a valid issuance: the issuer-signed JWT is decoded, changed and signed again.
@@ -187,7 +265,7 @@ export const FAULTS = {
   ),
   'mdoc.issuer-auth-duplicate-label': mdoc(
     'format',
-    'the protected header of its `IssuerAuth` structure carries the label `alg` (1) twice, both times with the value -7 (ES256), and the signature is made over those bytes',
+    'the protected header of its `IssuerAuth` structure carries the label `alg` (1) twice, both times with the value -7 (`ES256`), and the signature is made over those bytes',
   ),
   'mdoc.mso-not-tag24': mdoc(
     'format',
@@ -258,10 +336,6 @@ export const FAULTS = {
   'status-list.bare-list': statusList(
     'status-list-format',
     'the Test Status Provider serves the bare status list JSON object (`bits`, `lst`) instead of a Status List Token',
-  ),
-  'status-list.html-error-page': statusList(
-    'status-list-fetch',
-    'the Test Status Provider answers with HTTP status 503 and an HTML error page (`text/html`) instead of a Status List Token',
   ),
   'status-list.exp-past': statusList('status-list-validity', 'its `exp` claim is set to the current time minus `T_skew` minus one hour'),
   'status-list.sub-other': statusList('status-list-subject', 'its `sub` claim is the URI of a different status list'),
@@ -369,10 +443,6 @@ export const FAULTS = {
     'redirect',
   ),
   'presentation.kb-nonce-missing': kbJwt('key-binding', 'its KB-JWT has no `nonce` claim'),
-  'presentation.kb-iat-nan': kbJwt(
-    'format',
-    'the payload of its KB-JWT is not valid JSON: the value of its `iat` claim is `NaN`, and the KB-JWT is signed with the holder key over that payload',
-  ),
   'presentation.kb-aud-client-id': kbJwt(
     'key-binding',
     'the `aud` claim of its KB-JWT is the Client Identifier of the request instead of `origin:` followed by the Origin of the page',
@@ -518,7 +588,8 @@ export const FAULTS = {
   'request.nonce-short': request('nonce', 'its `nonce` is `abc123`'),
   'request.nonce-reused': request('nonce', 'it carries the `nonce` of an earlier request'),
   'request.state-short': request('state', 'its `state` is `1`', 'redirect'),
-  'request.dc-api-response-uri': request('dc-api-request', 'its request object carries a `response_uri`', 'dc-api'),
+  // Not `response_uri` since the spec review of 2026-11-20: OpenID4VP 1.0 Appendix A.2 allows additional parameters.
+  'request.dc-api-response-mode-unencrypted': request('dc-api-request', 'its request object asks for response mode `dc_api` (an unencrypted response)', 'dc-api'),
   'request.expected-origins-other': request('expected-origins', 'its `expected_origins` also names `https://other.example`', 'dc-api'),
   'request.enc-key-private': request('encryption-key', 'the encryption key in its `client_metadata` carries the private key member `d`'),
   'request.enc-values-one': request('enc-values', 'its `encrypted_response_enc_values_supported` lists only `A128GCM`'),
@@ -535,7 +606,7 @@ export const FAULTS = {
     'it is signed with an end-entity certificate of `AC-A` without the policy, contact and subject of an access certificate',
   ),
   'request.registration-certificate-missing': request('registration-certificate', 'it carries no `verifier_info`'),
-  'request.unregistered-claim': request('registered-attributes', 'its DCQL query also requests the claim `nationalities`, which its registration certificate does not list'),
+  'request.unregistered-claim': request('registered-attributes', 'its DCQL query also requests the claim `email` (SD-JWT VC) or `email_address` (mdoc), which its registration certificate does not list'),
   'request.unsigned': request('signed-request', 'it is not signed: an unsigned request object (`alg` `none`) via redirects, protocol `openid4vp-v1-unsigned` via the DC API'),
 
   // Authorization Response (direct_post.jwt via redirects, dc_api.jwt via the W3C Digital Credentials API): built from
@@ -568,6 +639,105 @@ export const FAULTS = {
   'response.jws': response('response-format', 'the `response` parameter is a JWS signed with a key of the Conformance Wallet instead of a JWE'),
   'response.alg-none': response('response-format', 'the `response` parameter is an unsecured JWT with `alg` `none` instead of a JWE'),
   'response.extra-member': response(null, 'its decrypted payload additionally contains the member `foo` with the value `bar`'),
+
+  // RP_WS_SH_Encoding: malformed encodings of the Authorization Response, the presentation and the credential, built
+  // from the valid artifact (packages/forge/src/robustness.ts).
+  'response.jwe-four-segments': response('response-format', 'its `response` parameter is the JWE without its last segment, the authentication tag, so it has four segments instead of five'),
+  'response.jwe-not-base64url': response(
+    'response-format',
+    'the protected header segment of the JWE in its `response` parameter contains the characters `*` and `!`, which are not in the base64url alphabet',
+  ),
+  'response.oversized': response(
+    'response-format',
+    'its decrypted payload additionally carries the member `padding`, a string long enough that the `response` parameter exceeds the maximum response size the Relying Party declares in its ICS by one MiB',
+  ),
+  'presentation.sd-jwt-no-separator': kbJwt(
+    'format',
+    'the `~` that separates the last disclosure from the KB-JWT is missing, so the last disclosure and the KB-JWT form one segment',
+  ),
+  'presentation.sd-jwt-empty-disclosure': kbJwt(
+    'disclosures',
+    'it carries an empty segment between two disclosures (`~~`), while the `sd_hash` of its KB-JWT is computed over the presented SD-JWT with that segment',
+  ),
+  'presentation.kb-payload-nan': kbJwt('format', 'the payload of its KB-JWT is not valid JSON: its `iat` member has the value `NaN`, while the KB-JWT is signed over that payload'),
+  'presentation.kb-duplicate-alg': kbJwt(
+    'key-binding',
+    'the header of its KB-JWT carries the member `alg` twice: first `ES256`, with which it is signed, and last `none`',
+  ),
+  'presentation.kb-duplicate-nonce': kbJwt(
+    'key-binding',
+    'the payload of its KB-JWT carries the member `nonce` twice: first the `nonce` of the request and last a newly generated random value',
+  ),
+  'presentation.device-response-truncated': deviceAuth('format', 'its DeviceResponse is cut after half of its bytes'),
+  'presentation.device-response-documents-map': deviceAuth(
+    'format',
+    'the `documents` member of its DeviceResponse is a map (major type 5) whose key 0 holds the document, instead of an array (major type 4)',
+  ),
+  'presentation.device-response-deep-nesting': deviceAuth(
+    'format',
+    'the `documents` member of its DeviceResponse is 10,000 arrays nested in each other, the innermost one empty, instead of the array of documents',
+  ),
+  'presentation.device-response-unterminated': deviceAuth(
+    'format',
+    'its DeviceResponse is encoded as a map of indefinite length (initial byte 0xbf) without the terminating `break` byte (0xff), so it is not well-formed CBOR',
+  ),
+  'credential.disclosure-invalid-json': credential(
+    'disclosures',
+    'its disclosure of `family_name` is replaced by a disclosure whose base64url decoding is not valid JSON (the closing bracket of the array is missing), and the `_sd` array of its Issuer-signed JWT carries the digest of that disclosure',
+  ),
+  'credential.x5c-50': credential(
+    'issuer-trust',
+    'the `x5c` header of its Issuer-signed JWT carries 50 certificates: its signing certificate followed by 49 self-signed CA certificates that are not part of `default_trust_configuration_rp`',
+  ),
+  'mdoc.x5chain-50': mdoc(
+    'issuer-trust',
+    'the `x5chain` of its `IssuerAuth` carries 50 certificates: its document signer certificate followed by 49 self-signed CA certificates that are not part of `default_trust_configuration_rp`',
+  ),
+
+  // Single objectives of issue 32 (packages/forge/src/policy-faults.ts): faults whose outcome the policy the Relying
+  // Party declares decides (RP_PP_SM_Revocation_014), that it records only (RP_WS_SM_Validity_004), or that a valid
+  // credential may carry (RP_PP_SM_Revocation_031).
+  'status-list.iat-future': statusList('status-list-validity', 'its `iat` claim is set to the current time plus `T_skew` plus one hour'),
+  'status-list.iat-old': statusList('status-list-validity', 'its `iat` claim lies 30 days in the past, while its `exp` claim lies one day in the future'),
+  'status-list-cwt.iat-future': statusListCwt('status-list-validity', 'its issued at claim (6) is set to the current time plus `T_skew` plus one hour'),
+  'status-list-cwt.iat-old': statusListCwt(
+    'status-list-validity',
+    'its issued at claim (6) lies 30 days in the past, while its expiration time (4) lies one day in the future',
+  ),
+  'credential.iat-future': credential(null, 'its Issuer-signed JWT carries an `iat` claim set to the current time plus `T_skew` plus one hour'),
+  'mdoc.status-certificate': mdoc(
+    null,
+    'the `status_list` map in the `status` element of its MSO additionally carries `certificate`: the DER encoding of the certificate that signs the referenced Status List Token, issued under the revocation anchor of `PP-A`',
+  ),
+  // RP_WS_IA_Engagement and RP_WS_IA_ProtocolFlow: request faults of the invocation and of the answers at `request_uri`
+  // (self-validation only), and the `state` of the Authorization Response (ProtocolFlow_013).
+  'request.invocation-scheme-other': request('invocation-scheme', 'its invocation URI uses the scheme `mdoc-openid4vp://`', 'redirect'),
+  'request.request-uri-content-type-jwt': request('request-uri-content-type', 'its `request_uri` answers with `Content-Type` `application/jwt`', 'redirect'),
+  'request.refetch-refused': request('request-uri-refetch', 'its `request_uri` answers a second retrieval with HTTP 404', 'redirect'),
+  'request.wallet-nonce-missing': request('wallet-nonce', 'the request object its `request_uri` returns to a POST does not carry the `wallet_nonce`', 'redirect'),
+  'response.state-other': response('response-payload', 'its decrypted payload carries a newly generated random `state` instead of the `state` of the request', 'redirect'),
+  'response.state-missing': response('response-payload', 'its decrypted payload carries no `state`', 'redirect'),
+  // Attribute variants of the PID (RP_WS_DM_IdentifyingData, RP_WS_DM_CredentialMetadata): the PID is issued with other
+  // attributes, valid in every other respect, and presented for the query that requests them. The presentation
+  // variants change what the Conformance Wallet discloses. Target `claims`: the disclosed claims do not satisfy the
+  // query, or a PID attribute has a data type the PID rulebook does not give it.
+  ...DATA_MODEL_FAULTS,
+  // vp_token (UC_Presentation): the presentations are valid, the `vp_token` that carries them is not.
+  'vp-token.entry-missing': vpToken('vp-token', 'its `vp_token` has no entry for the credential query `pid`'),
+  'vp-token.unknown-id': vpToken(
+    'vp-token',
+    'its `vp_token` additionally holds an entry with the key `x`, which is the `id` of no credential query of the request, with a valid presentation of the same PID that discloses every attribute of the PID',
+  ),
+  'vp-token.two-presentations': vpToken(
+    'vp-token',
+    'the entry of its `vp_token` for the credential query `pid`, which does not set `multiple`, holds two valid presentations of the PID',
+  ),
+  'vp-token.combined-device-response': {
+    point: 'vp-token',
+    format: 'mso_mdoc',
+    target: 'vp-token',
+    text: 'the entries of its `vp_token` for both credential queries hold one and the same DeviceResponse, which carries the documents of both credentials, each with a valid device signature',
+  },
 } as const satisfies Record<string, FaultInfo>;
 
 export type FaultId = keyof typeof FAULTS;

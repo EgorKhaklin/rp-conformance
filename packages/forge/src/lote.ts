@@ -79,7 +79,19 @@ const PUB_EAA_NOTIFIED = 'http://uri.etsi.org/19602/PubEAAProvidersList/SvcStatu
 
 const der = (key: CertifiedKey) => Buffer.from(key.certificate.der).toString('base64');
 
-function buildEntity(entity: TestEntity, profile: ListProfile, restoreIssuance = false) {
+/**
+ * The ServiceName of a service: for a Wallet Provider's issuance services the Wallet Solution's `wallet_name` (WIA) or
+ * the WSCD type (KA), as TS3 section 3.2 maps them; otherwise the entity and the last segment of the service type.
+ */
+function serviceNameOf(entity: TestEntity, type: string, anchor: CertifiedKey, profile: ListProfile): string {
+  const solution = entity.spec.walletSolution;
+  if (solution && type === profile.issuanceServiceType) {
+    return anchor === entity.keyAttestation?.anchor && solution.keyAttestationService ? solution.keyAttestationService : solution.name;
+  }
+  return `${entity.spec.id} ${type.split('/').pop()}`;
+}
+
+function buildEntity(entity: TestEntity, profile: ListProfile, restoreIssuance = false, withdrawIssuance = false) {
   const informationUri = `${profile.informationUriPrefix}DE`;
   const builder = trustedEntity()
     .name(entity.spec.id)
@@ -88,11 +100,13 @@ function buildEntity(entity: TestEntity, profile: ListProfile, restoreIssuance =
     .infoUri(informationUri);
   // A withdrawn issuance service is left out: TS 119 602 Annex D has no ServiceStatus for it (PP-W).
   const services: [string, CertifiedKey][] = [
-    ...(entity.spec.issuanceWithdrawn && !restoreIssuance ? [] : [[profile.issuanceServiceType, entity.anchors.issuance] as [string, CertifiedKey]]),
+    ...((entity.spec.issuanceWithdrawn && !restoreIssuance) || withdrawIssuance ? [] : [[profile.issuanceServiceType, entity.anchors.issuance] as [string, CertifiedKey]]),
     [profile.revocationServiceType, entity.anchors.revocation],
   ];
+  // A Wallet Provider's separate KA anchor is a second issuance service, withdrawn with the first (TS3 section 3.2).
+  if (entity.keyAttestation && services[0][0] === profile.issuanceServiceType) services.splice(1, 0, [profile.issuanceServiceType, entity.keyAttestation.anchor]);
   for (const [type, anchor] of services) {
-    const svc = service().name(`${entity.spec.id} ${type.split('/').pop()}`).type(type).addCertificate(der(anchor));
+    const svc = service().name(serviceNameOf(entity, type, anchor, profile)).type(type).addCertificate(der(anchor));
     if (profile.pubEaa) svc.status(PUB_EAA_NOTIFIED);
     builder.addService(svc.build());
   }
@@ -110,6 +124,8 @@ export interface LoteBuildOptions {
   distributionPoint?: string;
   /** Entities whose withdrawn issuance service the list carries again (`PP-W`, RP_Inf_SM_TrustMechanisms_005). */
   restoreIssuance?: string[];
+  /** Issue 26: entities whose issuance services the list leaves out, as if withdrawn (`WP-A` withdrawn, PP_Inf_002_UF). */
+  withdrawIssuance?: string[];
   /** `ListIssueDateTime`; default `now`. */
   issued?: Date;
   /** `NextUpdate`; default one month after `ListIssueDateTime`. */
@@ -154,7 +170,7 @@ export function buildLoteDocument(options: LoteBuildOptions) {
       NextUpdate: (options.nextUpdate ?? new Date(issued.getTime() + MONTH)).toISOString(),
       ...(options.distributionPoint ? { DistributionPoints: [options.distributionPoint] } : {}),
     } as never,
-    ids.map((id) => buildEntity(options.pki.entities[id], profile, options.restoreIssuance?.includes(id))),
+    ids.map((id) => buildEntity(options.pki.entities[id], profile, options.restoreIssuance?.includes(id), options.withdrawIssuance?.includes(id))),
   );
 }
 

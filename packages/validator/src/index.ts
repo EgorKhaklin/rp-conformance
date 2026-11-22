@@ -7,3 +7,15 @@ export * from './status-list';
 export * from './trust';
 export * from './x509-path';
 export * from './request';
+export * from './issued';
+export * from './issuer-request';
+export * from './issuer-session';
+export * from './claims';
+export * from './issuer-metadata';
+export * from './vp-token';
+export * from './published-status';
+export * from './pid-rulebook';
+export * from './issuer-integrity';
+export * from './issuer-grant';
+// Issue 27
+export * from './attestation-rulebook';

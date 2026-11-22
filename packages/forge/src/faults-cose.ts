@@ -26,6 +26,8 @@ import { decompressionBomb, otherSigner, type ServedStatusList, type StatusListF
 import type { CertifiedKey, TestEntity } from './pki';
 import { createHash } from 'node:crypto';
 import { foreignSigner, isSignerFault } from './signers';
+import { isRobustMdocCredentialFault, robustMdocCredential } from './robustness';
+import { isPolicyMdocFault, isPolicyStatusListCwtFault, policyMdocCredential, policyStatusListCwt } from './policy-faults';
 
 const HOUR = 3600;
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -125,6 +127,8 @@ const MDOC_CHANGES: Partial<Record<FaultId, (mso: CborMap, ctx: MdocFaultContext
 /** Applies a credential fault to an issued mdoc (`IssuerSigned`, CBOR) and returns the changed `IssuerSigned`. */
 export async function applyMdocFault(fault: FaultId, issuerSignedBytes: Uint8Array, ctx: MdocFaultContext): Promise<Uint8Array> {
   ensure(fault, 'credential', 'mso_mdoc');
+  if (isRobustMdocCredentialFault(fault)) return robustMdocCredential(issuerSignedBytes, fault);
+  if (isPolicyMdocFault(fault)) return policyMdocCredential(issuerSignedBytes, ctx.signer, ctx.issuer);
   const issuerSigned = decodeCbor<CborMap>(issuerSignedBytes);
   const issuerAuth = readCose(issuerSigned.get('issuerAuth'));
   const mso = decodeEmbedded<CborMap>(decodeCbor(issuerAuth.payload ?? new Uint8Array()));
@@ -265,6 +269,7 @@ const cwt = (value: unknown): ServedStatusList => ({ body: encodeCbor(value), co
 /** Applies a Status List Token fault to a valid token in CWT format and returns what the Test Status Provider serves. */
 export async function applyStatusListCwtFault(fault: FaultId, token: Uint8Array, ctx: StatusListFaultContext): Promise<ServedStatusList> {
   ensure(fault, 'status-list', 'cwt');
+  if (isPolicyStatusListCwtFault(fault)) return { body: await policyStatusListCwt(fault, token, ctx.signer, ctx.now, ctx.skewSeconds), contentType: STATUS_LIST_CWT };
   const structure = readCose(decodeCbor(token));
   const claims = decodeCbor<CborMap>(structure.payload ?? new Uint8Array());
   const list = () => claims.get(CLAIM.statusList) as CborMap;

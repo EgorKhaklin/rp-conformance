@@ -1,8 +1,14 @@
 name: Nightly EUDIPLO
 
-# Runs every executable test case against EUDIPLO's latest main image (harness design section 8). A FAIL listed in
-# adapters/eudiplo/known-findings.yaml shows in the report and the JUnit XML as a known finding but does not fail the
-# job; any other FAIL, an INCONCLUSIVE or REVIEW result, or a harness error does.
+# Runs every executable test case of both suites against EUDIPLO's latest main image (harness design section 8, issuer
+# harness design section 8): first the Relying Party suite, then, against the same instance in tenants of its own, the
+# issuer suite with EUDIPLO as PID Provider, with the command of the CI job `Issuer reference run`. Each suite has its
+# own report, JUnit XML and artifact. A FAIL listed in the suite's known findings (adapters/eudiplo/known-findings.yaml,
+# adapters/issuer-eudiplo/known-findings.yaml) shows in the report and the JUnit XML as a known finding but does not
+# fail the job; any other FAIL, an INCONCLUSIVE or REVIEW result, or a harness error does. A regression on EUDIPLO's
+# main is such a FAIL: a finding to analyse, which the issuer reference run against the pinned image does not see. The
+# test book items (RP_TB_*, PP_TB_*) are listed as REVIEW with their method and never fail it. The issuer suite runs
+# even when the Relying Party suite failed, as long as EUDIPLO started.
 
 on:
   schedule:
@@ -29,7 +35,7 @@ concurrency:
 jobs:
   eudiplo:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 75
     env:
       EUDIPLO_IMAGE: ${{ inputs.image || 'ghcr.io/eudiplo/eudiplo:main' }}
       # Docker Library image from Amazon ECR Public: Docker Hub's anonymous pull limit, shared by the runners, has broken
@@ -52,6 +58,7 @@ jobs:
       - name: Chromium and its system libraries
         run: pnpm playwright:install --with-deps
       - name: Start EUDIPLO with PostgreSQL
+        id: eudiplo
         run: docker compose up -d --wait
       - name: Image under test
         run: |
@@ -61,18 +68,32 @@ jobs:
           echo "EUDIPLO \`$EUDIPLO_IMAGE\`: revision \`$revision\`, \`$digest\`, built $created" | tee -a "$GITHUB_STEP_SUMMARY"
       - name: Run every test case in both flows
         run: pnpm rp-conformance run --adapter eudiplo --known-findings adapters/eudiplo/known-findings.yaml --report-dir reports
+      - name: Issuer suite against EUDIPLO
+        if: ${{ !cancelled() && steps.eudiplo.outcome == 'success' }}
+        run: >-
+          pnpm rp-conformance issuer run --adapter eudiplo
+          --ics adapters/issuer-eudiplo/ics.yaml
+          --known-findings adapters/issuer-eudiplo/known-findings.yaml
+          --report-dir issuer-reports
       - name: Summary
         if: always()
         run: |
-          for summary in reports/*/summary.md; do [ -f "$summary" ] && cat "$summary" >> "$GITHUB_STEP_SUMMARY"; done
+          for summary in reports/*/summary.md issuer-reports/*/summary.md; do [ -f "$summary" ] && cat "$summary" >> "$GITHUB_STEP_SUMMARY"; done
       - name: EUDIPLO log
         if: always()
-        run: docker compose logs --no-color --timestamps eudiplo > reports/eudiplo.log 2>&1 || true
+        run: mkdir -p reports && docker compose logs --no-color --timestamps eudiplo > reports/eudiplo.log 2>&1 || true
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: rp-conformance-eudiplo-${{ github.run_number }}
           path: reports/
+          retention-days: 30
+          if-no-files-found: warn
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: issuer-conformance-eudiplo-${{ github.run_number }}
+          path: issuer-reports/
           retention-days: 30
           if-no-files-found: warn
       - name: Stop EUDIPLO

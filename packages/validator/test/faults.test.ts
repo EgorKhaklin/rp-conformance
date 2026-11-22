@@ -1,4 +1,5 @@
 import {
+  attestation,
   FAULT_IDS,
   type FaultId,
   faultInfo,
@@ -11,7 +12,7 @@ import {
   type TrustListAction,
 } from '@rp-conformance/core';
 import { createPublicKey, verify, X509Certificate } from 'node:crypto';
-import { defaultEntitiesOf, trustedListEntitiesOf } from '@rp-conformance/forge';
+import { defaultEntitiesOf, faultySigner, isSignerFault, mdocValidity, trustedListEntitiesOf } from '@rp-conformance/forge';
 import {
   base64url,
   type CborMap,
@@ -49,7 +50,8 @@ const actionWith = (fault?: FaultId, format: 'dc+sd-jwt' | 'mso_mdoc' = 'dc+sd-j
   const credentialFormat = info?.format === 'mso_mdoc' || info?.format === 'cwt' ? 'mso_mdoc' : format;
   const only = (point: string) => (info?.point === point ? [fault as FaultId] : []);
   return presentation({
-    query: pidQueryOf(credentialFormat),
+    // An attribute variant of the PID is presented for the query that requests the changed attributes.
+    query: info?.query ?? pidQueryOf(credentialFormat),
     credential: pid.of(credentialFormat, { faults: only('credential'), ...(info?.issuer ? { issuer: info.issuer } : {}) }),
     ...(info?.point === 'identifier-list'
       ? { identifierList: identifierListToken.cwt({ contains: false, faults: only('identifier-list') }) }
@@ -107,6 +109,8 @@ const BINDING_REASONS: Partial<Record<FaultId, RegExp>> = {
   'presentation.no-device-auth': /no deviceAuth/,
   'presentation.device-signed-element': /DeviceNameSpaces is not empty/,
   'presentation.device-signature-es256k': /alg -47/,
+  'presentation.kb-duplicate-alg': /KB-JWT header carries the member alg twice/,
+  'presentation.kb-duplicate-nonce': /KB-JWT payload carries the member nonce twice/,
 };
 
 /** The reason for each fault of IssuerIntegrity: many fail the same check, so the reason shows each fails it for its own defect. */
@@ -161,14 +165,15 @@ const ISSUER_REASONS: Partial<Record<FaultId, RegExp>> = {
   'mdoc.key-p192': /key P-192/,
   'mdoc.key-rsa1024': /key RSA 1024 bit/,
   'mdoc.critical-extension': /unknown critical extension/,
+  'credential.x5c-50': /carries 50 certificates/,
+  'mdoc.x5chain-50': /carries 50 certificates/,
+  'credential.disclosure-invalid-json': /not base64url-encoded JSON/,
 };
 
-/** The reason for the faults of encoding (Encoding_002, _003) and of the status endpoint (Supportive_004), which fail the checks that read the artifact. */
+/** The reason for the faults of encoding (Encoding_003), which fail the check that reads the artifact. */
 const OTHER_REASONS: Partial<Record<FaultId, RegExp>> = {
-  'presentation.kb-iat-nan': /KB-JWT payload cannot be decoded/,
   'mdoc.issuer-auth-duplicate-label': /protected header.*repeat map key/,
   'mdoc.mso-not-tag24': /not MobileSecurityObjectBytes/,
-  'status-list.html-error-page': /HTTP 503/,
 };
 
 const reasonOf = (result: Awaited<ReturnType<Fixture['validate']>>, check: string) => result.credential?.checks.find((c) => c.check === check)?.detail;
@@ -227,7 +232,7 @@ describe('fault self-validation', () => {
     },
   );
 
-  it.each(FAULT_IDS.filter((fault) => !['trust-list', 'request'].includes(faultInfo(fault).point)))('%s fails exactly its target check', async (fault) => {
+  it.each(FAULT_IDS.filter((fault) => !['trust-list', 'request', 'vp-token'].includes(faultInfo(fault).point)))('%s fails exactly its target check', async (fault) => {
     const result = await fixture.validate(actionWith(fault), { other: await otherFor(fault) });
     const target = faultInfo(fault).target;
     expect(result.failures).toEqual(target ? [target] : []);
@@ -276,8 +281,17 @@ describe('fault self-validation', () => {
       const result = await fixture.validateRequests(flow, query, { count: 3 });
       expect(result.failures, query).toEqual([]);
       const skipped = result.checks.filter((c) => c.status === 'skip').map((c) => c.check);
-      const otherFlow = flow === 'redirect' ? ['dc-api-request', 'expected-origins'] : ['request-by-reference', 'request-object', 'state'];
-      expect(skipped.sort(), query).toEqual([...otherFlow, ...(query.endsWith('_trusted_authorities') ? [] : ['trusted-authorities'])].sort());
+      const otherFlow = flow === 'redirect' ? ['dc-api-request', 'expected-origins'] : ['request-by-reference', 'request-object', 'state', 'invocation-scheme', 'request-uri-content-type'];
+      // A single GET of request_uri: the checks of a second retrieval and of a POST with wallet_nonce do not apply.
+      const retrieval = ['request-uri-refetch', 'wallet-nonce'];
+      expect(skipped.sort(), query).toEqual([...otherFlow, ...retrieval, ...(query.endsWith('_trusted_authorities') ? [] : ['trusted-authorities'])].sort());
+      if (flow === 'redirect') {
+        for (const requestUri of ['twice', 'post'] as const) {
+          const retrieved = await fixture.validateRequests(flow, query, { requestUri });
+          expect(retrieved.failures, `${query} ${requestUri}`).toEqual([]);
+          expect(retrieved.checks.find((c) => c.check === (requestUri === 'twice' ? 'request-uri-refetch' : 'wallet-nonce'))?.status).toBe('pass');
+        }
+      }
     }
   });
 
@@ -291,10 +305,36 @@ describe('fault self-validation', () => {
     expect(result.failures).toEqual([faultInfo(fault).target]);
   });
 
+  // The disclosure variants of the data model test cases apply to both formats.
+  it.each(['presentation.family-name-withheld', 'presentation.unrequested-disclosed'] as const)('%s fails exactly its target check in mdoc format too', async (fault) => {
+    const result = await fixture.validate(actionWith(fault, 'mso_mdoc'));
+    const target = faultInfo(fault).target;
+    expect(result.failures).toEqual(target ? [target] : []);
+    if (target) expect(reasonOf(result, target)).toMatch(/family_name is not disclosed/);
+  });
+
   it('every fault that fails key-binding or kb-freshness has its own expected reason', () => {
     const binding = FAULT_IDS.filter((fault) => ['key-binding', 'kb-freshness'].includes(faultInfo(fault).target ?? ''));
     expect(binding.filter((fault) => !BINDING_REASONS[fault])).toEqual([]);
   });
+
+  // A signer fault that is not about the validity of the signing certificate keeps the MSO `signed` time within that
+  // validity: the reference validator checks the signed date only once the path is valid, so a faulted path hides it,
+  // while an RP that checks the date first rejects the credential for it and passes the test case for the wrong reason.
+  const VALIDITY_FAULTS = new Set<FaultId>(['mdoc.signer-expired', 'mdoc.signer-not-yet-valid', 'mdoc.signed-after-ds-expiry']);
+  it.each(FAULT_IDS.filter((fault) => faultInfo(fault).format === 'mso_mdoc' && isSignerFault(fault) && !VALIDITY_FAULTS.has(fault)))(
+    '%s signs within the validity of its document signer certificate',
+    async (fault) => {
+      const now = new Date();
+      const signer = await faultySigner(fault, fixture.pki.entities[faultInfo(fault).issuer ?? 'PP-A'], 'mso_mdoc', fixture.pki, now);
+      const leaf = signer.certificate;
+      for (const short of [false, true]) {
+        const { signed } = mdocValidity(now, short);
+        expect(leaf.notBefore.getTime()).toBeLessThanOrEqual(signed.getTime());
+        expect(leaf.notAfter.getTime()).toBeGreaterThanOrEqual(signed.getTime());
+      }
+    },
+  );
 
   // The ES256K faults are genuine device authentication with another algorithm: the credential is bound to the
   // secp256k1 key, and the signature verifies with it.
@@ -403,13 +443,6 @@ describe('fault self-validation', () => {
     expect(Buffer.from(sha256(encodeCbor(item))).subarray(0, 20).equals(Buffer.from(digest))).toBe(true);
   });
 
-  it('presentation.kb-iat-nan is a KB-JWT that the holder key signs over a payload with NaN as iat', async () => {
-    const { parts, kbJwt } = await sdJwtParts('presentation.kb-iat-nan');
-    expect(Buffer.from(kbJwt[1], 'base64url').toString()).toMatch(/"iat":NaN[,}]/);
-    const cnf = base64url.decodeJson<{ cnf: { jwk: JsonWebKey } }>(parts[0].split('.')[1]).cnf.jwk;
-    expect(p1363(createPublicKey({ key: cnf as never, format: 'jwk' }), `${kbJwt[0]}.${kbJwt[1]}`, base64url.decode(kbJwt[2]))).toBe(true);
-  });
-
   /** The device key of the MSO and what the device signature of the presented document covers. */
   const deviceSignatureOf = async (fault: FaultId) => {
     const { result, document, issuerAuth } = await mdocParts(fault);
@@ -454,5 +487,42 @@ describe('fault self-validation', () => {
       expect(result.credential?.failed).toBe(faultInfo(fault).target);
       expect(result.credential && 'statusListFetched' in result.credential && result.credential.statusListFetched).toBe(false);
     }
+  });
+});
+
+// The vp_token faults of the combined presentations (UC_Presentation): a valid PID and a valid non-qualified EAA for
+// `default_query_pid_eaa`, of which the vp_token fails exactly `vp-token`, in each format the fault applies to and in
+// both flows; the presentations in it are valid, and are not validated once the vp_token as a whole failed.
+describe('vp_token faults', () => {
+  const combined = (fault: FaultId | undefined, format: 'dc+sd-jwt' | 'mso_mdoc') =>
+    presentation({
+      query: format === 'mso_mdoc' ? 'default_query_pid_eaa_mdoc' : 'default_query_pid_eaa',
+      credential: pid.of(format),
+      answers: 'pid',
+      alongside: [{ answers: 'eaa', credential: attestation.of('eaa', format) }],
+      ...(fault ? { response: { faults: [fault] } } : {}),
+    });
+  const cases = (['dc+sd-jwt', 'mso_mdoc'] as const).flatMap((format) =>
+    (['redirect', 'dc-api'] as const).flatMap((flow) => [
+      [undefined, format, flow] as const,
+      ...FAULT_IDS.filter((fault) => faultInfo(fault).point === 'vp-token' && (!faultInfo(fault).format || faultInfo(fault).format === format)).map(
+        (fault) => [fault, format, flow] as const,
+      ),
+    ]),
+  );
+
+  it.each(cases)('%s (%s via %s) fails exactly its target check', async (fault, format, flow) => {
+    const result = await fixture.validate(combined(fault, format), { flow });
+    expect(result.failures).toEqual(fault ? [faultInfo(fault).target] : []);
+  });
+
+  it.each(['dc+sd-jwt', 'mso_mdoc'] as const)('an EAA of another person fails exactly combined-binding (%s)', async (format) => {
+    const action = presentation({
+      query: format === 'mso_mdoc' ? 'default_query_pid_eaa_identifying_mdoc' : 'default_query_pid_eaa_identifying',
+      credential: pid.of(format),
+      answers: 'pid',
+      alongside: [{ answers: 'eaa', credential: attestation.of('eaa', format, { identifying: 'other-person' }) }],
+    });
+    expect((await fixture.validate(action)).failures).toEqual(['combined-binding']);
   });
 });

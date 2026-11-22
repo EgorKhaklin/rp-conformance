@@ -12,9 +12,20 @@ RP.P.3: "No"    # VP_REMOVE_TA strips trusted_authorities from the request
 RP.P.4: 60      # T_skew: skewSeconds, EUDIPLO default 60
 RP.P.5: "Yes"
 RP.P.6: 300     # T_kb: KB-JWT iat at most 300 s old
+RP.P.7: PT60S   # T_tx: lifeTime of the presentation configurations, set by the adapter
+RP.P.8: "No"    # request_uri_method is always get
+RP.P.9: "No"    # EUDIPLO is a back end: the relying service compares the response_code with the session's responseCode
+RP.P.10: "No"   # no attribute-based binding of combined presentations
+RP.P.11: 10485760  # body parser limit 10mb (main.helpers.ts configureBodyParsers)
+RP.P.12: Accept  # does not evaluate the PID expiry date
 RP.R.1: "Yes"   # statusCheckMode strict
 RP.R.2: Reject
 RP.R.3: None
 RP.R.4: 10485760
+RP.R.5: "Yes"   # caches status list tokens for their ttl (at most 1 h; 5 min without ttl)
+RP.R.6: PT10S   # STATUS_LIST_TIMEOUT_MS (status-list-verifier.service.ts)
+RP.R.7: None    # checks only that iat is present (status-list-verifier.service.ts)
+RP.R.8: "Yes"   # Status List JWT verification refuses an iat in the future ("JWT is not yet valid")
 RP.T.1: PT5M    # trust list cache
 RP.T.2: PT0S
+RP.T.4: Discard  # a list whose seal fails is discarded with the cached one (trust-store.service.ts); fail-closed by design, and the adapter's refreshTrust (DELETE /api/cache/trust-list) empties the cache itself

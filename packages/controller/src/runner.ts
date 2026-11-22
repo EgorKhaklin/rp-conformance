@@ -19,13 +19,14 @@ import {
   type RelyingPartyResult,
   type StartAction,
   type StepDefinition,
+  type TestBookItem,
   type TestCaseDefinition,
   type TrustListAction,
   type Verdict,
   controlsOf,
   durationMs,
 } from '@rp-conformance/core';
-import { base64url, defaultEntitiesOf, forgePresentation, requestAnchorKeyIds, trustedListEntitiesOf } from '@rp-conformance/forge';
+import { base64url, credentialQueryOf, defaultEntitiesOf, forgePresentations, heldCredentialOf, requestAnchorKeyIds, trustedListEntitiesOf } from '@rp-conformance/forge';
 import { DcApiShim, type DcApiOutcome, type DcApiRun } from '@rp-conformance/dc-api-shim';
 import { validateRequests } from '@rp-conformance/validator';
 import { ConformanceWallet, type DcApiAnswer, type HeldCredential, type PresentationEvidence } from '@rp-conformance/wallet';
@@ -36,6 +37,8 @@ import { harnessInfo } from './info';
 import { writeJUnit } from './junit';
 import { describeFinding, type KnownFinding, knownFindingOf } from './known-findings';
 import { writeSummary } from './summary';
+import { isServed, presetStatusUri, servedAs } from './status-endpoint';
+import { combine, evaluateFlowCodes, redirectUriOf, runErrorResponse, runFlow, type TransactionTrace, withoutFlowCodes } from './flow';
 
 /** The flows the harness implements: redirects, and the W3C Digital Credentials API through the DC API shim. */
 export const IMPLEMENTED_FLOWS: Flow[] = FLOWS;
@@ -65,7 +68,7 @@ export interface StepRecord {
     redirect?: PresentationEvidence['redirect'];
     requestFetch?: { url: string; status?: number };
   };
-  statusLog: { url: string; at: string; status: number }[];
+  statusLog: { url: string; at: string; status: number; method?: string; target?: string; headers?: Record<string, unknown> }[];
   trustLog?: { url: string; at: string; status: number; version?: number }[];
   /** A request step: the request checks over the captured requests. */
   requestChecks?: CheckResult[];
@@ -110,12 +113,21 @@ export interface RunReport {
     error?: string;
   };
   results: TestCaseRecord[];
+  /** The selected test book items, each REVIEW with its method: inspections the harness cannot execute. */
+  testBook?: TestBookRecord[];
+}
+
+/** A test book item in the report: always REVIEW, with the method of the inspection. */
+export interface TestBookRecord extends TestBookItem {
+  verdict: 'REVIEW';
 }
 
 export interface RunOptions {
   adapter: RelyingPartyAdapter;
   ics: Ics;
   definitions: TestCaseDefinition[];
+  /** The test book items, reported as REVIEW (`only` selects them like test cases). */
+  testBook?: TestBookItem[];
   /** Test case IDs or patterns with `*`. */
   only?: string[];
   flows?: Flow[];
@@ -141,10 +153,10 @@ const matches = (id: string, pattern: string) =>
  * Selects the executable test cases and adds the positive controls they depend on, controls first (harness design
  * section 4.1). Text-only definitions are left out.
  */
-export function selectTestCases(all: TestCaseDefinition[], only?: string[]): TestCaseDefinition[] {
+export function selectTestCases(all: TestCaseDefinition[], only?: string[], testBook: TestBookItem[] = []): TestCaseDefinition[] {
   const definitions = all.filter(isExecutable);
   const selected = only?.length ? definitions.filter((d) => only.some((p) => matches(d.id, p))) : [...definitions];
-  if (only?.length && selected.length === 0) {
+  if (only?.length && selected.length === 0 && selectTestBook(testBook, only).length === 0) {
     const textOnly = all.filter((d) => !isExecutable(d) && only.some((p) => matches(d.id, p)));
     throw new Error(`no executable test case matches ${only.join(', ')}${textOnly.length ? ` (text only: ${textOnly.map((d) => d.id).join(', ')})` : ''}`);
   }
@@ -155,6 +167,11 @@ export function selectTestCases(all: TestCaseDefinition[], only?: string[]): Tes
     for (const control of controls) if (!selected.includes(control)) selected.push(control);
   }
   return [...selected.filter((d) => !d.control), ...selected.filter((d) => d.control)];
+}
+
+/** Selects the test book items `only` names; all of them without `only`. */
+export function selectTestBook(items: TestBookItem[], only?: string[]): TestBookItem[] {
+  return only?.length ? items.filter((item) => only.some((p) => matches(item.id, p))) : [...items];
 }
 
 export { durationMs };
@@ -197,7 +214,11 @@ export async function runConformance(options: RunOptions): Promise<{ report: Run
   };
   try {
     log(`run ${runId}: harness services at ${harness.status.baseUrl} (status) and ${harness.trust.baseUrl} (trust)`);
-    const selected = selectTestCases(options.definitions, options.only);
+    const selected = selectTestCases(options.definitions, options.only, options.testBook);
+    report.testBook = selectTestBook(options.testBook ?? [], options.only).map((item) => ({ ...item, verdict: 'REVIEW' }));
+    for (const item of report.testBook) log(`${item.verdict.padEnd(14)} ${item.id} (test book) ${item.method}`);
+    // Only test book items selected: nothing to execute against the Relying Party.
+    if (selected.length === 0) return await writeReport(report, runDir);
     try {
       await options.adapter.setUp(harness.env, namespace);
     } catch (error) {
@@ -272,6 +293,10 @@ interface TestCaseState {
   pendingRetrieval?: { record: StepRecord; list: PublishableList; version: number; publishedAt: Date; checks: number };
   /** Whether the Relying Party answered a request of this test case (a started presentation). */
   rpReached: boolean;
+  /** The status list URI each step's credential referenced, by step number (`StatusListSpec.uriOfStep`). */
+  statusUris?: Map<number, string>;
+  /** The transaction of each presentation step, by step number, for the flow steps that continue it. */
+  traces?: Map<number, TransactionTrace>;
 }
 
 async function runTestCase(definition: TestCaseDefinition, flow: Flow, flowSupported: boolean, ctx: Context): Promise<TestCaseRecord> {
@@ -368,6 +393,18 @@ async function runStep(
       case 'request':
         await runRequest(step, step.run, flow, record, save, ctx, state);
         break;
+      case 'flow':
+        await runFlow(step, step.run, flow, record, save, flowContext(ctx), (state.traces ??= new Map()));
+        break;
+      case 'error-response': {
+        const action = step.run;
+        await runErrorResponse(step, action, flow, record, save, flowContext(ctx), async () => {
+          const started = await startPresentation(action, flow, record, save, ctx);
+          state.rpReached = true;
+          return started;
+        });
+        break;
+      }
       default:
         record.reason = 'the step is text only';
     }
@@ -386,6 +423,14 @@ async function runStep(
 }
 
 type Save = (name: string, content: string | Uint8Array | undefined) => Promise<void>;
+
+const flowContext = (ctx: Context) => ({
+  adapter: ctx.adapter,
+  wallet: ctx.wallet,
+  namespace: ctx.harness.namespace,
+  resultTimeoutMs: ctx.resultTimeoutMs,
+  dcApiShim: ctx.dcApiShim,
+});
 
 /** An error message with the code of its cause, for example `fetch failed (ECONNREFUSED)`. */
 const describeError = (error: unknown) => {
@@ -453,39 +498,62 @@ async function runPresentation(
 ) {
   const skewSeconds = Number(ctx.ics.items['RP.P.4'] ?? 0);
   const kbMaxAgeSeconds = Number(ctx.ics.items['RP.P.6'] ?? 300);
-  // Every credential gets a unique status URL (harness design section 4.6).
-  const forged = await forgePresentation(action, {
+  // Every credential gets a unique status URL (harness design section 4.6), unless the step shares the list of an
+  // earlier step or names an endpoint the Test Status Provider does not serve (RP_PP_IA_Supportive).
+  const allocate = () => ctx.harness.status.allocate(ctx.harness.env.runId);
+  state.statusUris ??= new Map();
+  let preset = await presetStatusUri(action.statusList, state.statusUris, allocate);
+  // A combined presentation (UC_Presentation) forges every credential of the step; the first is the step's own, to
+  // which its fault applies, and the first status list URI allocated is its own.
+  const credentials = await forgePresentations(action, {
     pki: ctx.harness.pki,
     holderPublicJwk: ctx.wallet.holderKey.publicJwk,
     holderSecp256k1PublicJwk: ctx.wallet.secp256k1Key.publicJwk,
-    allocateStatusUri: () => ctx.harness.status.allocate(ctx.harness.env.runId),
+    allocateStatusUri: () => {
+      const uri = preset ?? allocate();
+      preset = undefined;
+      return uri;
+    },
     skewSeconds,
   });
+  const forged = credentials[0].forged;
   const mdoc = forged.format === 'mso_mdoc';
-  if (forged.statusList) {
-    const { served, validToken } = forged.statusList;
-    ctx.harness.status.register(forged.statusList.uri, served.body, { contentType: served.contentType, ...(served.status ? { status: served.status } : {}) });
-    const extension = mdoc ? 'cwt' : 'jwt';
-    await save(/json|cbor/.test(served.contentType) ? `status-list.${mdoc ? 'cbor' : 'json'}` : /html/.test(served.contentType) ? 'status-list.html' : `status-list.${extension}`, served.body);
-    if (!sameBody(served.body, validToken)) await save(`status-list.valid.${extension}`, validToken);
+  if (forged.statusList) state.statusUris.set(record.step, forged.statusList.uri);
+  for (const [i, { forged: credential }] of credentials.entries()) {
+    const prefix = i === 0 ? '' : `alongside-${i}.`;
+    const isMdoc = credential.format === 'mso_mdoc';
+    if (credential.statusList) {
+      const { served, validToken } = credential.statusList;
+      // The step's own status list may be served with another behaviour, or not at all (RP_PP_IA_Supportive).
+      const endpoint = i === 0 ? action.statusList?.endpoint : undefined;
+      const answer = servedAs(endpoint, credential.statusList.uri, served, ctx.ics);
+      if (isServed(endpoint)) ctx.harness.status.register(credential.statusList.uri, answer.body, answer.behaviour);
+      const extension = isMdoc ? 'cwt' : 'jwt';
+      await save(/json|cbor/.test(served.contentType) ? `${prefix}status-list.${isMdoc ? 'cbor' : 'json'}` : `${prefix}status-list.${extension}`, served.body);
+      if (!sameBody(served.body, validToken)) await save(`${prefix}status-list.valid.${extension}`, validToken);
+    }
+    if (credential.identifierList) {
+      const { served, validToken } = credential.identifierList;
+      ctx.harness.status.register(credential.identifierList.uri, served.body, { contentType: served.contentType });
+      await save(`${prefix}identifier-list.cwt`, served.body);
+      if (!sameBody(served.body, validToken)) await save(`${prefix}identifier-list.valid.cwt`, validToken);
+    }
+    await save(isMdoc ? `${prefix}credential.issuer-signed.cbor` : `${prefix}credential.sd-jwt`, credential.credential);
   }
-  if (forged.identifierList) {
-    const { served, validToken } = forged.identifierList;
-    ctx.harness.status.register(forged.identifierList.uri, served.body, { contentType: served.contentType });
-    await save('identifier-list.cwt', served.body);
-    if (!sameBody(served.body, validToken)) await save('identifier-list.valid.cwt', validToken);
-  }
-  await save(mdoc ? 'credential.issuer-signed.cbor' : 'credential.sd-jwt', forged.credential);
 
   const query = ctx.harness.env.queries[action.query];
   const stepStart = new Date();
+  // The step's list is served before the wait, so a Relying Party that refreshes it in the background sees the change.
+  if (action.delaySeconds) await new Promise((resolve) => setTimeout(resolve, (action.delaySeconds ?? 0) * 1000));
+  // A late response (ProtocolFlow_011) is sent once the transaction lifetime T_tx (ICS RP.P.7) has passed, plus 2 s.
+  const lifetimeMs = durationMs(String(ctx.ics.items['RP.P.7'] ?? ''));
+  if (action.wallet?.late && lifetimeMs === undefined) throw new Error('the ICS declares no transaction lifetime T_tx (RP.P.7)');
+  const sendAt = action.wallet?.late ? Date.now() + (lifetimeMs ?? 0) + 2000 : undefined;
   const { transactionId, uri } = await startPresentation(action, flow, record, save, ctx);
   state.rpReached = true;
   const otherKey = action.response.keyOfStep ? state.encryptionKeys.get(action.response.keyOfStep) : undefined;
   if (action.response.keyOfStep && !otherKey) throw new Error(`step ${action.response.keyOfStep} recorded no encryption key`);
-  const held: HeldCredential = mdoc
-    ? { format: 'mso_mdoc', value: forged.credential as Uint8Array, ...(forged.documentDocType ? { docType: forged.documentDocType } : {}) }
-    : { format: 'dc+sd-jwt', value: forged.credential as string };
+  const [held, ...alongside]: HeldCredential[] = credentials.map(heldCredentialOf);
   const replayed = action.response.presentationOfStep ? state.presentations.get(action.response.presentationOfStep) : undefined;
   if (action.response.presentationOfStep && !replayed) throw new Error(`step ${action.response.presentationOfStep} recorded no presentation`);
   const responseOptions = {
@@ -495,11 +563,17 @@ async function runPresentation(
     replayedPresentation: replayed,
     skewSeconds,
     kbMaxAgeSeconds,
+    maxResponseBytes: Number(ctx.ics.items['RP.P.11'] ?? 0) || undefined,
+    ...(alongside.length ? { alongside } : {}),
+    ...(action.wallet?.redirect === 'none' ? { followRedirect: false } : {}),
+    ...(sendAt ? { sendAt } : {}),
   };
 
   let evidence: PresentationEvidence;
   /** Whether the Authorization Response reached the Relying Party: posted to `response_uri`, or returned to its page. */
   let delivered: boolean;
+  /** Via the DC API: the network error of the page's request that forwarded the response, if it failed without an answer. */
+  let forwardError: string | undefined;
   if (flow === 'dc-api') {
     let walletEvidence: PresentationEvidence | undefined;
     let answer: DcApiAnswer | undefined;
@@ -508,13 +582,14 @@ async function runPresentation(
       // A wallet that cannot use the request answers with an OpenID4VP error (Appendix A.4), not a presentation.
       if (!answer) return { kind: 'respond', protocol: call.requests[0]?.protocol ?? '', data: { error: 'invalid_request', error_description: walletEvidence.error } };
       return { kind: 'respond', ...answer, marker: deliveryMarker(answer.data, walletEvidence.presentation) };
-    });
+    }, sendAt ? { callTimeoutMs: sendAt - Date.now() + 15_000 } : {});
     evidence = walletEvidence ?? { invocationUri: uri, findings: [], error: run.error ?? 'the page made no digital credential request' };
     await recordDcApiRun(run, walletEvidence, record, save);
     await save('response.data.json', evidence.responseData && JSON.stringify(evidence.responseData, null, 2));
     delivered = Boolean(answer) && run.calls.length > 0;
     if (run.delivery) {
       record.rpResponse = { endpoint: 'dc-api-forward', url: run.delivery.url, status: run.delivery.status, body: run.delivery.body };
+      forwardError = run.delivery.status === undefined ? run.delivery.error : undefined;
     }
     if (delivered && run.error) evidence.error = evidence.error ?? run.error;
   } else {
@@ -536,18 +611,52 @@ async function runPresentation(
   await save('rp-result.json', JSON.stringify(record.rpResult.raw, null, 2));
   // The status list or identifier list the credential references; `FETCHED` and `NOFETCH` read its log.
   const listUri = forged.statusList?.uri ?? forged.identifierList?.uri;
-  record.statusLog = listUri ? ctx.harness.status.requestsFor(listUri, stepStart).map(({ url, at, status }) => ({ url, at, status })) : [];
+  const statusEntries = listUri ? ctx.harness.status.requestsFor(listUri, stepStart) : [];
+  const withRequest = step.expect.codes.includes('STATUS_REQUEST');
+  record.statusLog = statusEntries.map(({ url, at, status, method, target, headers }) => ({
+    url,
+    at,
+    status,
+    ...(withRequest ? { method, target, headers } : {}),
+  }));
 
-  const evaluation = evaluate(step.expect, {
+  // `ACC` compares the released attributes with the credential queries the presented credentials answer, and their
+  // issued values; in a combined presentation that may be a part of the query (credential_sets, optional queries).
+  const answered = credentials.map(({ forged: credential, answers }) => credentialQueryOf(query, { format: credential.format, query: answers }).id);
+  const presentedQuery = { ...query, credentials: query.credentials.filter((c) => answered.includes(c.id)) };
+  const issuedClaims = Object.assign({}, ...credentials.map(({ forged: credential }) => credential.claims)) as Record<string, unknown>;
+  const alwaysDisclosed = credentials.flatMap(({ forged: credential }) => plainClaimsOf(credential));
+  const trace: TransactionTrace = {
+    transactionId,
+    query: action.query,
+    invocationUri: uri,
+    responseUri: evidence.response?.url,
+    responseForm: evidence.responseForm,
+    response: evidence.response,
+    redirectUri: redirectUriOf(evidence.response?.body),
     result: record.rpResult,
-    query,
-    issuedClaims: forged.claims,
+  };
+  const traces = (state.traces ??= new Map());
+  const flowEvaluation = evaluateFlowCodes(step.expect, { response: evidence.response, trace, earlier: [...traces.values()] });
+  traces.set(record.step, trace);
+  const presentationEvaluation = evaluate(withoutFlowCodes(step.expect), {
+    result: record.rpResult,
+    query: presentedQuery,
+    issuedClaims,
+    alwaysDisclosed,
     delivered,
     responseStatus: record.rpResponse?.status,
+    responseEndpoint: record.rpResponse?.endpoint,
+    responseBody: record.rpResponse?.body,
+    forwardError,
     ics: ctx.ics,
     category: categoryOfQuery(action.query),
     statusRequests: record.statusLog.length,
+    statusEntries,
+    transactionId,
+    statusFormat: action.statusList?.format,
   });
+  const evaluation = flowEvaluation ? combine(withoutFlowCodes(step.expect).codes.length ? presentationEvaluation : undefined, flowEvaluation) : presentationEvaluation;
   record.verdict = evaluation.verdict;
   record.reason = evidence.error && evaluation.verdict !== 'PASS' ? `${evaluation.reason}; Conformance Wallet: ${evidence.error}` : evaluation.reason;
 }
@@ -603,7 +712,7 @@ async function runRequest(step: StepDefinition, action: RequestAction, flow: Flo
       });
       if (!evidence) throw new Error(run.error ?? 'the page made no digital credential request');
     } else {
-      evidence = await ctx.wallet.start(uri);
+      evidence = await ctx.wallet.start(uri, { requestUri: action.requestUri });
     }
     if (!evidence.captured) throw new Error('the Conformance Wallet captured no request');
     captured.push(evidence.captured);
@@ -685,5 +794,20 @@ async function checkPendingRetrieval(state: TestCaseState, ctx: Context, final: 
     pending.record.verdict = 'FAIL';
     pending.record.reason += '; the Relying Party did not retrieve it';
     state.pendingRetrieval = undefined;
+  }
+}
+
+/**
+ * The plain top-level claims of an SD-JWT VC's issuer-signed JWT: disclosed with every presentation, since they are not
+ * selectively disclosable. An mdoc has none (the wallet presents only the elements it selects).
+ */
+function plainClaimsOf(credential: { format: string; credential: string | Uint8Array }): string[] {
+  if (credential.format !== 'dc+sd-jwt' || typeof credential.credential !== 'string') return [];
+  try {
+    const payload = credential.credential.split('~')[0]?.split('.')[1];
+    if (!payload) return [];
+    return Object.keys(JSON.parse(Buffer.from(payload, 'base64url').toString('utf8')) as Record<string, unknown>).filter((claim) => claim !== '_sd' && claim !== '_sd_alg');
+  } catch {
+    return [];
   }
 }

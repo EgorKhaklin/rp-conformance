@@ -6,7 +6,7 @@ Verify that the Relying Party rejects a credential in mdoc format of a document 
 
 ## References
 
-- [OpenID4VP] section 8.6, B.2.3
+- [OpenID4VP] section 8.6, 14.9, B.2.3
 - [CIR 2024/2982 amended] Annex II
 
 ## Profile applicability

@@ -47,6 +47,10 @@ const ECCG_COSE = new Set([-7, -35, -36, -9, -51, -52, -37, -38, -39]);
 const PRIVATE_MEMBERS = ['d', 'p', 'q', 'dp', 'dq', 'qi', 'k', 'oth'];
 const ALLOWED_INVOCATION = new Set(['client_id', 'request_uri', 'request_uri_method']);
 const SIGNED_PROTOCOLS = ['openid4vp-v1-signed', 'openid4vp-v1-multisigned'];
+/** Same-device invocation schemes: HAIP section 5.1, OpenID4VP section 9, or a claimed https URL. */
+const INVOCATION_SCHEMES = ['haip-vp:', 'openid4vp:', 'https:'];
+const REQUEST_OBJECT_TYPE = 'application/oauth-authz-req+jwt';
+const mediaTypeOf = (contentType: string | null | undefined) => contentType?.split(';')[0]?.trim().toLowerCase();
 
 const decodeJson = (segment: unknown, what: string): Record<string, unknown> => {
   try {
@@ -184,7 +188,9 @@ export async function validateRequests(captured: CapturedRequest[], options: Req
         const p = payload();
         if (p.response_mode !== 'dc_api.jwt') fail(`response_mode is ${String(p.response_mode)}, not dc_api.jwt`);
         if (!Array.isArray(p.expected_origins) || p.expected_origins.length === 0) fail('the request carries no expected_origins');
-        if (p.response_uri !== undefined) fail('the DC API request carries a response_uri');
+        // OpenID4VP 1.0 Appendix A.2: "Additional request parameters MAY be defined and used" and "The Wallet MUST ignore
+        // any unrecognized parameters"; a response_uri is recorded, not failed (spec review 2026-11-20).
+        if (p.response_uri !== undefined) return 'dc_api.jwt with expected_origins; also carries a response_uri, which a Wallet ignores over the DC API (recorded)';
       });
       await recorder.run('expected-origins', ['signed-request'], () => {
         const skip = flowOnly('dc-api');
@@ -329,6 +335,47 @@ export async function validateRequests(captured: CapturedRequest[], options: Req
         const result = checkOverAsking(payload().dcql_query, registered);
         const errors = result.issues.filter((i: { severity: string }) => i.severity === 'error');
         if (errors.length) fail(`the request asks for more than the registration certificate lists: ${errors.map((i: { code: string; path: (string | number)[] }) => `${i.code} at ${i.path.join('.')}`).join('; ')}`);
+      });
+      // RP_WS_IA_Engagement and RP_WS_IA_ProtocolFlow: the invocation and the answers at request_uri.
+      await recorder.run('invocation-scheme', [], () => {
+        const skip = flowOnly('redirect');
+        if (skip) return skip;
+        let scheme: string;
+        try {
+          scheme = new URL(String(request.invocationUri)).protocol;
+        } catch {
+          return fail(`the invocation URI ${String(request.invocationUri)} is not a URI`);
+        }
+        if (!INVOCATION_SCHEMES.includes(scheme)) fail(`the invocation URI uses the scheme ${scheme}//, not haip-vp://, openid4vp:// or an https URL`);
+      });
+      await recorder.run('request-uri-content-type', [], () => {
+        const skip = flowOnly('redirect');
+        if (skip) return skip;
+        const contentType = request.requestUri?.contentType;
+        if (mediaTypeOf(contentType) !== REQUEST_OBJECT_TYPE) fail(`request_uri answers with Content-Type ${String(contentType)}, not ${REQUEST_OBJECT_TYPE}`);
+      });
+      await recorder.run('request-uri-refetch', ['signed-request'], () => {
+        const skip = flowOnly('redirect');
+        if (skip) return skip;
+        const refetch = request.refetch;
+        if (!refetch) return new NotApplicable('the request_uri was retrieved once');
+        if (refetch.status !== 200) fail(`request_uri answers a second retrieval with HTTP ${String(refetch.status)}`);
+        let again: Record<string, unknown> | undefined;
+        try {
+          again = decode({ ...request, requestUri: refetch }).payload;
+        } catch {
+          again = undefined;
+        }
+        if (!again) fail('request_uri answers a second retrieval without a request object');
+        if (again?.client_id !== payload().client_id) fail('the request object of the second retrieval carries another client_id');
+      });
+      await recorder.run('wallet-nonce', ['signed-request'], () => {
+        const skip = flowOnly('redirect');
+        if (skip) return skip;
+        if (request.walletNonce === undefined) return new NotApplicable('the request object was not retrieved with POST');
+        const method = new URL(String(request.invocationUri)).searchParams.get('request_uri_method');
+        if (method !== 'post') fail(`the invocation URI carries request_uri_method ${String(method)}, not post`);
+        if (payload().wallet_nonce !== request.walletNonce) fail(`the request object carries wallet_nonce ${JSON.stringify(payload().wallet_nonce)}, not the one the Conformance Wallet posted`);
       });
     });
     perRequest.push(recorder.results);

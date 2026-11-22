@@ -7,7 +7,7 @@ Verify that the Relying Party rejects a credential in mdoc format whose signing 
 ## References
 
 - [RFC5280] section 6.1
-- [ISO/IEC 18013-5] section 9.3.1
+- [ISO/IEC 18013-5] section 9.3.1 (not verified)
 - [RFC5280] section 4.2.1.9
 - [CIR 2024/2982 amended] Annex II
 

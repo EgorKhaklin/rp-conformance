@@ -44,6 +44,13 @@ export interface EntitySpec {
   intermediate?: boolean;
   /** `EP-A`: on no list; the rulebook of the credential defines its anchor `CA-EP-A`. */
   rulebook?: 'default_credential_eaa';
+  /**
+   * A Wallet Provider of `TL-WP` (issuer catalogue section 3.2). `name` is the Wallet Solution's `wallet_name` and the
+   * ServiceName of the WalletSolution/Issuance service whose anchor signs WIAs (TS3 section 3.2.1). With
+   * `keyAttestationService`, a separate CA signs KAs, listed as a second WalletSolution/Issuance service of that
+   * ServiceName (the WSCD type, TS3 section 3.2); without it, the issuance anchor signs both.
+   */
+  walletSolution?: { name: string; keyAttestationService?: string };
   /** Short host-like name used in subject alternative names and `iss`. */
   host: string;
 }
@@ -62,7 +69,11 @@ export const ENTITIES: EntitySpec[] = [
   { id: 'QP-W', trustedList: 'TL-QEAA', qeaaService: 'withdrawn', host: 'qp-w.rp-test' },
   { id: 'PB-A', list: 'TL-PUB', host: 'pb-a.rp-test' },
   { id: 'EP-A', rulebook: 'default_credential_eaa', host: 'ep-a.rp-test' },
-  { id: 'WP-A', list: 'TL-WP', host: 'wp-a.rp-test' },
+  { id: 'WP-A', list: 'TL-WP', separateRevocationAnchor: true, walletSolution: { name: 'WP-A Wallet', keyAttestationService: 'WP-A WSCD' }, host: 'wp-a.rp-test' },
+  { id: 'WP-B', list: 'TL-WP', walletSolution: { name: 'WP-B Wallet' }, host: 'wp-b.rp-test' },
+  { id: 'WP-W', list: 'TL-WP', issuanceWithdrawn: true, walletSolution: { name: 'WP-W Wallet' }, host: 'wp-w.rp-test' },
+  // On `TL-WP` only from its second version (PP_Inf_003), which the Test Wallet Provider publishes.
+  { id: 'WP-C', walletSolution: { name: 'WP-C Wallet' }, host: 'wp-c.rp-test' },
   { id: 'AC-A', list: 'TL-AC', host: 'ac-a.rp-test' },
   { id: 'RC-A', list: 'TL-RC', host: 'rc-a.rp-test' },
   { id: 'CA-X', host: 'ca-x.rp-test' },
@@ -82,6 +93,8 @@ export interface TestEntity {
   signers: { issuance: CertifiedKey; mdoc: CertifiedKey; revocation: CertifiedKey };
   /** `PP-I`: the intermediate CA under the issuance anchor that issued its signers. */
   intermediate?: CertifiedKey;
+  /** `WP-A`: the separate anchor for key attestations (`walletSolution.keyAttestationService`) and its KA signer. */
+  keyAttestation?: { anchor: CertifiedKey; signer: CertifiedKey };
 }
 
 /** The lists in ETSI TS 119 612 format: the test list of trusted lists and the Trusted List it points to. */
@@ -130,7 +143,7 @@ function derOid(oid: string): Uint8Array {
 }
 
 /** The extensions of the ISO/IEC 18013-5 Annex B profiles that `@owf/x509` has no template field for. */
-const annexBExtensions = (uri: string, documentSigner: boolean): X509Extension[] => [
+export const annexBExtensions = (uri: string, documentSigner: boolean): X509Extension[] => [
   // IssuerAltName (2.5.29.18): GeneralNames with one uniformResourceIdentifier [6].
   { oid: '2.5.29.18', critical: false, value: der(0x30, der(0x86, new TextEncoder().encode(uri))) },
   // ExtendedKeyUsage (2.5.29.37), critical for a document signer.
@@ -384,14 +397,36 @@ async function createEntity(spec: EntitySpec, now: Date): Promise<TestEntity> {
     issuerUri,
   );
   const revocationSigner = await createEndEntity(revocationCa, spec.id, `${spec.id} status list signer`, leafValidity);
+  const keyAttestationAnchor = spec.walletSolution?.keyAttestationService
+    ? await createSelfSignedCa(spec.id, `CA-${spec.id}-KA`, anchorValidity, { uri: issuerUri })
+    : undefined;
+  const keyAttestation = keyAttestationAnchor && {
+    anchor: keyAttestationAnchor,
+    signer: await createEndEntity(keyAttestationAnchor, spec.id, `${spec.id} key attestation signer`, leafValidity),
+  };
   return {
     spec,
     issuerUri,
     anchors: { issuance: issuanceAnchor, revocation: revocationAnchor },
     signers: { issuance: issuanceSigner, mdoc: documentSigner, revocation: revocationSigner },
     ...(intermediate ? { intermediate } : {}),
+    ...(keyAttestation ? { keyAttestation } : {}),
   };
 }
+
+/**
+ * The entities that stand for the Provider under test (issuer test catalogue section 3.2): `PP-T` on `TL-PID`, `QP-T`
+ * on `TL-QEAA`, `PB-T` on `TL-PUB`, and `EP-T` on no list (its anchor is configured as a rulebook anchor, `TA-EAA`).
+ * Their anchors are generated per run like those of every other entity; the leaf certificates the SUT signs with are
+ * issued by the Test Registrar (`enrolSut`) for the SUT's own keys. The `signers` the PKI generates for them are the
+ * harness's own and never the SUT's.
+ */
+export const SUT_ENTITIES: EntitySpec[] = [
+  { id: 'PP-T', list: 'TL-PID', separateRevocationAnchor: true, host: 'pp-t.rp-test' },
+  { id: 'QP-T', trustedList: 'TL-QEAA', qeaaService: 'granted', host: 'qp-t.rp-test' },
+  { id: 'PB-T', list: 'TL-PUB', separateRevocationAnchor: true, host: 'pb-t.rp-test' },
+  { id: 'EP-T', host: 'ep-t.rp-test' },
+];
 
 /**
  * Creates the test PKI of `default_trust_configuration_rp`: per entity its anchors and signing certificates,
@@ -402,6 +437,9 @@ export async function createTestPki(options: { now?: Date; relyingPartyHost?: st
   const now = options.now ?? new Date();
   const entities: Record<string, TestEntity> = {};
   for (const spec of ENTITIES) {
+    entities[spec.id] = await createEntity(spec, now);
+  }
+  for (const spec of SUT_ENTITIES) {
     entities[spec.id] = await createEntity(spec, now);
   }
   const schemeOperators = {} as Record<LoteListId, CertifiedKey>;
