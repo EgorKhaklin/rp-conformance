@@ -41,6 +41,28 @@ The SUT is placed in a controlled environment. Peers that interact with the SUT 
 - for a Relying Party, a **Conformance Wallet** that acts as Wallet Unit, **Test Issuers** that issue the presented credentials, a **Test Status Provider** and a **Test Trust Infrastructure**;
 - for a Provider, a **Conformance Wallet** that runs the issuance, a **Test Wallet Provider** that issues its Wallet Instance Attestations and key attestations, a **Test Registrar** and a **Test Trust Infrastructure**, and a reference validator that checks what the Provider returns.
 
+```mermaid
+flowchart LR
+
+    subgraph RPENV["Testing a Relying Party"]
+        direction LR
+        TI["Test Issuers"] -. credentials .-> CW1["Conformance Wallet<br/><small>acts as Wallet Unit</small>"]
+        CW1 -- "presentation" --> RP["Relying Party<br/><b>SUT</b>"]
+        RP -- "status lists" --> TSP["Test Status Provider"]
+        RP -- "trust lists" --> TTI1["Test Trust Infrastructure"]
+    end
+
+    subgraph PENV["Testing a PID or Attestation Provider"]
+        direction LR
+        TWP["Test Wallet Provider<br/><small>WIA, key attestations</small>"] -. attestations .-> CW2["Conformance Wallet<br/><small>runs the issuance</small>"]
+        CW2 -- "issuance" --> P["Provider<br/><b>SUT</b>"]
+        TR["Test Registrar"] -- "registration" --> P
+        P -- "trust" --> TTI2["Test Trust Infrastructure"]
+        CW2 -- "issued credentials" --> RV["Reference validator"]
+    end
+```
+*Figure 1: The test environment. The test tools play every peer of the SUT.*
+
 The [defaults](defaults.md) define these roles. The SUT is considered a black box and is tested without assumptions about, or required knowledge of, its inner workings.
 
 The controlled environment is essential to ensure that findings are objective, reproducible, and directly attributable to the SUT.

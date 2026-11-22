@@ -44,9 +44,9 @@ Passing the PCAF test cases is not a certification or a declaration of complianc
 The PCAF consists of:
 
 - the [methodology](index.md): Systems Under Test, test classes, layers and the test case format, as in the FCAF;
-- [guidance on using the framework](using-fcaf.md): system under test, ICS, preparation, execution and outcomes;
+- [guidance on using the framework](using-pcaf.md): system under test, ICS, preparation, execution and outcomes;
 - the [defaults](defaults.md): test roles, trust configurations, credentials and configurations shared by the test cases;
 - the test cases of each [System Under Test](suts/index.md), each traced to the requirements it tests;
 - an Implementation Conformance Statement (ICS) for [Relying Parties](ics-rp.md) and for [PID and Attestation Providers](ics-issuer.md).
 
-The test cases are tool-agnostic and can be executed manually. They are also rendered from executable definitions, and an [open-source harness](https://github.com/cre8/rp-conformance) runs them unattended.
+The PCAF is a framework, not a test tool. Its test cases are tool-agnostic and can be executed manually or with any tool. They are rendered from executable definitions, and an [open-source reference harness](https://github.com/cre8/rp-conformance) runs them unattended. You run it in your own test environment; it is not a hosted service. See [Framework and harness](../index.md#framework-and-harness).
