@@ -53,13 +53,15 @@ const PID_SHORT_LIFETIME_SECONDS = 12 * 60 * 60;
  * Issue 27: the attestation configurations of an Attestation Provider tenant (QEAA, PuB-EAA, non-qualified EAA), FCAF
  * `default_credential_A`, by the ICS reference that names them; the IDs come from the tenant's ICS (`categories.<c>`).
  */
-const ATTESTATION_CONFIGURATIONS: { ref: string; format: 'SD' | 'MD'; lifetime: number; short: boolean; deviceBound: boolean; second?: boolean }[] = [
+const ATTESTATION_CONFIGURATIONS: { ref: string; format: 'SD' | 'MD'; lifetime: number; short: boolean; deviceBound: boolean; second?: boolean; edp?: boolean }[] = [
   { ref: 'ICS-02.SD', format: 'SD', lifetime: 30 * 24 * 60 * 60, short: false, deviceBound: true },
   { ref: 'ICS-02.second', format: 'SD', lifetime: 30 * 24 * 60 * 60, short: false, deviceBound: true, second: true },
   { ref: 'ICS-02.MD', format: 'MD', lifetime: 30 * 24 * 60 * 60, short: false, deviceBound: true },
   { ref: 'ICS-05.short.SD', format: 'SD', lifetime: 12 * 60 * 60, short: true, deviceBound: true },
   { ref: 'ICS-05.short.MD', format: 'MD', lifetime: 12 * 60 * 60, short: true, deviceBound: true },
   { ref: 'ICS-04.NDB.SD', format: 'SD', lifetime: 30 * 24 * 60 * 60, short: false, deviceBound: false },
+  // Only AP_WS_SM_Revocation_102 issues from it: changing its policy revokes every attestation issued under it (EDP_11).
+  { ref: 'ICS-19.EDP.SD', format: 'SD', lifetime: 30 * 24 * 60 * 60, short: false, deviceBound: true, edp: true },
 ];
 /** `vct`, doctype and namespace of `default_credential_A` (the forge's `CREDENTIAL_A_VCT`, `CREDENTIAL_A_DOCTYPE`). */
 export const ATTESTATION_VCT = 'urn:rp-conformance:credential_a:1';
@@ -418,7 +420,8 @@ export class IssuerEudiploAdapter implements IssuerAdapter {
   /**
    * Issue 27: the configurations of `default_credential_A` for an Attestation Provider tenant: device-bound in SD-JWT VC
    * (`ICS-02.SD`, and the second configuration `ICS-02.second`) and mdoc (`ICS-02.MD`), the short-lived ones
-   * (`ICS-05.short.*`), and one that is not device-bound (`ICS-04.NDB.SD`, ICS-04 `P-NDB`). Revocation chaining
+   * (`ICS-05.short.*`), one that is not device-bound (`ICS-04.NDB.SD`, ICS-04 `P-NDB`), and with `P-EDP` the one whose
+   * embedded disclosure policy `AP_WS_SM_Revocation_102` changes (`ICS-19.EDP.SD`, ICS-19). Revocation chaining
    * (`revokeWithWalletUnit`) as ICS-07 declares it, the KA levels of ICS-04.
    */
   private async setUpAttestations(
@@ -431,10 +434,11 @@ export class IssuerEudiploAdapter implements IssuerAdapter {
     for (const c of ATTESTATION_CONFIGURATIONS) {
       if (c.short && !o.short) continue;
       if (!c.deviceBound && !ndb) continue;
+      if (c.edp && !env.ics.profiles.includes('P-EDP')) continue;
       if (c.format === 'MD' && !env.ics.profiles.includes('P-MD')) continue;
       const id = env.ics.items[c.ref];
       if (typeof id !== 'string') throw new Error(`the ICS of the ${name} names no configuration under ${c.ref}`);
-      const what = `${c.format === 'SD' ? 'SD-JWT VC' : 'mdoc'}${c.short ? ', short-lived without status reference' : ''}${c.deviceBound ? '' : ', not device-bound'}${c.second ? ', second configuration (never offered with the first)' : ''}`;
+      const what = `${c.format === 'SD' ? 'SD-JWT VC' : 'mdoc'}${c.short ? ', short-lived without status reference' : ''}${c.deviceBound ? '' : ', not device-bound'}${c.second ? ', second configuration (never offered with the first)' : ''}${c.edp ? ', embedded disclosure policy changed by AP_WS_SM_Revocation_102' : ''}`;
       const display = [{ name: `default_credential_A (${name})`, locale: 'en-US', description: 'FCAF default_credential_A of the conformance test subject' }];
       const proof = c.deviceBound ? { keyAttestationsRequired: o.keyAttestationsRequired } : {};
       // ICS-19 (`P-EDP`): an embedded disclosure policy, published as `disclosure_policy` of the configuration.
@@ -677,14 +681,16 @@ export class IssuerEudiploAdapter implements IssuerAdapter {
   /**
    * Issue 27 (`AP_WS_SM_Revocation_102`, ICS-19): changes the embedded disclosure policy of every configuration the
    * session issued credentials of (`PATCH /api/issuer/credentials/{id}`: another allowed relying party), and resolves
-   * once EUDIPLO stores the new policy.
+   * once EUDIPLO stores the new policy. `revokeOnDisclosurePolicyChange=true` (EUDIPLO/eudiplo#1642) makes EUDIPLO
+   * revoke every attestation issued under the old policy (EDP_11), so the test case issues from a configuration of its
+   * own (`ICS-19.EDP.SD`); a release before it ignores the parameter.
    */
   async changeDisclosurePolicy(sessionId: string): Promise<{ at: string }> {
     const configurations = [...new Set((await this.credentialStatus(sessionId)).map((entry) => entry.credentialConfigurationId))];
     if (!configurations.length) throw new Error(`EUDIPLO reports no credential of session ${sessionId}`);
     const policy = { policy: 'allowList', values: [CHANGED_DISCLOSURE_POLICY_RP] };
     for (const id of configurations) {
-      await this.call('PATCH', `/api/issuer/credentials/${encodeURIComponent(id)}`, { embeddedDisclosurePolicy: policy });
+      await this.call('PATCH', `/api/issuer/credentials/${encodeURIComponent(id)}?revokeOnDisclosurePolicyChange=true`, { embeddedDisclosurePolicy: policy });
       const stored = await this.call<{ embeddedDisclosurePolicy?: { values?: unknown[] } }>('GET', `/api/issuer/credentials/${encodeURIComponent(id)}`);
       if (!stored.embeddedDisclosurePolicy?.values?.includes(CHANGED_DISCLOSURE_POLICY_RP)) throw new Error(`EUDIPLO did not store the changed disclosure policy of ${id}`);
     }

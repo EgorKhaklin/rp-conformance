@@ -38,7 +38,7 @@ EUDI_specific | EUDI_required
 
 ## Test Scenario
 
-1. The adapter creates a credential offer for `SUBJ-1` and the attestation configuration in SD-JWT VC format, pre-authorized code. `CW-1` runs `SCN-I`: token request with WIA, PoP and DPoP proof, nonce request, credential request with an `openid4vci-proof+jwt` that carries the KA, all valid.
+1. The adapter creates a credential offer for `SUBJ-1` and the attestation configuration with an embedded disclosure policy that only this test case issues from (`ICS-19.EDP.SD`), pre-authorized code. `CW-1` runs `SCN-I`: token request with WIA, PoP and DPoP proof, nonce request, credential request with an `openid4vci-proof+jwt` that carries the KA, all valid.
 2. The adapter changes the embedded disclosure policy of the configuration of step 1 (`changeDisclosurePolicy`) and reports when the Provider has done so (`OBS-ADM`).
 3. The harness polls the status list of the credential of step 1 anonymously every `min(T_rev / 20, 30 s)` until `T_rev` (ICS-06) after the reported change of the policy, keeping every version with its `iat`, `exp` and the credential's status.
 
@@ -51,5 +51,7 @@ EUDI_specific | EUDI_required
 ## Comments
 
 Long running: the steps that wait run after the other test cases, in parallel (issuer harness design section 6.3).
+
+The configuration of `ICS-19.EDP.SD` is one no other test case issues from: a Provider that meets EDP_11 revokes every attestation issued under the old policy, which would revoke the attestations of test cases running at the same time.
 
 Variants (issuer catalogue section 2.3), each executed when the Provider's ICS puts it in the profiles named: `SD+PA+Q` (`P-Q`, `P-SD`, `P-PA`, `P-EDP`, `P-REV`), `SD+PA+PB` (`P-PB`, `P-SD`, `P-PA`, `P-EDP`, `P-REV`), `SD+PA+E` (`P-E`, `P-SD`, `P-PA`, `P-EDP`, `P-REV`).

@@ -46,6 +46,8 @@ describe('ICS of EUDIPLO as Attestation Provider (categories)', () => {
     expect(ics.categories?.E?.items?.['ICS-07']).toBe('No');
     expect(ics.categories?.E?.profiles).not.toContain('P-CHAIN');
     expect(ics.categories?.Q?.profiles).toContain('P-EDP');
+    // AP_WS_SM_Revocation_102 issues from a configuration of its own: changing its policy revokes all issued under it.
+    expect(ics.categories?.Q?.items?.['ICS-19.EDP.SD']).toEqual(expect.any(String));
   });
 });
 

@@ -240,8 +240,12 @@ the PID (`ICS-02.SD`, `.MD`, `.second`, `ICS-05.short.*`), plus one SD-JWT VC co
 (ICS-04), so `AP_WS_SM_KeyAttestation_101_UF` runs with `basic`. The QEAA and PuB-EAA tenants chain revocation
 (`revokeWithWalletUnit`, ICS-07 Yes), the non-qualified EAA tenant does not (ICS-07 No), so `AP_WS_SM_Revocation_100`
 sees both answers of its `POLICY`. Every tenant rejects an unobtainable WIA or KA status (`strict`, ICS-18 reject). The
-QEAA tenant publishes an embedded disclosure policy (`embeddedDisclosurePolicy`, ICS-19 `P-EDP`), which
-`changeDisclosurePolicy` changes with `PATCH /api/issuer/credentials/{id}`.
+QEAA tenant publishes an embedded disclosure policy (`embeddedDisclosurePolicy`, ICS-19 `P-EDP`) on every
+configuration. `AP_WS_SM_Revocation_102` issues from a configuration of its own (`ICS-19.EDP.SD`, `qeaa-sd-jwt-vc-edp`),
+whose policy `changeDisclosurePolicy` changes with `PATCH /api/issuer/credentials/{id}?revokeOnDisclosurePolicyChange=true`
+([EUDIPLO/eudiplo#1642](https://github.com/EUDIPLO/eudiplo/pull/1642)): EUDIPLO then revokes every attestation issued
+under the old policy, which on a shared configuration would revoke those of the test cases running at the same time. A
+release before it, such as the pinned reference image, ignores the parameter.
 
 The `AP_*` variants of `PP_*` test cases fail where the `PP_*` test case fails, for the same reason: EUDIPLO's behaviour
 does not depend on the credential type. [`known-findings.yaml`](known-findings.yaml) lists them in its Attestation
