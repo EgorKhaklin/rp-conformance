@@ -62,31 +62,34 @@ export const PID_SD_JWT_EXTRA_FIELDS = [
 /** DocType and namespace of the PID in mdoc format (PID Rulebook chapter 4). */
 export const PID_MDOC_NAMESPACE = 'eu.europa.ec.eudi.pid.1';
 
-const mdocField = (name: string, type: string, mandatory = false, children?: unknown[]) => ({
+const mdocField = (name: string, type: string, mandatory = false, children?: unknown[], format?: 'date') => ({
   namespace: PID_MDOC_NAMESPACE,
   path: [name],
   type,
+  ...(format ? { format } : {}),
   ...(mandatory ? { mandatory: true } : {}),
   ...(children ? { children } : {}),
 });
 
 /**
  * The claim definitions of the PID configuration in mdoc format, namespace `eu.europa.ec.eudi.pid.1` (PID Rulebook
- * chapter 4). EUDIPLO's field types are JSON types: it has none for `full-date`, so the dates are strings.
+ * chapter 4). The dates declare `format` `date` (EUDIPLO/eudiplo#1635), so EUDIPLO issues them as `full-date` (CBOR tag
+ * 1004) as PID Rulebook section 3.1.2 requires; a release before it does not know the key, the adapter leaves it out
+ * (`postWithoutUnknownKeys`) and the dates are text strings.
  */
 export const PID_MDOC_FIELDS = [
   mdocField('family_name', 'string', true),
   mdocField('given_name', 'string', true),
-  mdocField('birth_date', 'string', true),
+  mdocField('birth_date', 'string', true, undefined, 'date'),
   mdocField('place_of_birth', 'object', true, [
     { path: ['locality'], type: 'string' },
     { path: ['country'], type: 'string' },
   ]),
   mdocField('nationality', 'array', true, [{ path: [null], type: 'string' }]),
-  mdocField('expiry_date', 'string', true),
+  mdocField('expiry_date', 'string', true, undefined, 'date'),
   mdocField('issuing_authority', 'string', true),
   mdocField('issuing_country', 'string', true),
-  mdocField('issuance_date', 'string'),
+  mdocField('issuance_date', 'string', false, undefined, 'date'),
   mdocField('age_over_18', 'boolean'),
   mdocField('age_in_years', 'integer'),
   mdocField('age_birth_year', 'integer'),
@@ -136,11 +139,11 @@ export const ATTESTATION_SD_JWT_FIELDS = [
   { path: ['attribute_C'], type: 'string', mandatory: true, disclosable: true },
 ];
 
-/** Issue 27: the same in mdoc format, namespace `test.rp-conformance.credential_a.1` (dates as strings, as for the PID). */
+/** Issue 27: the same in mdoc format, namespace `test.rp-conformance.credential_a.1` (attribute_C a `full-date`, as for the PID). */
 export const ATTESTATION_MDOC_FIELDS = [
   { namespace: ATTESTATION_NAMESPACE, path: ['attribute_A'], type: 'number', mandatory: true },
   { namespace: ATTESTATION_NAMESPACE, path: ['attribute_B'], type: 'string', mandatory: true },
-  { namespace: ATTESTATION_NAMESPACE, path: ['attribute_C'], type: 'string', mandatory: true },
+  { namespace: ATTESTATION_NAMESPACE, path: ['attribute_C'], type: 'string', format: 'date', mandatory: true },
 ];
 
 /** Issue 27: the claims of `default_credential_A` the adapter seeds for a subject (`ATTESTATION_TEST_SUBJECTS`). */
