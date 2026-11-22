@@ -143,7 +143,65 @@ export interface RunOptions {
   trustRefreshWaitMs?: number;
   /** Known findings of the Relying Party under test; a FAIL that matches one is marked in the report. */
   knownFindings?: KnownFinding[];
+  /**
+   * How many test case runs execute at a time (harness design section 6); default 1, every run one after another in
+   * definition order. With more, the runs that change the trust lists of the namespace run after the others, one at a
+   * time. The report lists the results in definition order either way.
+   */
+  concurrency?: number;
   log?: (line: string) => void;
+}
+
+/**
+ * Whether a test case publishes new trust list versions in the run's namespace (a `trust-list` step). Every other test
+ * case relies on the default trust configuration, so such a test case runs alone (harness design section 6).
+ */
+export const changesTrust = (definition: TestCaseDefinition) => definition.steps.some((step) => step.run?.kind === 'trust-list');
+
+/** One run of a test case in one flow. */
+interface Job {
+  definition: TestCaseDefinition;
+  flow: Flow;
+}
+
+const jobKey = (testCase: string, flow: Flow) => `${testCase} ${flow}`;
+
+/**
+ * Executes the jobs, at most `concurrency` at a time, and returns their records in the order of `jobs`. A job waits for
+ * the runs of its positive controls in the same flow, which come before it. With `concurrency` above 1 the jobs that
+ * change trust run after all others, one at a time; with 1 every job runs in order.
+ */
+async function schedule(jobs: Job[], concurrency: number, execute: (job: Job) => Promise<TestCaseRecord>): Promise<TestCaseRecord[]> {
+  const records: TestCaseRecord[] = new Array(jobs.length);
+  const pending = new Map<string, Promise<unknown>>();
+  const run = async (index: number) => {
+    const { definition, flow } = jobs[index];
+    await Promise.all(controlsOf(definition).map((id) => pending.get(jobKey(id, flow))));
+    records[index] = await execute(jobs[index]);
+  };
+  const indices = jobs.map((_, index) => index);
+  const exclusive = concurrency > 1 ? indices.filter((i) => changesTrust(jobs[i].definition)) : [];
+  const shared = indices.filter((i) => !exclusive.includes(i));
+  // Workers take the shared jobs in order; a job's controls were taken before it, so waiting for them cannot deadlock.
+  let next = 0;
+  let failure: { error: unknown } | undefined;
+  const worker = async () => {
+    while (next < shared.length && !failure) {
+      const index = shared[next++];
+      const job = jobs[index];
+      const done = run(index);
+      pending.set(jobKey(job.definition.id, job.flow), done.catch(() => {}));
+      try {
+        await done;
+      } catch (error) {
+        failure ??= { error };
+      }
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(Math.max(1, concurrency), shared.length) }, worker));
+  if (failure) throw failure.error;
+  for (const index of exclusive) await run(index);
+  return records;
 }
 
 const matches = (id: string, pattern: string) =>
@@ -238,19 +296,28 @@ export async function runConformance(options: RunOptions): Promise<{ report: Run
       accessCertificateAnchors: [harness.pki.entities['AC-A'].anchors.issuance.certificate],
       allowInsecureUrls: true,
     });
-    for (const definition of selected) {
-      // Every test case once per flow, except the SessionEncryption variants, whose profile names their flow.
-      for (const flow of flowsOf(definition).filter((f) => requestedFlows.includes(f))) {
-        const started = Date.now();
-        const record = await runTestCase(definition, flow, flows.includes(flow), { ...options, harness, wallet, runDir, report, dcApiShim });
-        record.durationMs = Date.now() - started;
-        const finding = record.verdict === 'FAIL' ? knownFindingOf(options.knownFindings ?? [], record.testCase, flow) : undefined;
-        if (finding) record.knownFinding = describeFinding(finding);
-        report.results.push(record);
-        log(`${record.verdict.padEnd(14)} ${record.testCase} [${record.flow}]${record.knownFinding ? ' (known finding)' : ''}${record.reason ? ` ${record.reason}` : ''}`);
-        for (const step of record.steps.filter((s) => s.verdict !== 'PASS')) log(`    step ${step.step} ${step.verdict}: ${step.reason}`);
-      }
+    // Every test case once per flow, except the SessionEncryption variants, whose profile names their flow.
+    const jobs = selected.flatMap((definition) => flowsOf(definition).filter((f) => requestedFlows.includes(f)).map((flow) => ({ definition, flow })));
+    const concurrency = options.concurrency ?? 1;
+    if (!Number.isInteger(concurrency) || concurrency < 1) throw new Error(`concurrency must be a positive integer, not ${concurrency}`);
+    if (concurrency > 1) {
+      const exclusive = jobs.filter((job) => changesTrust(job.definition)).length;
+      log(`${jobs.length} test case runs, up to ${concurrency} at a time${exclusive ? `; the ${exclusive} that change trust lists run after them, one at a time` : ''}`);
     }
+    const finished = new Map<string, TestCaseRecord>();
+    const ctx: Context = { ...options, harness, wallet, runDir, report, dcApiShim, finished };
+    report.results = await schedule(jobs, concurrency, async ({ definition, flow }) => {
+      const started = Date.now();
+      const record = await runTestCase(definition, flow, flows.includes(flow), ctx);
+      record.durationMs = Date.now() - started;
+      const finding = record.verdict === 'FAIL' ? knownFindingOf(options.knownFindings ?? [], record.testCase, flow) : undefined;
+      if (finding) record.knownFinding = describeFinding(finding);
+      finished.set(jobKey(record.testCase, flow), record);
+      // With concurrency the lines come in the order the runs finish; the report keeps definition order.
+      log(`${record.verdict.padEnd(14)} ${record.testCase} [${record.flow}]${record.knownFinding ? ' (known finding)' : ''}${record.reason ? ` ${record.reason}` : ''}`);
+      for (const step of record.steps.filter((s) => s.verdict !== 'PASS')) log(`    step ${step.step} ${step.verdict}: ${step.reason}`);
+      return record;
+    });
   } finally {
     await options.adapter.tearDown?.().catch(() => {});
     await shim?.then((s) => s.close()).catch(() => {});
@@ -277,6 +344,8 @@ interface Context extends RunOptions {
   dcApiShim: () => Promise<DcApiShim>;
   runDir: string;
   report: RunReport;
+  /** The records of the finished test case runs, by `jobKey`: the verdicts of the positive controls. */
+  finished: Map<string, TestCaseRecord>;
 }
 
 /** State shared by the steps of one test case. */
@@ -304,7 +373,7 @@ async function runTestCase(definition: TestCaseDefinition, flow: Flow, flowSuppo
   // One passed control is enough when the definition names alternatives (for example 001a or 001b).
   const outcomes = controlsOf(definition).map((id) => ({
     id,
-    verdict: ctx.report.results.find((r) => r.testCase === id && r.flow === flow)?.verdict ?? ('INCONCLUSIVE' as Verdict),
+    verdict: ctx.finished.get(jobKey(id, flow))?.verdict ?? ('INCONCLUSIVE' as Verdict),
   }));
   const control = outcomes.find((o) => o.verdict === 'PASS') ?? outcomes[0] ?? null;
   const end = (verdict: Verdict, reason: string): TestCaseRecord => ({ ...base, verdict, reason, control, steps: [] });

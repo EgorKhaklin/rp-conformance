@@ -6,7 +6,7 @@ import { flowsOf } from '@rp-conformance/core';
 import { executableDefinitions as definitions } from '@rp-conformance/definitions';
 import { describe, expect, it } from 'vitest';
 import { loadIcs } from '../src/ics';
-import { runConformance } from '../src/runner';
+import { changesTrust, runConformance, selectTestCases } from '../src/runner';
 
 // Harness design section 7, step 3: every executable test case passes against the reference Relying Party in every flow
 // it runs in (redirects, and the DC API through the shim), which also proves that each positive control is reachable.
@@ -36,5 +36,32 @@ describe('run against the reference Relying Party', () => {
       dcApi: { protocol: 'openid4vp-v1-signed' },
     });
     expect(control('dc-api').steps[0].statusLog).toHaveLength(1);
+  }, 600_000);
+
+  // Harness design section 6: with concurrency the verdicts stay the same, the trust-changing test cases run after the
+  // others, and the report keeps definition order.
+  it('runs test cases concurrently with the same verdicts and order', async () => {
+    const reportDir = await mkdtemp(join(tmpdir(), 'rp-conformance-'));
+    const ics = await loadIcs(new URL('../../../adapters/reference/ics.yaml', import.meta.url).pathname);
+    const only = ['RP_PP_SM_Revocation_00*', 'RP_Inf_SM_TrustMechanisms_001', 'RP_WS_SM_TrustMechanisms_007a_UF'];
+    const lines: string[] = [];
+    const { report } = await runConformance({
+      adapter: new ReferenceAdapter(),
+      ics,
+      definitions,
+      only,
+      reportDir,
+      harnessHost: '127.0.0.1',
+      concurrency: 4,
+      log: (line) => lines.push(line),
+    });
+    const selected = selectTestCases(definitions, only);
+    expect(report.results.map((r) => `${r.testCase} ${r.flow}`)).toEqual(selected.flatMap((d) => flowsOf(d).map((flow) => `${d.id} ${flow}`)));
+    expect(report.results.filter((r) => r.verdict !== 'PASS').map((r) => `${r.testCase} ${r.flow}: ${r.verdict} ${r.reason ?? ''}`)).toEqual([]);
+    // The trust-changing runs are logged last, one after another.
+    const trustChanging = new Set(selected.filter(changesTrust).map((d) => d.id));
+    expect(trustChanging.size).toBe(2);
+    const logged = lines.filter((l) => l.startsWith('PASS')).map((l) => l.split(/\s+/)[1]);
+    expect(logged.slice(-2 * trustChanging.size).every((id) => trustChanging.has(id))).toBe(true);
   }, 600_000);
 });

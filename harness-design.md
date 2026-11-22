@@ -298,7 +298,7 @@ Each test case produces a record like this, collected into JSON, JUnit XML and a
 ## 6. Isolation, determinism and parallelism
 
 - Every step uses newly issued credentials with unique status URLs, so the RP's status cache needs no reset.
-- Trust state is per namespace. With an adapter that maps namespaces to tenants (EUDIPLO), trust-changing test cases run in parallel; otherwise they run serially at the end of the run and restore the lists.
+- Trust state is per namespace. With an adapter that maps namespaces to tenants (EUDIPLO), trust-changing test cases could run in parallel; the controller runs one namespace per run, so with `--concurrency` above 1 they run serially at the end of the run and restore the lists, while the other test cases (each with its own credentials and status URLs) run up to `n` at a time. A test case waits for its positive control in the same flow; the report keeps definition order. What the test cases share is safe for that: the Conformance Wallet keeps no state between presentations, the Test Status Provider serves and logs per URL, and the DC API shim opens a browser context of its own for every page in one Chromium.
 - Time faults are computed from the RP's declared `T_skew` and `T_kb` plus one hour, so clock jitter never decides a verdict; the harness checks its own clock against NTP at start.
 - `T_refresh` can be long; the adapter's refresh hook avoids waiting it out.
 
