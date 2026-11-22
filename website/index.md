@@ -44,9 +44,23 @@ It does the same, as a separate draft, for PID and Attestation Providers, for wh
 
 The [framework pages](pcaf/introduction.md) (introduction, methodology, using the framework, defaults) are those of the FCAF, rewritten for these SUTs. The FCAF's Wallet Solution pages are not part of this site.
 
-## The harness
+## Framework and harness
 
-The test cases are rendered from executable definitions. The [harness](https://github.com/cre8/rp-conformance) runs them unattended against a Relying Party or a PID Provider through an adapter: a Conformance Wallet, status list and trust list servers, and an artifact forge that injects exactly one fault per test step, both over redirects and over the W3C Digital Credentials API; for a PID Provider an issuance client with a Test Wallet Provider and a Test Registrar. The [README](https://github.com/cre8/rp-conformance#readme) shows how to run it, and each suite has its test catalogue, which traces every test objective to the ARF, and its harness design: [Relying Party suite](rp/index.md), [issuer suite](issuer/index.md).
+The PCAF is a framework, not a test service. It specifies test cases: what the test environment sends the SUT, what the SUT must do, and how the outcome is judged. Like the FCAF, it is tool-agnostic. Any laboratory or vendor can execute the test cases by hand or with tools of its own.
+
+Next to the framework, this project provides an open-source reference implementation: the [harness](https://github.com/cre8/rp-conformance), which runs the test cases unattended. The test cases on this site are rendered from its executable definitions, so the specification and the harness do not drift apart. For a Relying Party, the harness provides a Conformance Wallet, status list and trust list servers, and an artifact forge that injects exactly one fault per test step, over redirects and over the W3C Digital Credentials API. For a PID Provider, it adds an issuance client with a Test Wallet Provider and a Test Registrar. It runs every night against EUDIPLO, the reference verifier and issuer.
+
+The harness is not a hosted test platform like the [OIDF conformance suite](https://www.certification.openid.net). You run it yourself, in a test environment you control, and connect your SUT through an adapter. The adapter is needed because most negative test cases can only be judged from the Relying Party's own verification result, not from what it returns over the protocol. The harness produces a report with JUnit XML and the artifacts of every step. There is no certification program behind it. Passing it is not a certification or a declaration of compliance.
+
+| | OIDF conformance suite | PCAF |
+| --- | --- | --- |
+| What it is | A test tool | A framework (test case specification) with an open-source reference harness |
+| How you use it | A hosted service you register your SUT with | A CLI you run in your own test environment |
+| Connection to the SUT | Over the protocol | Through an adapter that also exposes the SUT's verification result |
+| Focus | Mostly the happy flow | Mostly what the SUT must reject |
+| Certification | OpenID Foundation certification | None; an unofficial draft meant for upstream contribution to the FCAF |
+
+The [README](https://github.com/cre8/rp-conformance#readme) shows how to run the harness; the adapters for EUDIPLO show how a SUT is connected. Each suite has its test catalogue, which traces every test objective to the ARF, and its harness design: [Relying Party suite](rp/index.md), [issuer suite](issuer/index.md).
 
 ## Licence
 
