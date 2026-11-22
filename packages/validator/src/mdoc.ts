@@ -134,6 +134,11 @@ export function readIssuerSigned(value: unknown): ParsedIssuerSigned {
   const issuerSigned = asMap(value, 'issuerSigned');
   asMap(issuerSigned.get('nameSpaces'), 'issuerSigned.nameSpaces');
   const issuerAuth = attempt(() => readCose(issuerSigned.get('issuerAuth')), 'IssuerAuth');
+  // RFC 9052 section 3: "Labels in each of the maps MUST be unique. When processing messages, if a label appears
+  // multiple times, the message MUST be rejected as malformed."
+  if (issuerAuth.protectedBytes.length > 0) {
+    attempt(() => decodeCbor(issuerAuth.protectedBytes, { rejectDuplicateKeys: true }), 'the IssuerAuth protected header');
+  }
   if (issuerAuth.tag !== undefined && issuerAuth.tag !== 18) fail(`IssuerAuth carries tag ${issuerAuth.tag}`);
   const chain = x5chainOf(issuerAuth.unprotectedHeader.get(COSE.x5chain) ?? issuerAuth.protectedHeader.get(COSE.x5chain));
   if (!chain) fail('IssuerAuth carries no x5chain');

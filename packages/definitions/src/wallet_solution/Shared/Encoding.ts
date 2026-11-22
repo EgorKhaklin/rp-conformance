@@ -132,8 +132,9 @@ export const definitions = [
   }),
   defineTestCase({
     id: testCaseId('WS', 'SH', 'Encoding', 3, '', true),
-    objective: 'Verify that the Relying Party rejects a presentation in mdoc format whose DeviceResponse is not well-formed CBOR or not of the structure ISO/IEC 18013-5 defines.',
-    references: ['[RFC8949] section 3, 5.3', '[ISO/IEC 18013-5] section 8.3.2.1.2.2', '[OpenID4VP] section B.2', PRESENTATION],
+    objective:
+      'Verify that the Relying Party rejects a presentation in mdoc format whose DeviceResponse is not well-formed CBOR or not of the structure ISO/IEC 18013-5 defines, or whose COSE structures break the encoding rules of their format: a repeated header label, an MSO not wrapped in tag 24, a device signature that carries its payload.',
+    references: ['[RFC8949] section 3, 5.3', '[RFC9052] section 3, 4.1', '[ISO/IEC 18013-5] section 8.3.2.1.2.2, 9.1.2, 9.1.3', '[OpenID4VP] section B.2', PRESENTATION],
     ...ofFormat(mdoc),
     steps: (
       [
@@ -141,6 +142,9 @@ export const definitions = [
         'presentation.device-response-documents-map',
         'presentation.device-response-deep-nesting',
         'presentation.device-response-unterminated',
+        'mdoc.issuer-auth-duplicate-label',
+        'mdoc.mso-not-tag24',
+        'presentation.device-signature-not-detached',
       ] as const
     ).map((fault) => step({ ...faultStep(fault), expect: rej() })),
     comments: [

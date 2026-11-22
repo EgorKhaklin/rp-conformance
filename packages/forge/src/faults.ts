@@ -7,7 +7,7 @@ import { createDeflate } from 'node:zlib';
 import { type FaultId, faultInfo, type FaultPoint, type Flow } from '@rp-conformance/core';
 import { CompactEncrypt, CompactSign, exportJWK, generateKeyPair, importJWK, type JWK } from 'jose';
 import { createCertificate } from '@owf/x509';
-import { base64url, type EcKeyPair, randomSerial, sha256, signEs256 } from './crypto';
+import { base64url, derEcdsaSignature, type EcKeyPair, randomSerial, sha256, signEs256 } from './crypto';
 import { decodeJws, flipBitInSegment, resignJws } from './jose';
 import { type CertifiedKey, createEndEntity, createSelfSignedCa, createSelfSignedSigner, type TestEntity, type TestPki } from './pki';
 import { foreignSigner, isSignerFault } from './signers';
@@ -138,6 +138,13 @@ async function applyDisclosureFault(fault: FaultId, parts: SdJwtParts, ctx: Cred
       disclosures[at] = encodeDisclosure([s, value]);
       return { jwt: await resign((p) => replaceDigest(p, disclosureDigest(old), [disclosureDigest(disclosures[at])])), disclosures };
     }
+    case 'credential.disclosure-four-elements': {
+      const at = indexOfClaim(parts, 'family_name');
+      const [s, name, value] = decodeDisclosure(disclosures[at]);
+      const old = disclosures[at];
+      disclosures[at] = encodeDisclosure([s, name, value, 'extra']);
+      return { jwt: await resign((p) => replaceDigest(p, disclosureDigest(old), [disclosureDigest(disclosures[at])])), disclosures };
+    }
     case 'credential.disclosure-array-three-elements': {
       const at = indexOfClaim(parts, 'nationalities');
       const old = disclosures[at];
@@ -199,6 +206,10 @@ export async function applyCredentialFault(fault: FaultId, sdJwt: string, ctx: C
   switch (fault) {
     case 'credential.signature-bitflip':
       return withJwt(flipBitInSegment(issuerJwt, 2));
+    case 'credential.signature-der': {
+      const [header, payload, signature] = issuerJwt.split('.');
+      return withJwt(`${header}.${payload}.${base64url.encode(derEcdsaSignature(base64url.decode(signature ?? '')))}`);
+    }
     case 'credential.alg-none':
       return withJwt(`${unsigned({ alg: 'none' })}.`);
     case 'credential.alg-hs256': {

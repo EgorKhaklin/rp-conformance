@@ -304,15 +304,15 @@ Columns: **Objective** says what is verified. **Stimulus** is the mutation or in
 
 | ID | Objective | Stimulus | Expected | References | Var | Rel |
 | --- | --- | --- | --- | --- | --- | --- |
-| `RP_WS_SM_SessionBinding_001_UF` | KB-JWT `nonce` different from the request `nonce` is rejected. | Other nonce | REJ (OIDF `invalid-kb-jwt-nonce`) | OID4VP §14.1.2, B.3.6; RFC 9901 §7.3 step 5f | SD × RD, DC | G/R |
-| `RP_WS_SM_SessionBinding_002_UF` | KB-JWT `aud` other than the full Client Identifier is rejected. | (a) other verifier's `client_id`; (b) `client_id` without the `x509_hash:` prefix | REJ (OIDF `invalid-kb-jwt-aud` covers a) | OID4VP §14.1.2, §14.8, B.3.6 | SD × RD | G/R |
+| `RP_WS_SM_SessionBinding_001_UF` | KB-JWT `nonce` different from the request `nonce` is rejected. | Other nonce; `nonce` absent | REJ (OIDF `invalid-kb-jwt-nonce`) | OID4VP §14.1.2, B.3.6; RFC 9901 §7.3 step 5f | SD × RD, DC | G/R |
+| `RP_WS_SM_SessionBinding_002_UF` | KB-JWT `aud` other than the full Client Identifier is rejected. | (a) other verifier's `client_id`; (b) `client_id` without the `x509_hash:` prefix; (c) `aud` absent; (d) `aud` an array holding the full Client Identifier | REJ (OIDF `invalid-kb-jwt-aud` covers a) | OID4VP §14.1.2, §14.8, B.3.6 | SD × RD | G/R |
 | `RP_WS_SM_SessionBinding_003_UF` | KB-JWT `iat` older than `T_kb` is rejected. | `iat` = now − `T_kb` − 1 h | REJ (OIDF `kb-jwt-iat-in-past`) | RFC 9901 §7.3 step 5e | SD × RD, DC | G/R |
 | `RP_WS_SM_SessionBinding_004_UF` | KB-JWT `iat` in the future beyond `T_skew` is rejected. | `iat` = now + `T_skew` + 1 h | REJ (OIDF `kb-jwt-iat-in-future`) | RFC 9901 §7.3 step 5e | SD × RD, DC | G/R |
 | `RP_WS_SM_SessionBinding_005_UF` | A complete, valid presentation from an earlier transaction, re-encrypted for the current one, is rejected. | Replay T1 presentation into T2 | REJ | OID4VP §14.1 | SD, MD × RD, DC | G/R |
 | `RP_WS_SM_SessionBinding_006_UF` | DC API: KB-JWT `aud` equal to the `client_id` instead of `origin:<origin>` is rejected. | `aud` = `x509_hash:…` | REJ | OID4VP A.4 | SD × DC | G/R |
 | `RP_WS_SM_SessionBinding_007_UF` | DC API: KB-JWT `aud` naming another origin is rejected. | `aud` = `origin:https://other.example` | REJ | OID4VP A.4, A.5 | SD × DC | G/R |
-| `RP_WS_SM_SessionBinding_008_UF` | mdoc: DeviceAuth over a SessionTranscript with a wrong OpenID4VPHandover element is rejected. | Wrong (a) nonce, (b) client_id, (c) response_uri, (d) jwkThumbprint | REJ (OIDF `invalid-session-transcript` covers one element) | OID4VP B.2.6.1; ISO/IEC 18013-5 §9.1.3 | MD × RD | G/R |
-| `RP_WS_SM_SessionBinding_009_UF` | mdoc over DC API: handover with another origin, nonce or encryption key is rejected. | Wrong (a) origin, (b) nonce, (c) jwkThumbprint | REJ | OID4VP B.2.6.2 | MD × DC | G/R |
+| `RP_WS_SM_SessionBinding_008_UF` | mdoc: DeviceAuth over a SessionTranscript with a wrong OpenID4VPHandover element is rejected. | Wrong (a) nonce, (b) client_id, (c) response_uri, (d) jwkThumbprint; (e) `client_id` without its prefix; (f) `jwkThumbprint` `null` where the response is encrypted | REJ (OIDF `invalid-session-transcript` covers one element) | OID4VP B.2.6.1; ISO/IEC 18013-5 §9.1.3 | MD × RD | G/R |
+| `RP_WS_SM_SessionBinding_009_UF` | mdoc over DC API: handover with another origin, nonce or encryption key is rejected. | Wrong (a) origin, (b) nonce, (c) jwkThumbprint; (d) the right origin written with an `origin:` prefix | REJ | OID4VP B.2.6.2 | MD × DC | G/R |
 | `RP_WS_SM_SessionBinding_010_UF` | Proximity: DeviceAuth computed over the SessionTranscript of another session is rejected. | Transcript with other DeviceEngagement / EReaderKey | REJ | ISO/IEC 18013-5 §9.1.3 | MD × PX | G/R |
 
 ##### RP_WS_SM_DeviceBinding (`P-DB`)
@@ -326,9 +326,9 @@ Columns: **Objective** says what is verified. **Stimulus** is the mutation or in
 | `RP_WS_SM_DeviceBinding_005_UF` | KB-JWT `sd_hash` not matching the presented SD-JWT is rejected. | Hash over different disclosures | REJ (OIDF `invalid-sd-hash`) | RFC 9901 §7.3 step 5g | SD | G/R |
 | `RP_WS_SM_DeviceBinding_006_UF` | KB-JWT with `alg: none` or `HS256` keyed with the public key is rejected. | Algorithm confusion | REJ | RFC 9901 §7.3 step 5b; RFC 8725 §3.1, §3.2 | SD | G/R |
 | `RP_WS_SM_DeviceBinding_007_UF` | A PID without `cnf` / device key is rejected. | PID issued without holder binding | REJ | OID4VP §6.1, §8.6; ARF §6.6.3.8 | SD, MD | S/R |
-| `RP_WS_SM_DeviceBinding_008_UF` | mdoc DeviceSignature that does not verify is rejected. | Corrupt signature | REJ | ISO/IEC 18013-5 §9.1.3 | MD | G/R |
+| `RP_WS_SM_DeviceBinding_008_UF` | mdoc DeviceSignature that does not verify is rejected. | Corrupt signature; signature over a DeviceAuthentication that names another `docType` | REJ | ISO/IEC 18013-5 §9.1.3 | MD | G/R |
 | `RP_WS_SM_DeviceBinding_009_UF` | mdoc DeviceSignature made with a key other than MSO `deviceKeyInfo.deviceKey` is rejected. | Sign with fresh key | REJ | ISO/IEC 18013-5 §9.1.3 | MD | G/R |
-| `RP_WS_SM_DeviceBinding_010_UF` | mdoc without DeviceAuth is rejected. | Remove `deviceAuth` | REJ | ISO/IEC 18013-5 §9.1.3 | MD | G/R |
+| `RP_WS_SM_DeviceBinding_010_UF` | mdoc without DeviceAuth is rejected. | Remove `deviceAuth`; `deviceAuth` present and empty | REJ | ISO/IEC 18013-5 §9.1.3 | MD | G/R |
 | `RP_WS_SM_DeviceBinding_011_UF` | Device-signed data elements are never taken as PID attributes. | PID with `family_name` in DeviceNameSpaces, not authorised by KeyAuthorizations | REJ, or element ignored and not released | ISO/IEC 18013-5 §9.1.3 (KeyAuthorizations); ARF §6.6.3.6 note | MD | S/R |
 | `RP_WS_SM_DeviceBinding_012_UF` | Proximity: DeviceMac computed with the wrong reader key is rejected. | MAC with other EReaderKey | REJ | ISO/IEC 18013-5 §9.1.3 | MD × PX | G/O |
 | `RP_WS_SM_DeviceBinding_013_UF` | Device authentication with an algorithm outside ECCG ACM is rejected. | ES256K | REJ | OIA_03; HAIP 7 | SD, MD | S/R |
@@ -340,7 +340,7 @@ SD-JWT VC:
 
 | ID | Objective | Stimulus | Expected | References | Var | Rel |
 | --- | --- | --- | --- | --- | --- | --- |
-| `RP_WS_SM_IssuerIntegrity_001_UF` | Issuer-signed JWT with an invalid signature is rejected. | Corrupt signature | REJ (OIDF `invalid-credential-signature`) | RFC 9901 §7.1 step 2b | SD | G/R |
+| `RP_WS_SM_IssuerIntegrity_001_UF` | Issuer-signed JWT with an invalid signature is rejected. | Corrupt signature; the valid ES256 signature DER-encoded, not as 64 octets | REJ (OIDF `invalid-credential-signature`) | RFC 9901 §7.1 step 2b | SD | G/R |
 | `RP_WS_SM_IssuerIntegrity_002_UF` | Issuer-signed JWT with `alg: none` or `HS256` is rejected. | Algorithm confusion | REJ | RFC 9901 §7.1 step 2a | SD | G/R |
 | `RP_WS_SM_IssuerIntegrity_003_UF` | Issuer signature with an algorithm outside ECCG ACM is rejected. | ES256K | REJ | OIA_03 | SD | S/R |
 | `RP_WS_SM_IssuerIntegrity_004_UF` | SD-JWT VC without `x5c` is rejected. | Remove `x5c` | REJ | HAIP 6.1.1; SD-JWT VC §2.5 | SD | G/R |
@@ -350,7 +350,7 @@ SD-JWT VC:
 | `RP_WS_SM_IssuerIntegrity_008_UF` | A disclosure whose digest is not in the payload is rejected. | (a) foreign disclosure added; (b) value of a disclosure modified | REJ | RFC 9901 §7.1 step 5 | SD | G/R |
 | `RP_WS_SM_IssuerIntegrity_009_UF` | A digest occurring more than once is rejected. | Same disclosure twice; duplicate digest in `_sd` | REJ | RFC 9901 §7.1 step 4 | SD | G/R |
 | `RP_WS_SM_IssuerIntegrity_010_UF` | Disclosure claim name `_sd` or `...`, or a name already present at that level, is rejected. | Issue such disclosures | REJ | RFC 9901 §7.1 step 3c | SD | G/R |
-| `RP_WS_SM_IssuerIntegrity_011_UF` | A disclosure with the wrong number of elements is rejected. | 2-element disclosure for an object, 3 for an array | REJ | RFC 9901 §7.1 step 3c | SD | G/R |
+| `RP_WS_SM_IssuerIntegrity_011_UF` | A disclosure with the wrong number of elements is rejected. | 2-element disclosure for an object, 3 for an array; 4-element disclosure for an object | REJ | RFC 9901 §7.1 step 3c | SD | G/R |
 | `RP_WS_SM_IssuerIntegrity_012_UF` | `_sd_alg` unknown or insecure is rejected. | `md5`, `sha-1` | REJ | RFC 9901 §7.1 step 2d; HAIP 8 | SD | G/R |
 | `RP_WS_SM_IssuerIntegrity_013_UF` | `vct` not in the requested `vct_values` is rejected. | Other `vct` | REJ (OIDF `wrong-vct`) | OID4VP §8.6, §14.9, B.3.5 | SD | G/R |
 | `RP_WS_SM_IssuerIntegrity_014` | Decoy digests are ignored. | Credential with decoys | ACC | RFC 9901 §4.2.5 | SD | G/R |
@@ -360,8 +360,8 @@ mdoc:
 
 | ID | Objective | Stimulus | Expected | References | Var | Rel |
 | --- | --- | --- | --- | --- | --- | --- |
-| `RP_WS_SM_IssuerIntegrity_020_UF` | IssuerAuth with an invalid signature is rejected. | Corrupt COSE_Sign1 signature | REJ | ISO/IEC 18013-5 §9.1.2, §9.3.1 | MD | G/R |
-| `RP_WS_SM_IssuerIntegrity_021_UF` | IssuerSignedItem whose digest does not match the MSO is rejected. | Change `elementValue` | REJ | ISO/IEC 18013-5 §9.3.1 | MD | G/R |
+| `RP_WS_SM_IssuerIntegrity_020_UF` | IssuerAuth with an invalid signature is rejected. | Corrupt COSE_Sign1 signature; the valid ES256 signature DER-encoded, not as 64 octets | REJ | ISO/IEC 18013-5 §9.1.2, §9.3.1 | MD | G/R |
+| `RP_WS_SM_IssuerIntegrity_021_UF` | IssuerSignedItem whose digest does not match the MSO is rejected. | Change `elementValue`; the same item encoded again in other bytes (`digestID` in more than its shortest form); a digest in the MSO cut to 20 bytes | REJ | ISO/IEC 18013-5 §9.3.1 | MD | G/R |
 | `RP_WS_SM_IssuerIntegrity_022_UF` | IssuerSignedItem with a `digestID` not in `valueDigests` is rejected. | Add item with unknown digestID | REJ | ISO/IEC 18013-5 §9.3.1 | MD | G/R |
 | `RP_WS_SM_IssuerIntegrity_023_UF` | MSO `docType` different from the Document `docType` is rejected. | Mismatch | REJ | ISO/IEC 18013-5 §9.3.1 | MD | G/R |
 | `RP_WS_SM_IssuerIntegrity_024_UF` | Unsupported MSO `digestAlgorithm` is rejected. | `SHA-1` | REJ | HAIP 8 | MD | G/R |
@@ -486,7 +486,7 @@ Certificate path, both formats:
 | --- | --- | --- | --- | --- | --- | --- |
 | `RP_WS_SH_Encoding_001_UF` | Malformed `response` is rejected cleanly. | Wrong segment count; invalid base64url | REJ; via redirects 4xx without internal details (via the DC API the answer goes to the RP's own page, see `_007`) | RFC 7516 §7.1, §9 | RD, DC | G/R |
 | `RP_WS_SH_Encoding_002_UF` | Malformed SD-JWT, or a KB-JWT whose payload is not valid JSON, is rejected. | No `~` between the last disclosure and the KB-JWT; empty segment; invalid JSON in a disclosure; `NaN` in the KB-JWT payload | REJ | RFC 9901 §4; RFC 8259 §6 | SD | G/R |
-| `RP_WS_SH_Encoding_003_UF` | Malformed CBOR DeviceResponse is rejected. | Truncated; wrong major type; deep nesting; indefinite-length map without its `break` | REJ | RFC 8949 §3.2.1; ISO/IEC 18013-5 §8.3.2.1.2.2 | MD | G/R |
+| `RP_WS_SH_Encoding_003_UF` | Malformed CBOR DeviceResponse is rejected, as is one whose COSE structures break the encoding rules of their format. | Truncated; wrong major type; deep nesting; indefinite-length map without its `break`; `alg` twice in the protected header of `IssuerAuth`; bare MSO as the `IssuerAuth` payload; `DeviceSignature` with its payload attached | REJ | RFC 8949 §3.2.1; RFC 9052 §3, §4.1; ISO/IEC 18013-5 §8.3.2.1.2.2 | MD | G/R |
 | `RP_WS_SH_Encoding_004_UF` | Oversized response is rejected without exhausting resources. | Response above ICS-17 limit | REJ (via the DC API also a 4xx or network error at the RP's page, without a failed verification result, §8.3), RP stays available | ICS-17 | RD, DC | G/R |
 | `RP_WS_SH_Encoding_005_UF` | Duplicate member names in JOSE headers or JWT claims are rejected. | Duplicate `alg` in the KB-JWT header; duplicate `nonce` in the KB-JWT payload; the last value is the wrong one | REJ | RFC 7515 §4; RFC 7519 §4; FCAF Shared_JSON | SD, RD, DC | G/R |
 | `RP_WS_SH_Encoding_006_UF` | Excessive `x5c` / `x5chain` length is bounded. | 50 certificates | REJ, RP stays available | RFC 5280 §6.1 | SD, MD | G/R |

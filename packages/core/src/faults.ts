@@ -158,6 +158,10 @@ export const FAULTS = {
   'credential.exp-within-skew': credential(null, 'its Issuer-signed JWT carries an `exp` claim set to the current time minus half of `T_skew`'),
   'credential.nbf-future': credential('validity', 'its Issuer-signed JWT carries an `nbf` claim set to the current time plus `T_skew` plus one hour'),
   'credential.signature-bitflip': credential('issuer-signature', 'one bit of the signature value of its Issuer-signed JWT is flipped'),
+  'credential.signature-der': credential(
+    'issuer-signature',
+    'the signature value of its Issuer-signed JWT is the valid `ES256` signature in its DER encoding (an ASN.1 `SEQUENCE` of the two integers) instead of the 64 octets `R || S`',
+  ),
   'credential.status-no-idx': credential('status-reference', 'its `status.status_list` object has no `idx` member'),
   'credential.status-no-uri': credential('status-reference', 'its `status.status_list` object has no `uri` member'),
   'credential.status-idx-negative': credential('status-reference', 'the `idx` member of its `status.status_list` object is -1'),
@@ -216,6 +220,10 @@ export const FAULTS = {
     'disclosures',
     'its disclosure of `family_name`, referenced from the `_sd` array of an object, has two elements (salt and value) instead of three',
   ),
+  'credential.disclosure-four-elements': credential(
+    'disclosures',
+    'its disclosure of `family_name`, referenced from the `_sd` array of an object, has four elements (salt, claim name, value and a further string) instead of three',
+  ),
   'credential.disclosure-array-three-elements': credential(
     'disclosures',
     'its claim `nationalities` is a plain array whose element is a selectively disclosable array element, and the disclosure of that element has three elements (salt, name and value) instead of two',
@@ -251,6 +259,18 @@ export const FAULTS = {
     'the `expectedUpdate` value in the `validityInfo` of its MSO lies one day in the past, while `validUntil` lies in the future',
   ),
   'mdoc.signature-bitflip': mdoc('issuer-signature', 'one bit of the signature value of its `IssuerAuth` structure is flipped'),
+  'mdoc.signature-der': mdoc(
+    'issuer-signature',
+    'the signature value of its `IssuerAuth` structure is the valid `ES256` signature in its DER encoding (an ASN.1 `SEQUENCE` of the two integers) instead of the 64 octets `r || s`',
+  ),
+  'mdoc.issuer-auth-duplicate-label': mdoc(
+    'format',
+    'the protected header of its `IssuerAuth` structure carries the label `alg` (1) twice, both times with the value -7 (`ES256`), and the signature is made over those bytes',
+  ),
+  'mdoc.mso-not-tag24': mdoc(
+    'format',
+    'the payload of its `IssuerAuth` structure is the MSO itself instead of `MobileSecurityObjectBytes` (the MSO as an embedded CBOR data item, tag 24), and the signature is made over that payload',
+  ),
   'mdoc.status-no-idx': mdoc('status-reference', 'the `status_list` map in the `status` element of its MSO has no `idx` entry'),
   'mdoc.status-no-uri': mdoc('status-reference', 'the `status_list` map in the `status` element of its MSO has no `uri` entry'),
   'mdoc.status-idx-negative': mdoc('status-reference', 'the `idx` entry of the `status_list` map in its MSO is -1'),
@@ -277,6 +297,14 @@ export const FAULTS = {
     'the `docType` in its MSO is `org.iso.18013.5.1.mDL`, while the document in the DeviceResponse keeps the `docType` `eu.europa.ec.eudi.pid.1`',
   ),
   'mdoc.digest-sha1': mdoc('disclosures', 'the `digestAlgorithm` of its MSO is `SHA-1`, and every value digest is computed with SHA-1'),
+  'mdoc.digest-reencoded-item': mdoc(
+    'disclosures',
+    'its `IssuerSignedItem` for `family_name` is encoded again with the same content, the `digestID` written in more bytes than its shortest form, so that its bytes are not those the MSO digests',
+  ),
+  'mdoc.digest-truncated': mdoc(
+    'disclosures',
+    'the value digest of its `IssuerSignedItem` for `family_name` in the MSO is cut to its first 20 bytes',
+  ),
   'mdoc.doctype-other': mdoc(
     'format',
     'it is of the `docType` `org.iso.18013.5.1.mDL`, in its MSO and in the document, instead of the `docType` the request asks for',
@@ -408,6 +436,13 @@ export const FAULTS = {
     'the `aud` claim of its KB-JWT is the Client Identifier of the request without its prefix `x509_hash:`',
     'redirect',
   ),
+  'presentation.kb-aud-missing': kbJwt('key-binding', 'its KB-JWT has no `aud` claim'),
+  'presentation.kb-aud-array': kbJwt(
+    'key-binding',
+    'the `aud` claim of its KB-JWT is an array that holds the Client Identifier of the request as its only element, instead of the string',
+    'redirect',
+  ),
+  'presentation.kb-nonce-missing': kbJwt('key-binding', 'its KB-JWT has no `nonce` claim'),
   'presentation.kb-aud-client-id': kbJwt(
     'key-binding',
     'the `aud` claim of its KB-JWT is the Client Identifier of the request instead of `origin:` followed by the Origin of the page',
@@ -456,6 +491,11 @@ export const FAULTS = {
     'the `OpenID4VPHandover` in the SessionTranscript its device signature covers is computed with the Client Identifier of another Relying Party instead of the `client_id` of the request',
     'redirect',
   ),
+  'presentation.transcript-client-id-no-prefix': deviceAuth(
+    'key-binding',
+    'the `OpenID4VPHandover` in the SessionTranscript its device signature covers is computed with the Client Identifier of the request without its prefix `x509_hash:`',
+    'redirect',
+  ),
   'presentation.transcript-response-uri': deviceAuth(
     'key-binding',
     'the `OpenID4VPHandover` in the SessionTranscript its device signature covers is computed with a `response_uri` other than that of the request',
@@ -465,9 +505,18 @@ export const FAULTS = {
     'key-binding',
     'the SessionTranscript its device signature covers is computed with the JWK thumbprint of a newly generated key instead of that of the encryption key of the request',
   ),
+  'presentation.transcript-jwk-thumbprint-null': deviceAuth(
+    'key-binding',
+    'the SessionTranscript its device signature covers is computed with `null` as the JWK thumbprint, although the response is encrypted to the encryption key of the request',
+  ),
   'presentation.transcript-origin': deviceAuth(
     'key-binding',
     'the `OpenID4VPDCAPIHandover` in the SessionTranscript its device signature covers is computed with the Origin `https://other.example` instead of the Origin of the page',
+    'dc-api',
+  ),
+  'presentation.transcript-origin-prefixed': deviceAuth(
+    'key-binding',
+    'the `OpenID4VPDCAPIHandover` in the SessionTranscript its device signature covers is computed with the Origin of the page written with the prefix `origin:`',
     'dc-api',
   ),
   'presentation.device-signature-bitflip': deviceAuth('key-binding', 'one bit of the signature value of its `DeviceSignature` is flipped'),
@@ -476,6 +525,15 @@ export const FAULTS = {
     'its `DeviceSignature` is made with a newly generated P-256 key instead of the device key in the `deviceKeyInfo` of the MSO',
   ),
   'presentation.no-device-auth': deviceAuth('key-binding', 'the `deviceSigned` structure of its document has no `deviceAuth`'),
+  'presentation.device-signature-missing': deviceAuth('key-binding', 'the `deviceAuth` of its document is present and empty, without a `deviceSignature`'),
+  'presentation.device-signature-doctype-other': deviceAuth(
+    'key-binding',
+    'its `DeviceSignature` covers a `DeviceAuthentication` structure that names the `docType` `org.iso.18013.5.1.mDL`, while its document has the `docType` of the PID',
+  ),
+  'presentation.device-signature-not-detached': deviceAuth(
+    'key-binding',
+    'its `DeviceSignature` carries its payload (`DeviceAuthenticationBytes`) instead of `nil`, and is made over that payload',
+  ),
   'presentation.device-signed-element': deviceAuth(
     'key-binding',
     'the `DeviceNameSpaces` its device signature covers contain the element `family_name` with the value `Musterfrau` in the namespace `eu.europa.ec.eudi.pid.1`, which the MSO does not authorise through `keyAuthorizations`',
