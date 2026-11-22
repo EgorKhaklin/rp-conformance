@@ -56,7 +56,7 @@ second in the document signer profile of ISO/IEC 18013-5 Annex B.
 EUDIPLO's claim field types are JSON types; it has no date type for mdoc, so the mdoc PID carries `birth_date`,
 `issuance_date` and `expiry_date` as text strings instead of `full-date` (tag 1004): `PP_WS_DM_PidMdoc_002` is a known
 finding against the PID Rulebook v1.7 section 3.1.2 (EUDI profile), with the issue text in
-[`upstream-findings/mdoc-full-date.md`](upstream-findings/mdoc-full-date.md). The
+[EUDIPLO/eudiplo#1623](https://github.com/EUDIPLO/eudiplo/issues/1623). The
 portrait opt-out (`DM_Portrait_001`) is not offered: the PID configurations have no portrait, and inline JSON claims
 cannot carry the empty byte string an mdoc needs (`ICS-17.portrait_opt_out` No).
 
@@ -133,8 +133,8 @@ identifier lists and the adapter configures no mdoc PID, so `PP_WS_SM_Revocation
 
 | Finding | Test cases |
 | --- | --- |
-| A TS3 1.5 WIA or KA status is never read ([`wallet-attestation-status-claim.md`](upstream-findings/wallet-attestation-status-claim.md)); `revokeWithWalletUnit` follows the KA only ([`wia-revocation-chaining.md`](upstream-findings/wia-revocation-chaining.md)); EUDI profile | `PP_WS_SM_Revocation_006`, `_007` (SD, MD) |
-| Array elements of an SD-JWT VC are never disclosable one by one, PID_21 ([`sd-jwt-array-element-disclosure.md`](upstream-findings/sd-jwt-array-element-disclosure.md)); EUDI profile | `PP_WS_SM_IssuerIntegrity_005` |
+| A TS3 1.5 WIA or KA status is never read ([EUDIPLO/eudiplo#1620](https://github.com/EUDIPLO/eudiplo/issues/1620)); `revokeWithWalletUnit` follows the KA only ([EUDIPLO/eudiplo#1621](https://github.com/EUDIPLO/eudiplo/issues/1621)); EUDI profile | `PP_WS_SM_Revocation_006`, `_007` (SD, MD) |
+| Array elements of an SD-JWT VC are never disclosable one by one, PID_21 ([EUDIPLO/eudiplo#1624](https://github.com/EUDIPLO/eudiplo/issues/1624)); EUDI profile | `PP_WS_SM_IssuerIntegrity_005` |
 
 SD-JWT VC salts have 64 bits, below the 128 bits RFC 9901 section 9.3 RECOMMENDS; `PP_WS_SM_IssuerIntegrity_006` records
 it (suggestion in [`upstream-findings/suggestions/sd-jwt-salt-length.md`](upstream-findings/suggestions/sd-jwt-salt-length.md)).
@@ -250,8 +250,8 @@ the spec review of 2026-11-20 removed are gone with them, and `AP_WS_SM_Revocati
 
 | Behaviour | Test cases |
 | --- | --- |
-| A configuration with `keyBinding: false` is published with `cryptographic_binding_methods_supported` and proof types, and a credential request without `proofs` is rejected (`invalid_proof`), though the credential is issued without `cnf` ([`key-binding-false.md`](upstream-findings/key-binding-false.md)) | `AP_WS_MS_Metadata_008`, `_100`, `_101`; `AP_WS_SM_KeyAttestation_102`, `_103` (`Q`, `PB`, `E`) |
-| Changing the embedded disclosure policy leaves the attestations issued under the old one valid, EDP_11 ([`disclosure-policy-change.md`](upstream-findings/disclosure-policy-change.md)) | `AP_WS_SM_Revocation_102` (`Q`) |
+| A configuration with `keyBinding: false` is published with `cryptographic_binding_methods_supported` and proof types, and a credential request without `proofs` is rejected (`invalid_proof`), though the credential is issued without `cnf` ([EUDIPLO/eudiplo#1625](https://github.com/EUDIPLO/eudiplo/issues/1625)) | `AP_WS_MS_Metadata_008`, `_100`, `_101`; `AP_WS_SM_KeyAttestation_102`, `_103` (`Q`, `PB`, `E`) |
+| Changing the embedded disclosure policy leaves the attestations issued under the old one valid, EDP_11 ([EUDIPLO/eudiplo#1626](https://github.com/EUDIPLO/eudiplo/issues/1626)) | `AP_WS_SM_Revocation_102` (`Q`) |
 
 Not applicable against EUDIPLO, with the reason in the report: `AP_WS_MS_Metadata_102` and `AP_WS_SM_Revocation_102` in
 `PB` and `E` (no embedded disclosure policy configured there, ICS-19), `AP_WS_SM_Revocation_101` in `E` (no chaining),
