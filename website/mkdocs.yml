@@ -1,11 +1,11 @@
-# Configuration of the GitHub Pages site. scripts/site-build.sh copies it next to the FCAF configuration as
-# mkdocs.rp.yml. It inherits the FCAF theme, Markdown extensions, hooks and assets, and replaces everything that
-# would present the site as the European Commission's: name, author, URL, repository, logo, colours, navigation and
-# copyright. MkDocs merges mappings key by key and replaces lists as a whole.
+# Configuration of the GitHub Pages site of the Peer Conformance Assessment Framework (PCAF). scripts/site-build.sh
+# copies it next to the FCAF configuration as mkdocs.rp.yml. It inherits the FCAF theme, Markdown extensions, hooks and
+# assets, and replaces everything that would present the site as the European Commission's: name, author, URL,
+# repository, logo, colours, navigation and copyright. MkDocs merges mappings key by key and replaces lists as a whole.
 INHERIT: mkdocs.yml
 
-site_name: RP conformance
-site_description: Relying Party and PID Provider test cases for the EUDI Wallet FCAF, and the harness that runs them. Unofficial draft.
+site_name: Peer Conformance (PCAF)
+site_description: Functional conformance test cases for the peers of the EUDI Wallet (Relying Parties, PID Providers and Attestation Providers) in the FCAF format, and the harness that runs them. Unofficial draft.
 site_author: rp-conformance
 site_url: https://rp-conformance.eudi-wallet.dev/
 repo_url: https://github.com/cre8/rp-conformance
@@ -67,20 +67,65 @@ plugins:
   - privacy
   - include-markdown
 
-# As the FCAF, without fcaf_edit_urls.py, which points the edit actions at the FCAF branches.
+# As the FCAF, without fcaf_edit_urls.py, which points the edit actions at the FCAF branches, and without fcaf_nav.py:
+# the navigation below replaces the FCAF's content navigation (docs/fcaf/.nav.yml), which lists the Wallet Solution.
 hooks:
   - hooks/precond_alpha.py
-  - hooks/fcaf_nav.py
 
 extra:
   version: null
 
-# As the FCAF's "Functional Conformance" section, with this site's home page; hooks/fcaf_nav.py appends the content
-# navigation (docs/fcaf/.nav.yml) to it.
+# The framework pages are the site-only layer (website/fcaf, scripts/site-layer.py); the SUT pages come from the
+# overlays. The Wallet Solution pages of the FCAF are not part of the site.
 nav:
   - Home: index.md
-  - Functional Conformance:
-      - Roadmap: roadmap.md
+  - Framework:
+      - Introduction: fcaf/introduction.md
+      - Terminology: fcaf/terminology.md
+      - Methodology: fcaf/index.md
+      - Using the framework: fcaf/using-fcaf.md
+      - Defaults: fcaf/defaults.md
+      - ICS (Relying Party): fcaf/ics-rp.md
+      - ICS (PID and Attestation Provider): fcaf/ics-issuer.md
+      - References: fcaf/references.md
+  - Test cases:
+      - Overview: fcaf/suts/index.md
+      - Relying Party (SUT):
+          - Overview: fcaf/suts/relying_party/index.md
+          - (rp_ws) Wallet Solution:
+              - Overview: fcaf/suts/relying_party/wallet_solution/rp_ws.md
+              - Baseline tests: fcaf/suts/relying_party/wallet_solution/baseline-tests.md
+              - Test cases: fcaf/suts/relying_party/wallet_solution/test-cases.md
+          - (rp_pp) PID Provider:
+              - Overview: fcaf/suts/relying_party/pid_provider/rp_pp.md
+              - Baseline tests: fcaf/suts/relying_party/pid_provider/baseline-tests.md
+              - Test cases: fcaf/suts/relying_party/pid_provider/test-cases.md
+          - (rp_inf) Trust Infrastructure:
+              - Overview: fcaf/suts/relying_party/infrastructure/rp_inf.md
+              - Baseline tests: fcaf/suts/relying_party/infrastructure/baseline-tests.md
+              - Test cases: fcaf/suts/relying_party/infrastructure/test-cases.md
+      - PID Provider (SUT):
+          - Overview: fcaf/suts/pid_provider/index.md
+          - (pp_ws) Wallet Solution:
+              - Overview: fcaf/suts/pid_provider/wallet_solution/pp_ws.md
+              - Test cases: fcaf/suts/pid_provider/wallet_solution/test-cases.md
+          - (pp_rp) Relying Party:
+              - Overview: fcaf/suts/pid_provider/relying_party/pp_rp.md
+              - Test cases: fcaf/suts/pid_provider/relying_party/test-cases.md
+          - (pp_inf) Trust Infrastructure:
+              - Overview: fcaf/suts/pid_provider/infrastructure/pp_inf.md
+              - Test cases: fcaf/suts/pid_provider/infrastructure/test-cases.md
+      - Attestation Provider (SUT):
+          - Overview: fcaf/suts/attestation_provider/index.md
+          - (ap_ws) Wallet Solution:
+              - Overview: fcaf/suts/attestation_provider/wallet_solution/ap_ws.md
+              - Test cases: fcaf/suts/attestation_provider/wallet_solution/test-cases.md
+          - (ap_rp) Relying Party:
+              - Overview: fcaf/suts/attestation_provider/relying_party/ap_rp.md
+              - Test cases: fcaf/suts/attestation_provider/relying_party/test-cases.md
+          - (ap_inf) Trust Infrastructure:
+              - Overview: fcaf/suts/attestation_provider/infrastructure/ap_inf.md
+              - Test cases: fcaf/suts/attestation_provider/infrastructure/test-cases.md
   # The project documents of both suites, copied by scripts/site-project-pages.py: the same pages for each.
   - Test suites:
       - Relying Party suite:

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Builds the GitHub Pages site: the FCAF site with the Relying Party and the PID Provider test cases, as the FCAF would
-# publish them, under this project's name. It
+# Builds the GitHub Pages site of the Peer Conformance Assessment Framework (PCAF): the Relying Party, PID Provider and
+# Attestation Provider test cases on the FCAF site shell, without the FCAF's Wallet Solution content. It
 #  1. fetches the FCAF repository at the pinned `site` (MkDocs shell) and `submitted` (content) commits,
 #  2. composes them as the FCAF's own Pages workflow does, and lays the Relying Party overlay (fcaf-overlay/docs/fcaf,
 #     or OVERLAY_DIR) and then the issuer overlay (fcaf-overlay-issuer/docs/fcaf, or ISSUER_OVERLAY_DIR) over the
@@ -8,9 +8,12 @@
 #  3. adds website/: the configuration, which inherits the FCAF one and replaces the European Commission's name,
 #     logo, navigation and copyright, the stylesheet that replaces its colours, the home page, the overview page of
 #     each suite and the "unofficial" banner,
-#  4. adds the project documents of both suites (scripts/site-project-pages.py): the test catalogue, the harness
+#  4. lays the site-only layer over the content (scripts/site-layer.py): removes the Wallet Solution pages and puts
+#     the general pages (introduction, methodology, using the framework, ...) rewritten for these SUTs in their
+#     place; the overlays themselves stay a diff against the FCAF,
+#  5. adds the project documents of both suites (scripts/site-project-pages.py): the test catalogue, the harness
 #     design, and the EUDIPLO adapter's README, ICS, known findings and upstream finding texts,
-#  5. runs MkDocs (website/requirements.txt) into <work-dir>/public, or serves the site with SITE_SERVE=1.
+#  6. runs MkDocs (website/requirements.txt) into <work-dir>/public, or serves the site with SITE_SERVE=1.
 #
 #   scripts/site-build.sh [work-dir]
 set -euo pipefail
@@ -41,6 +44,7 @@ sed "s/@FCAF_SUBMITTED@/${SUBMITTED:0:7}/g" "$root/website/index.md" > "$compose
 mkdir -p "$compose/docs/rp" "$compose/docs/issuer"
 cp "$root/website/rp.md" "$compose/docs/rp/index.md"
 cp "$root/website/issuer.md" "$compose/docs/issuer/index.md"
+python3 "$root/scripts/site-layer.py" "$root" "$compose/docs"
 python3 "$root/scripts/site-project-pages.py" "$root" "$compose/docs"
 
 cd "$compose"

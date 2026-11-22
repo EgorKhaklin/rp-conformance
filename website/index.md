@@ -1,27 +1,32 @@
-# Relying Party and PID Provider conformance
+# Peer Conformance Assessment Framework (PCAF)
 
 !!! warning "Unofficial draft"
 
-    This site is not published or endorsed by the European Commission. It shows the Functional Conformance Assessment Framework (FCAF), as on its `submitted` branch at commit `@FCAF_SUBMITTED@`, with a proposed **Relying Party** System Under Test and a draft **PID Provider** System Under Test added. The official FCAF is at [conformance.eudi.dev](https://conformance.eudi.dev).
+    This site is not published or endorsed by the European Commission. It uses the method and the test case format of the Commission's Functional Conformance Assessment Framework (FCAF), as on its `submitted` branch at commit `@FCAF_SUBMITTED@`, for a proposed **Relying Party** System Under Test and draft **PID Provider** and **Attestation Provider** Systems Under Test. Wallet Solutions are tested with the official FCAF at [conformance.eudi.dev](https://conformance.eudi.dev).
 
-## What the FCAF is
+The PCAF specifies functional conformance test cases for the **peers** of a Wallet Unit: the systems it talks to in the EUDI Wallet ecosystem. It is for
 
-The Functional Conformance Assessment Framework (FCAF) is the European Commission's set of functional test cases for the EUDI Wallet ecosystem. It names a System Under Test (SUT), splits it into test classes by interface, and specifies each test case step by step, with an Implementation Conformance Statement (ICS) in which the SUT declares what it supports.
+- **Relying Parties** and vendors of verifier software,
+- **PID Providers**, **QEAA**, **PuB-EAA** and **non-qualified EAA Providers** and vendors of issuer software,
+- the conformity assessment bodies, test laboratories, supervisory bodies and registrars that assess them.
+
+It is not for testing a wallet: the FCAF does that.
 
 ## The gap
 
-Today the FCAF has test cases for one SUT only: the Wallet Solution. Its `WS_RP` class covers the wallet's side of a presentation, and there the Relying Party is the test tool, not the thing being tested. The methodology names Relying Parties as a future SUT and reserves the classes `RP_WS`, `RP_PP`, `RP_AP` and `RP_Inf`, but none of them has test cases yet.
+The FCAF names a System Under Test (SUT), splits it into test classes by interface, and specifies each test case step by step, with an Implementation Conformance Statement (ICS) in which the SUT declares what it supports. Today it has test cases for one SUT only: the Wallet Solution. Its `WS_RP` class covers the wallet's side of a presentation, and there the Relying Party is the test tool, not the thing being tested. The FCAF methodology names Relying Parties as a future SUT and reserves the classes `RP_WS`, `RP_PP`, `RP_AP` and `RP_Inf`, but none of them has test cases yet.
 
 The OIDF verifier suite tests a Relying Party, but mostly on the happy flow: 16 of the 222 test objectives here correspond to one of its modules. The rest have no public test today: validity periods, status list tokens, trust anchor categories, trust lists, response encryption, session binding after the redirect and more.
 
-A wallet that is certified gains little if the Relying Party accepts a revoked PID or trusts the wrong anchor. This project fills the reserved classes with test cases in the FCAF format, so they can be contributed upstream, and with a harness that runs them. The focus is on what a Relying Party must reject: expired credentials, revoked or suspended credentials, unusable status lists, wrong trust anchors, stale trust lists, faulty response encryption.
+A wallet that is certified gains little if the Relying Party accepts a revoked PID or trusts the wrong anchor. The PCAF fills the reserved classes with test cases in the FCAF format, so they can be contributed upstream, and comes with a harness that runs them. The focus is on what a Relying Party must reject: expired credentials, revoked or suspended credentials, unusable status lists, wrong trust anchors, stale trust lists, faulty response encryption.
 
-It does the same, as a separate draft, for PID and Attestation Providers, for which the methodology reserves no test classes: the metadata and offers a PID Provider publishes when it issues PIDs with OpenID4VCI, the Wallet Instance Attestations, key attestations and proofs it must reject, the PID it issues, checked against the PID Rulebook, and the status lists it publishes.
+It does the same, as a separate draft, for PID and Attestation Providers, for which the FCAF methodology reserves no test classes: the metadata and offers a Provider publishes when it issues credentials with OpenID4VCI, the Wallet Instance Attestations, key attestations and proofs it must reject, the PID or attestation it issues, checked against its rulebook, and the status lists it publishes.
 
 ## Where to start
 
 | Page | Content |
 | --- | --- |
+| [Using the framework](fcaf/using-fcaf.md) | How a Relying Party or a Provider is tested: the SUT, the test environment, the ICS, preparation, execution and outcomes |
 | [Relying Party (SUT)](fcaf/suts/relying_party/index.md) | Overview, test classes, the decisions applied |
 | [(rp_ws) Wallet Solution](fcaf/suts/relying_party/wallet_solution/rp_ws.md) | Test cases on what the Relying Party receives from a Wallet Unit: validity, revocation, trust, session encryption |
 | [(rp_pp) PID Provider](fcaf/suts/relying_party/pid_provider/rp_pp.md) | Test cases on the Status List Tokens and identifier lists of a PID Provider |
@@ -37,7 +42,7 @@ It does the same, as a separate draft, for PID and Attestation Providers, for wh
 | [Relying Party suite](rp/index.md) | The Relying Party suite, its catalogue and harness design, and EUDIPLO as reference verifier with its ICS and known findings |
 | [Issuer suite](issuer/index.md) | The issuer suite, its catalogue and harness design, and EUDIPLO as reference issuer with its ICS and known findings |
 
-Everything else is the FCAF itself; of its pages only the defaults, the references, the navigation and the SUT overview are extended.
+The [framework pages](fcaf/introduction.md) (introduction, methodology, using the framework, defaults) are those of the FCAF, rewritten for these SUTs. The FCAF's Wallet Solution pages are not part of this site.
 
 ## The harness
 
