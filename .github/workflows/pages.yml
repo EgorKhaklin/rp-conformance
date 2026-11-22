@@ -22,6 +22,7 @@ on:
       - adapters/issuer-eudiplo/upstream-findings/**
       - website/**
       - scripts/site-build.sh
+      - scripts/site-layer.py
       - scripts/site-project-pages.py
       - scripts/fcaf-upstream.sh
       - .github/workflows/pages.yml
