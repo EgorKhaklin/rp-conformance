@@ -4,9 +4,19 @@
 
     This site is not published or endorsed by the European Commission. It shows the Functional Conformance Assessment Framework (FCAF), as on its `submitted` branch at commit `@FCAF_SUBMITTED@`, with a proposed **Relying Party** System Under Test and a draft **PID Provider** System Under Test added. The official FCAF is at [conformance.eudi.dev](https://conformance.eudi.dev).
 
-The FCAF tests only the Wallet Solution. This project adds the tests a Relying Party must pass: a service that requests and verifies PIDs and attestations from Wallet Units. The focus is on what it must reject: expired credentials, revoked or suspended credentials, unusable status lists, wrong trust anchors, stale trust lists, faulty response encryption.
+## What the FCAF is
 
-It also adds the tests a PID Provider must pass when it issues PIDs with OpenID4VCI: the metadata and offers it publishes, the Wallet Instance Attestations, key attestations and proofs it must reject, the PID it issues, checked against the PID Rulebook, and the status lists it publishes. These test cases are a separate draft, since the FCAF methodology does not reserve test classes for Providers.
+The Functional Conformance Assessment Framework (FCAF) is the European Commission's set of functional test cases for the EUDI Wallet ecosystem. It names a System Under Test (SUT), splits it into test classes by interface, and specifies each test case step by step, with an Implementation Conformance Statement (ICS) in which the SUT declares what it supports.
+
+## The gap
+
+Today the FCAF has test cases for one SUT only: the Wallet Solution. Its `WS_RP` class covers the wallet's side of a presentation, and there the Relying Party is the test tool, not the thing being tested. The methodology names Relying Parties as a future SUT and reserves the classes `RP_WS`, `RP_PP`, `RP_AP` and `RP_Inf`, but none of them has test cases yet.
+
+The OIDF verifier suite tests a Relying Party, but mostly on the happy flow: 16 of the 222 test objectives here correspond to one of its modules. The rest have no public test today: validity periods, status list tokens, trust anchor categories, trust lists, response encryption, session binding after the redirect and more.
+
+A wallet that is certified gains little if the Relying Party accepts a revoked PID or trusts the wrong anchor. This project fills the reserved classes with test cases in the FCAF format, so they can be contributed upstream, and with a harness that runs them. The focus is on what a Relying Party must reject: expired credentials, revoked or suspended credentials, unusable status lists, wrong trust anchors, stale trust lists, faulty response encryption.
+
+It does the same, as a separate draft, for PID and Attestation Providers, for which the methodology reserves no test classes: the metadata and offers a PID Provider publishes when it issues PIDs with OpenID4VCI, the Wallet Instance Attestations, key attestations and proofs it must reject, the PID it issues, checked against the PID Rulebook, and the status lists it publishes.
 
 ## Where to start
 
