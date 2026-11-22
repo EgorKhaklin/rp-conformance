@@ -61,7 +61,7 @@ Layers and areas follow the FCAF: `MS` message structure, `IA` interaction, `SM`
 
 ### 2.4 Relevancy
 
-FCAF labels, abbreviated in the `Rel` column: first letter origin (`G` EUDI_generic, `S` EUDI_specific, `A` EUDI_agnostic), second letter scope (`R` EUDI_required, `O` EUDI_optional, `U` EUDI_undefined). `S/R` means EUDI_specific | EUDI_required.
+FCAF labels, abbreviated in the `Rel` column: first letter origin (`G` EUDI_generic, `S` EUDI_specific, `A` EUDI_agnostic), second letter scope (`R` EUDI_required, `O` EUDI_optional, `U` EUDI_undefined). `S/R` means EUDI_specific | EUDI_required. The FCAF knows five relevancy values and `S/U` is not one of them, so a rendered test case with `S/U` in its row (`SM_Validity_020`) is `EUDI_specific | EUDI_optional`.
 
 ### 2.5 Expected result codes
 
@@ -664,8 +664,26 @@ normative strength. The upstream texts are in `adapters/eudiplo/upstream-finding
 
 ## 9. Next steps
 
-1. Done (2026-11-06): the baseline covers the `SM_Validity`, `SM_Revocation`, `RP_PP_SM_Revocation`, `SM_TrustMechanisms` and `SM_SessionEncryption` objectives plus the positive controls `RP_WS_IA_MainInteraction_001a` and `_001b`: 121 test cases in the FCAF format, one file per test case, in [fcaf-overlay](fcaf-overlay/README.md). The README lists the objectives left out and why.
-2. Design the harness: draft in [harness-design.md](harness-design.md) (2026-11-06), with four decisions open in its §12.
-3. Contact the FCAF maintainers about adding the Relying Party SUT before opening a pull request.
-4. Write the remaining objectives as test cases. Done for `SM_SessionBinding` and `SM_DeviceBinding` (2026-11-13), `SM_IssuerIntegrity`, `RP_Inf_SM_TrustMechanisms` and the request-side areas `MS_ProtocolMessages`, `MS_Metadata`, `MS_CredentialFormats` and `SM_RpIntegrity` (2026-11-17): 97 executable test cases, see "Beyond the baseline" in the [overlay README](fcaf-overlay/README.md). Not written: the proximity objectives (`SessionBinding_010`, `DeviceBinding_012`, `RpIntegrity_010`, `_011`), `IssuerIntegrity_035` (CRL; optional, the harness serves no CRLs), `RP_Inf_SM_TrustMechanisms_007` (needs several RP Instances), `_010` and `_011` (aggregates of other test cases), `MS_ProtocolMessages_006` (ISO/IEC 18013-7 Annex C), `RpIntegrity_008` (several services) and `_009` (intermediaries). Done for `IA_Engagement` and `IA_ProtocolFlow` (2026-11-19, issue 29): 16 executable test cases; not written: `IA_Engagement_002` (the QR code exists only in the RP's user interface). Done for `MainInteraction_002` to `_005`, `DM_IdentifyingData` and `DM_CredentialMetadata` (2026-11-19, issue 30): 24 executable test cases; `DM_IdentifyingData_006` and `_007` are written for SD-JWT VC only (see their rows). Done for `UC_Presentation` `_001` to `_011` (2026-11-19, issue 31): 21 executable test cases; not executable today: `UC_Presentation_012_UF` (no cryptographic binding scheme for combined presentations is specified, §8.2) and `_020`, `_021` (intermediaries: they need a second, intermediated Relying Party behind the SUT, `P-INT`). Still open: the test book.
-5. Issue 32 (2026-11-20): `SH_Encoding`, `RP_PP_IA_Supportive`, `RP_PP_SM_Revocation_014_UF` and `_031`, `SM_Revocation_011`, `SM_Validity_004` and `_020` are written as 27 executable test cases; see the [overlay README](fcaf-overlay/README.md). Rows changed to make them executable: `SH_Encoding_001_UF` (4xx and the answer's content via redirects only), `_002_UF` (`NaN` in the KB-JWT payload added), `_003_UF` (an indefinite-length map without `break`, since well-formed indefinite lengths are valid CBOR), `_005_UF` (where the duplicates are), `RP_PP_IA_Supportive_001` (`Accept` is a SHOULD), `_004_UF` (503 with an HTML page added), `_005_UF` and `_006_UF` (see below), `SM_Revocation_011` (`_010` added, so a Relying Party that refuses every identifier list does not pass), `SM_Validity_020` (the RP must request the expiry date), `RP_PP_SM_Revocation_014_UF` (concrete times). Not executable today: the redirect to a plain-HTTP or internal target of `RP_PP_IA_Supportive_005_UF` and the absence of a request to the link-local address in `_006_UF`, because the harness serves its status lists over HTTP from a loopback or private address the Relying Party must be allowed to reach and sees no request to an address it does not serve; and `SM_TrustMechanisms_017_UF`, because no specification says how a Relying Party obtains the registration certificate of an attestation provider during a presentation, so the harness has no channel to hand one over. `SM_Validity_020` is rendered as `EUDI_specific | EUDI_optional`: `S/U` is not one of the five FCAF relevancy values.
+The written test cases and the catalogue rows changed to make them executable are listed in the
+[overlay README](fcaf-overlay/README.md) ("Baseline", "Beyond the baseline", "Test book"); the harness delivery phases
+in [harness-design.md](harness-design.md) §11.
+
+1. **FCAF contribution.** Contact the FCAF maintainers about adding the Relying Party SUT before opening a pull
+   request (decision 8); the other open points before that pull request are in the overlay README.
+2. **Test book.** The `RP_TB_*` items are defined and reported as REVIEW in every run, but not rendered: the FCAF
+   defines no test book format yet.
+3. **Objectives not written**, each blocked outside the harness:
+   - ISO/IEC 18013-5 proximity: `SM_SessionBinding_010`, `SM_DeviceBinding_012`, `SM_RpIntegrity_010`, `_011` (§5.5).
+   - ISO/IEC 18013-7 Annex C: `MS_ProtocolMessages_006`.
+   - CRLs (optional check, the harness serves none): `SM_IssuerIntegrity_035`.
+   - Several RP Instances or services: `RP_Inf_SM_TrustMechanisms_007`, `SM_RpIntegrity_008`.
+   - Intermediaries (`P-INT`, a second Relying Party behind the SUT): `SM_RpIntegrity_009`, `UC_Presentation_020`,
+     `_021`.
+   - No cryptographic binding scheme for combined presentations: `UC_Presentation_012_UF` (§8.2).
+   - No channel for the registration certificate of an attestation provider: `SM_TrustMechanisms_017_UF`.
+   - The cross-device QR code exists only in the RP's user interface: `IA_Engagement_002`.
+   - Partly executable: the redirect to a plain-HTTP or internal target of `RP_PP_IA_Supportive_005_UF` and the
+     absent request to the link-local address of `_006_UF`.
+
+   `RP_Inf_SM_TrustMechanisms_010` and `_011` are not written because other test cases cover them.
+4. **Polaris negative vectors** (issue 10): map the remaining vectors to catalogue rows.
