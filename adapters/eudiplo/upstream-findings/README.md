@@ -17,9 +17,12 @@ revision. The evidence is shortened; the certificates and credentials are test d
 
 | Issue or text | Basis | Test cases |
 | --- | --- | --- |
-| [EUDIPLO/eudiplo#1615](https://github.com/EUDIPLO/eudiplo/issues/1615) | confirmed (OpenID4VP 1.0) | `RP_WS_SM_IssuerIntegrity_013_UF`, `_025_UF` |
-| [EUDIPLO/eudiplo#1616](https://github.com/EUDIPLO/eudiplo/issues/1616) | confirmed (RFC 5280, RFC 7515) | `RP_WS_SM_IssuerIntegrity_034a_UF`, `_034b_UF`, `_037a_UF`, `_037b_UF` |
-| [EUDIPLO/eudiplo#1617](https://github.com/EUDIPLO/eudiplo/issues/1617) | confirmed (product bug) | `RP_WS_DM_IdentifyingData_001b` |
+| [EUDIPLO/eudiplo#1649](https://github.com/EUDIPLO/eudiplo/issues/1649) | confirmed (RFC 9052 section 3) | `RP_WS_SH_Encoding_003_UF` step 5 (`mdoc.issuer-auth-duplicate-label`, found 2026-11-22) |
+
+Fixed on `ghcr.io/eudiplo/eudiplo:main` (`10.0.0-main.7586139`, re-run of 2026-11-22) and removed from the findings
+list: [EUDIPLO/eudiplo#1615](https://github.com/EUDIPLO/eudiplo/issues/1615) (`RP_WS_SM_IssuerIntegrity_013_UF`,
+`_025_UF`), [EUDIPLO/eudiplo#1616](https://github.com/EUDIPLO/eudiplo/issues/1616) (`_034a_UF`, `_034b_UF`, `_037a_UF`,
+`_037b_UF`) and [EUDIPLO/eudiplo#1617](https://github.com/EUDIPLO/eudiplo/issues/1617) (`RP_WS_DM_IdentifyingData_001b`).
 
 `RP_WS_SM_Validity_005b_UF` (an expired mdoc's status list is fetched before the validity check, in `@owf/mdoc`) is a
 profile-only known finding without a text here: the "MUST NOT" fetch rule of Token Status List section 8.3 is in

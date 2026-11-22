@@ -53,10 +53,11 @@ With CSR enrolment the adapter creates two attestation key chains, one for SD-JW
 signer, and names their profiles in the enrolment request (`credentialSigningProfiles`); the Registrar certifies the
 second in the document signer profile of ISO/IEC 18013-5 Annex B.
 
-EUDIPLO's claim field types are JSON types; it has no date type for mdoc, so the mdoc PID carries `birth_date`,
-`issuance_date` and `expiry_date` as text strings instead of `full-date` (tag 1004): `PP_WS_DM_PidMdoc_002` is a known
-finding against the PID Rulebook v1.7 section 3.1.2 (EUDI profile), with the issue text in
-[EUDIPLO/eudiplo#1623](https://github.com/EUDIPLO/eudiplo/issues/1623). The
+The mdoc fields `birth_date`, `issuance_date` and `expiry_date` of the PID (and `attribute_C` of `default_credential_A`)
+declare `format` `date`, so EUDIPLO issues them as `full-date` (tag 1004) as the PID Rulebook v1.7 section 3.1.2
+requires ([EUDIPLO/eudiplo#1635](https://github.com/EUDIPLO/eudiplo/pull/1635)). A release before it, such as the pinned
+reference image, does not know the key: the adapter leaves it out and the dates are text strings, the known finding
+`PP_WS_DM_PidMdoc_002` ([EUDIPLO/eudiplo#1623](https://github.com/EUDIPLO/eudiplo/issues/1623)). The
 portrait opt-out (`DM_Portrait_001`) is not offered: the PID configurations have no portrait, and inline JSON claims
 cannot carry the empty byte string an mdoc needs (`ICS-17.portrait_opt_out` No).
 

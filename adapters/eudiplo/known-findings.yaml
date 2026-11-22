@@ -10,51 +10,20 @@
 # profile only. Findings whose test was wrong are gone with their tests corrected; findings without a MUST are no
 # longer FAILs (INFO or POLICY), and the texts kept for them are suggestions in upstream-findings/suggestions/. The
 # confirmed findings were reported upstream on 2026-11-21: `reference` names the issue.
+# Re-run of 2026-11-22 against ghcr.io/eudiplo/eudiplo:main (7586139): the findings fixed there are removed.
 
 # --- confirmed -------------------------------------------------------------------------------------------------------
 
-- testCase: RP_WS_SM_IssuerIntegrity_013_UF
+# Fixed on EUDIPLO's main (7586139, 2026-11-22) and removed: RP_WS_SM_IssuerIntegrity_013_UF, _025_UF (EUDIPLO/eudiplo#1615),
+# _034a_UF, _034b_UF, _037a_UF, _037b_UF (EUDIPLO/eudiplo#1616), RP_WS_DM_IdentifyingData_001b (EUDIPLO/eudiplo#1617).
+
+- testCase: RP_WS_SH_Encoding_003_UF
   basis: confirmed
   finding: >-
-    EUDIPLO accepts an SD-JWT VC whose vct is not among the vct_values of its query (OpenID4VP 1.0 sections 8.6, 14.9,
-    Appendix B.3.5)
-  reference: EUDIPLO/eudiplo#1615
-- testCase: RP_WS_SM_IssuerIntegrity_025_UF
-  basis: confirmed
-  finding: >-
-    EUDIPLO accepts an mdoc whose docType is not the doctype_value of its query (OpenID4VP 1.0 sections 8.6, 14.9,
-    Appendix B.2.3): it builds the DeviceRequest it verifies against from the presented docType
-  reference: EUDIPLO/eudiplo#1615
-- testCase: RP_WS_SM_IssuerIntegrity_034a_UF
-  basis: confirmed
-  finding: >-
-    EUDIPLO accepts an SD-JWT VC whose signing certificate is issued by a certificate with basicConstraints cA false
-    (and keyCertSign) (RFC 5280 sections 6.1.4 (k), 4.2.1.9, bound by RFC 7515 section 4.1.6)
-  reference: EUDIPLO/eudiplo#1616
-- testCase: RP_WS_SM_IssuerIntegrity_034b_UF
-  basis: confirmed
-  finding: >-
-    EUDIPLO accepts an mdoc whose document signer certificate is issued by a certificate with basicConstraints cA
-    false (RFC 5280 section 6.1.4 (k); overlaps the open EUDIPLO/eudiplo#1448)
-  reference: EUDIPLO/eudiplo#1616
-- testCase: RP_WS_SM_IssuerIntegrity_037a_UF
-  basis: confirmed
-  finding: >-
-    EUDIPLO accepts an SD-JWT VC whose signing certificate carries an unknown extension marked critical (RFC 5280
-    sections 4.2, 6.1.5 (f), bound by RFC 7515 section 4.1.6)
-  reference: EUDIPLO/eudiplo#1616
-- testCase: RP_WS_SM_IssuerIntegrity_037b_UF
-  basis: confirmed
-  finding: >-
-    EUDIPLO accepts an mdoc whose document signer certificate carries an unknown extension marked critical (RFC 5280
-    sections 4.2, 6.1.5 (f))
-  reference: EUDIPLO/eudiplo#1616
-- testCase: RP_WS_DM_IdentifyingData_001b
-  basis: confirmed
-  finding: >-
-    EUDIPLO releases the mdoc element place_of_birth, a CBOR map, as an empty object: getPrettyClaims returns it as a
-    Map, which the session result serialises as {} (a product bug, not a specification clause)
-  reference: EUDIPLO/eudiplo#1617
+    EUDIPLO accepts an mdoc whose IssuerAuth protected header carries the label alg twice (step 5,
+    mdoc.issuer-auth-duplicate-label), which makes the COSE message malformed (RFC 9052 section 3). Found 2026-11-22 with
+    the stimulus of PR 66; the pinned ae0792a accepts it too, so it is no regression
+  reference: EUDIPLO/eudiplo#1649
 
 # --- EUDI profile only ----------------------------------------------------------------------------------------------
 
