@@ -18,8 +18,7 @@
 # findings against the EUDI profile only (`basis: profile`: ARF, TS3, PID Rulebook; EUDIPLO conforms to the base
 # specification) remain. Findings whose test was wrong are gone with their tests corrected; findings without a MUST are
 # no longer FAILs (INFO or POLICY), and the texts kept for them are suggestions in upstream-findings/suggestions/.
-# The confirmed findings were reported upstream on 2026-11-21 and `reference` names the issue; the profile-only ones are
-# not reported, and `reference` names the prepared issue text in upstream-findings/.
+# All findings were reported upstream on 2026-11-21 and 2026-11-22: `reference` names the issue.
 
 # --- confirmed -------------------------------------------------------------------------------------------------------
 
@@ -46,61 +45,61 @@
   variants: [SD+PA]
   basis: profile
   finding: EUDIPLO issues a PID for a revoked Wallet Instance; it does not read the TS3 1.5 client_status.status of the WIA
-  reference: upstream-findings/wallet-attestation-status-claim.md
+  reference: EUDIPLO/eudiplo#1620
 - testCase: PP_WS_SM_ClientAttestation_013_UF
   variants: [SD+PA]
   basis: profile
   finding: >-
     EUDIPLO issues a PID when the WIA's status list is unreachable or a bad Status List Token; it never fetches the list
     of a TS3 1.5 WIA (client_status.status)
-  reference: upstream-findings/wallet-attestation-status-claim.md
+  reference: EUDIPLO/eudiplo#1620
 - testCase: PP_WS_SM_KeyAttestation_008_UF
   variants: [SD+PA]
   basis: profile
   finding: EUDIPLO issues a PID for a revoked WSCD; it does not read the TS3 1.5 key_storage_status.status of the KA
-  reference: upstream-findings/wallet-attestation-status-claim.md
+  reference: EUDIPLO/eudiplo#1620
 - testCase: PP_WS_SM_KeyAttestation_009_UF
   variants: [SD+PA]
   basis: profile
   finding: >-
     EUDIPLO issues a PID when the KA's status list is unreachable or a bad Status List Token; it never fetches the list
     of a TS3 1.5 KA (key_storage_status.status)
-  reference: upstream-findings/wallet-attestation-status-claim.md
+  reference: EUDIPLO/eudiplo#1620
 - testCase: PP_WS_SM_Revocation_007
   variants: [SD+PA, MD+PA]
   basis: profile
   finding: >-
     No revocation chaining for a revoked WSCD: the PID stays valid after the KA's entry is revoked, since no wallet unit
     is recorded for a KA without a top-level status (TS3 1.5 section 2.4.3)
-  reference: upstream-findings/wallet-attestation-status-claim.md
+  reference: EUDIPLO/eudiplo#1620
 - testCase: PP_WS_SM_Revocation_006
   variants: [SD+PA, MD+PA]
   basis: profile
   finding: >-
     No revocation chaining for a revoked Wallet Instance: revokeWithWalletUnit follows the KA only, so the WIA's status
     is never kept with the PID (TS3 1.5 section 2.4.3, WURevocation_18); the TS3 1.5 claim is not read either
-  reference: upstream-findings/wia-revocation-chaining.md, upstream-findings/wallet-attestation-status-claim.md
+  reference: EUDIPLO/eudiplo#1621, EUDIPLO/eudiplo#1620
 - testCase: PP_WS_IA_Reissuance_005_UF
   variants: [SD+PA]
   basis: profile
   finding: >-
     After the Wallet Instance of CW-1 was revoked, the refresh grant still gives an access token and a new PID; the
     TS3 1.5 client_status of the WIA is not read at the refresh grant either
-  reference: upstream-findings/wallet-attestation-status-claim.md
+  reference: EUDIPLO/eudiplo#1620
 - testCase: PP_WS_SH_Encoding_004_UF
   variants: [SD+PA]
   basis: profile
   finding: >-
     A WIA or KA whose TS3 1.5 status reference points to http://169.254.169.254/... is accepted (steps 3 and 4): the
     claim is not read, which shows no request forgery weakness by itself; steps 5 and 6 test the top-level status
-  reference: upstream-findings/wallet-attestation-status-claim.md
+  reference: EUDIPLO/eudiplo#1620
 - testCase: PP_WS_SH_Encoding_005_UF
   variants: [SD+PA]
   basis: profile
   finding: >-
     The decompression bomb served as the WIA's and KA's status list is never fetched (the TS3 1.5 status claims are not
     read), so the test case cannot pass; it is no evidence of its own
-  reference: upstream-findings/wallet-attestation-status-claim.md
+  reference: EUDIPLO/eudiplo#1620
 
 # TS3 1.5 section 2.4.3 and ISSU_12c: the PID ends before the WIA's and KA's revocation maintenance period.
 - testCase: PP_WS_SM_ClientAttestation_016_UF
@@ -109,7 +108,7 @@
   finding: >-
     A WIA whose maintenance period (client_status.exp) ends tomorrow is neither rejected nor does it shorten the PID,
     which expires in 30 days (TS3 1.5 section 2.4.3, ISSU_12c)
-  reference: upstream-findings/maintenance-period.md
+  reference: EUDIPLO/eudiplo#1622
 
 # PID Rulebook v1.7 section 3.1.2, PID_09.
 - testCase: PP_WS_DM_PidMdoc_002
@@ -118,7 +117,7 @@
   finding: >-
     EUDIPLO issues the mdoc PID's birth_date, issuance_date and expiry_date as CBOR text strings, not as full-date (tag
     1004) or tdate (tag 0) as the PID Rulebook v1.7 section 3.1.2 requires: its claim field types have no date type
-  reference: upstream-findings/mdoc-full-date.md
+  reference: EUDIPLO/eudiplo#1623
 
 # PID_21.
 - testCase: PP_WS_SM_IssuerIntegrity_005
@@ -128,7 +127,7 @@
     The elements of an array claim are not selectively disclosable one by one even when the element is marked
     disclosable: nationalities is one disclosure as a whole (PID_21); buildDisclosureFrame turns an element path into
     a string key, which @sd-jwt/core never matches to an array index
-  reference: upstream-findings/sd-jwt-array-element-disclosure.md
+  reference: EUDIPLO/eudiplo#1624
 
 # --- Attestation Provider variants (issue 27) ------------------------------------------------------------------------
 
@@ -152,49 +151,49 @@
   variants: [SD+PA+Q, SD+PA+PB, SD+PA+E]
   basis: profile
   finding: As PP_WS_SM_ClientAttestation_012_UF (the same behaviour for default_credential_A)
-  reference: upstream-findings/wallet-attestation-status-claim.md
+  reference: EUDIPLO/eudiplo#1620
 - testCase: AP_WS_SM_ClientAttestation_013_UF
   variants: [SD+PA+Q, SD+PA+PB, SD+PA+E]
   basis: profile
   finding: As PP_WS_SM_ClientAttestation_013_UF (the same behaviour for default_credential_A)
-  reference: upstream-findings/wallet-attestation-status-claim.md
+  reference: EUDIPLO/eudiplo#1620
 - testCase: AP_WS_SM_KeyAttestation_008_UF
   variants: [SD+PA+Q, SD+PA+PB, SD+PA+E]
   basis: profile
   finding: As PP_WS_SM_KeyAttestation_008_UF (the same behaviour for default_credential_A)
-  reference: upstream-findings/wallet-attestation-status-claim.md
+  reference: EUDIPLO/eudiplo#1620
 - testCase: AP_WS_SM_KeyAttestation_009_UF
   variants: [SD+PA+Q, SD+PA+PB, SD+PA+E]
   basis: profile
   finding: As PP_WS_SM_KeyAttestation_009_UF (the same behaviour for default_credential_A)
-  reference: upstream-findings/wallet-attestation-status-claim.md
+  reference: EUDIPLO/eudiplo#1620
 - testCase: AP_WS_IA_Reissuance_005_UF
   variants: [SD+PA+Q, SD+PA+PB, SD+PA+E]
   basis: profile
   finding: As PP_WS_IA_Reissuance_005_UF (the same behaviour for default_credential_A)
-  reference: upstream-findings/wallet-attestation-status-claim.md
+  reference: EUDIPLO/eudiplo#1620
 - testCase: AP_WS_SH_Encoding_004_UF
   variants: [SD+PA+Q, SD+PA+PB, SD+PA+E]
   basis: profile
   finding: As PP_WS_SH_Encoding_004_UF (the same behaviour for default_credential_A)
-  reference: upstream-findings/wallet-attestation-status-claim.md
+  reference: EUDIPLO/eudiplo#1620
 - testCase: AP_WS_SH_Encoding_005_UF
   variants: [SD+PA+Q, SD+PA+PB, SD+PA+E]
   basis: profile
   finding: As PP_WS_SH_Encoding_005_UF (the same behaviour for default_credential_A)
-  reference: upstream-findings/wallet-attestation-status-claim.md
+  reference: EUDIPLO/eudiplo#1620
 - testCase: AP_WS_SM_ClientAttestation_016_UF
   variants: [SD+PA+Q, SD+PA+PB, SD+PA+E]
   basis: profile
   finding: As PP_WS_SM_ClientAttestation_016_UF (the same behaviour for default_credential_A)
-  reference: upstream-findings/maintenance-period.md
+  reference: EUDIPLO/eudiplo#1622
 - testCase: AP_WS_DM_Rulebook_100
   variants: [MD+PA+Q, MD+PA+PB, MD+PA+E]
   basis: profile
   finding: >-
     attribute_C of default_credential_A in mdoc format is issued as a CBOR text string, not as full-date (tag 1004), as
     the dates of PP_WS_DM_PidMdoc_002: EUDIPLO has no date field type
-  reference: upstream-findings/mdoc-full-date.md
+  reference: EUDIPLO/eudiplo#1623
 
 # AP_* objectives from 100 (ARF Annex 2, TS3).
 - testCase: AP_WS_MS_Metadata_008
@@ -203,21 +202,21 @@
   finding: >-
     The configuration with keyBinding false advertises the proof types jwt and attestation without
     key_attestations_required (metadata-key-attestation); the device-bound configurations pass
-  reference: upstream-findings/key-binding-false.md
+  reference: EUDIPLO/eudiplo#1625
 - testCase: AP_WS_MS_Metadata_100
   variants: [Q, PB, E]
   basis: profile
   finding: >-
     A configuration with keyBinding false is published with cryptographic_binding_methods_supported ["jwk"] and the
     proof types jwt and attestation, so no configuration states that it needs no key attestation (WUA_10a)
-  reference: upstream-findings/key-binding-false.md
+  reference: EUDIPLO/eudiplo#1625
 - testCase: AP_WS_MS_Metadata_101
   variants: [Q, PB, E]
   basis: profile
   finding: >-
     The configuration with keyBinding false is published with proof types but without key_attestations_required, though
     its cryptographic_binding_methods_supported makes it a device-bound configuration
-  reference: upstream-findings/key-binding-false.md
+  reference: EUDIPLO/eudiplo#1625
 - testCase: AP_WS_SM_KeyAttestation_102
   variants: [SD+PA+Q, SD+PA+PB, SD+PA+E]
   basis: profile
@@ -225,7 +224,7 @@
     A credential request without proofs for the configuration with keyBinding false is rejected with HTTP 400
     invalid_proof ("The proofs parameter is missing"): the attestation that is not device-bound cannot be obtained with
     the WIA only (WUA_10a). With a proof it is issued without cnf
-  reference: upstream-findings/key-binding-false.md
+  reference: EUDIPLO/eudiplo#1625
 - testCase: AP_WS_SM_KeyAttestation_103
   variants: [SD+PA+Q, SD+PA+PB, SD+PA+E]
   basis: profile
@@ -233,7 +232,7 @@
     The valid step (no proofs, configuration with keyBinding false) is rejected with invalid_proof, as in
     AP_WS_SM_KeyAttestation_102; the revoked Wallet Instance stimulus is answered with an attestation, as
     PP_WS_SM_ClientAttestation_012_UF
-  reference: upstream-findings/key-binding-false.md, upstream-findings/wallet-attestation-status-claim.md
+  reference: EUDIPLO/eudiplo#1625, EUDIPLO/eudiplo#1620
 - testCase: AP_WS_SM_Revocation_100
   variants: [MD+PA+Q, SD+PA+Q, MD+PA+PB, SD+PA+PB]
   basis: profile
@@ -241,11 +240,11 @@
     The QEAA and PuB-EAA tenants declare revocation chaining (ICS-07 Yes, revokeWithWalletUnit true), but the
     attestation stays valid (0x00) in every poll for T_chain after the Test Wallet Provider revoked the Wallet Instance,
     as PP_WS_SM_Revocation_006
-  reference: upstream-findings/wia-revocation-chaining.md, upstream-findings/wallet-attestation-status-claim.md
+  reference: EUDIPLO/eudiplo#1621, EUDIPLO/eudiplo#1620
 - testCase: AP_WS_SM_Revocation_102
   variants: [SD+PA+Q]
   basis: profile
   finding: >-
     After the embedded disclosure policy of the configuration changed (PATCH /api/issuer/credentials/{id}, confirmed by
     GET), the attestation issued under the old policy stays valid (0x00) in every poll for T_rev (EDP_11)
-  reference: upstream-findings/disclosure-policy-change.md
+  reference: EUDIPLO/eudiplo#1626
