@@ -25,6 +25,9 @@ Options:
                          Known findings of the RP (YAML). A FAIL listed there is reported as known and does not fail
                          the run; any other FAIL, INCONCLUSIVE, REVIEW or a run error does (exit code 1). The test
                          book items (RP_TB_*) are always REVIEW and never fail the run
+  --concurrency <n>      How many test case runs execute at a time; default 1 (one after another). With more, the test
+                         cases that change trust lists run after the others, one at a time; the report keeps
+                         definition order
   --list                 List the test definitions and test book items and exit
 
 The report goes to <report-dir>/<run>/: report.json, summary.md, junit.xml and the artifacts of every step.
@@ -43,6 +46,7 @@ async function main() {
       'report-dir': { type: 'string', default: 'reports' },
       'harness-host': { type: 'string' },
       'known-findings': { type: 'string' },
+      concurrency: { type: 'string', default: '1' },
       list: { type: 'boolean' },
       help: { type: 'boolean', short: 'h' },
     },
@@ -58,6 +62,12 @@ async function main() {
   }
   if (positionals[0] !== 'run' || !values.adapter) {
     process.stderr.write(usage);
+    process.exitCode = 2;
+    return;
+  }
+  const concurrency = Number(values.concurrency);
+  if (!Number.isInteger(concurrency) || concurrency < 1) {
+    process.stderr.write(`--concurrency must be a positive integer, not ${values.concurrency}\n`);
     process.exitCode = 2;
     return;
   }
@@ -77,6 +87,7 @@ async function main() {
     reportDir: resolve(values['report-dir']),
     harnessHost: values['harness-host'] ?? adapter.harnessHost ?? '127.0.0.1',
     knownFindings,
+    concurrency,
     log: (line) => process.stdout.write(`${line}\n`),
   });
   const summary = Object.entries(report.run.summary).map(([k, v]) => `${k} ${v}`).join(', ');
