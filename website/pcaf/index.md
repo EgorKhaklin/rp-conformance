@@ -87,26 +87,25 @@ A **Test Class** groups all functionality associated with one interface of the S
     - **AttestationProvider_Infrastructure (AP_Inf)**
 
 ```mermaid
-flowchart TD
+flowchart LR
 
-    RP["SUT = Relying Party"]
-    PP["SUT = PID Provider"]
-    AP["SUT = Attestation Provider"]
+    INF["Trust infrastructure<br/><small>trust lists, Registrar, Wallet Provider<br/>not a SUT</small>"]
+    WU["Wallet Unit<br/><small>SUT of the FCAF</small>"]
 
-    RP --> RP_WS["RP_WS"]
-    RP --> RP_PP["RP_PP"]
-    RP --> RP_AP["RP_AP"]
-    RP --> RP_Inf["RP_Inf"]
+    PP["<b>PID Provider</b><br/><small>SUT of the PCAF</small>"]
+    AP["<b>Attestation Provider</b><br/><small>QEAA, PuB-EAA, EAA<br/>SUT of the PCAF</small>"]
+    RP["<b>Relying Party</b><br/><small>SUT of the PCAF</small>"]
 
-    PP --> PP_WS["PP_WS"]
-    PP --> PP_RP["PP_RP"]
-    PP --> PP_Inf["PP_Inf"]
-
-    AP --> AP_WS["AP_WS"]
-    AP --> AP_RP["AP_RP"]
-    AP --> AP_Inf["AP_Inf"]
+    PP -- "PP_WS<br/>issuance (OpenID4VCI)" --> WU
+    AP -- "AP_WS<br/>issuance (OpenID4VCI)" --> WU
+    WU -- "RP_WS<br/>presentation (OpenID4VP)" --> RP
+    PP -- "PP_RP / RP_PP<br/>status lists" --> RP
+    AP -- "AP_RP / RP_AP (reserved)<br/>status lists" --> RP
+    INF -- "PP_Inf" --> PP
+    INF -- "AP_Inf" --> AP
+    INF -- "RP_Inf<br/>trust lists" --> RP
 ```
-*Figure 2: Systems Under Test and test classes*
+*Figure 2: Systems Under Test and test classes. Each arrow is an interface, in the direction in which credentials, status and trust information flow, labelled with the test classes that test it (the SUT's class first).*
 
 An Attestation Provider runs every objective of the PID Provider that is not specific to the PID, with the same number, and the objectives specific to Attestation Providers. Every class tests the SUT through an external interface; the PCAF has no class for user-facing functionality, which the FCAF's `WS_UI` class covers for the Wallet Solution.
 
