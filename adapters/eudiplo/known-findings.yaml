@@ -32,5 +32,7 @@
   finding: >-
     EUDIPLO rejects an expired mdoc but fetches its status list first (@owf/mdoc IssuerAuth.verify runs verifyStatus
     before the validityInfo check), against Token Status List section 8.3 as the FCAF pins it (draft-20; "MUST NOT" from
-    draft-19). HAIP 1.0 pins draft-14, which has no such rule. Low severity
-  reference: cre8/rp-conformance#4
+    draft-19). HAIP 1.0 pins draft-14, which has no such rule. Low severity. Fixed in @owf/mdoc by
+    openwallet-foundation-labs/identity-common-ts#478 (merged 2026-11-17, after 0.10.0); EUDIPLO main (7586139) still
+    resolves @owf/mdoc 0.10.0, so the finding goes once EUDIPLO takes a release that contains the fix (0.11.0)
+  reference: openwallet-foundation-labs/identity-common-ts#478

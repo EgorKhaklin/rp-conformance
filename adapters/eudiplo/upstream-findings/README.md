@@ -27,7 +27,10 @@ list: [EUDIPLO/eudiplo#1615](https://github.com/EUDIPLO/eudiplo/issues/1615) (`R
 `RP_WS_SM_Validity_005b_UF` (an expired mdoc's status list is fetched before the validity check, in `@owf/mdoc`) is a
 profile-only known finding without a text here: the "MUST NOT" fetch rule of Token Status List section 8.3 is in
 draft-19 and later (draft-17 and -18 word it as "no further procedures ... MUST be performed"), while HAIP 1.0 pins
-draft-14; low severity.
+draft-14; low severity. No issue is needed: `@owf/mdoc` checks the validity before the status since
+[openwallet-foundation-labs/identity-common-ts#478](https://github.com/openwallet-foundation-labs/identity-common-ts/pull/478)
+(merged 2026-11-17, after the 0.10.0 release). EUDIPLO main (`7586139`, re-run of 2026-11-23) still resolves
+`@owf/mdoc` 0.10.0; the finding goes once it takes a release with the fix (0.11.0, in alpha on 2026-11-23).
 
 Suggestions and questions (not conformance findings, no FAIL in the suite):
 
