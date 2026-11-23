@@ -30,6 +30,12 @@ Checked against `ghcr.io/eudiplo/eudiplo@sha256:1a1f53b77b69cfeaf573f6950de6a709
 
 The `AP_*` variants of the `PP_*` test cases above (issue 27) share their text and basis.
 
+Not filed yet (texts here):
+
+| Text | Basis | Test cases |
+| --- | --- | --- |
+| [mdoc-child-claims-namespace.md](mdoc-child-claims-namespace.md) | confirmed (OpenID4VCI 1.0 Appendix C.2), regression on `main` since `641b548`; worked around in the adapter | every `MD` variant (credential request answered `unknown_credential_configuration`) |
+
 Suggestions and questions (not conformance findings, no FAIL in the suite):
 
 | File | Test cases (informational or `POLICY`) |

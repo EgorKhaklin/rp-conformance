@@ -62,13 +62,20 @@ export const PID_SD_JWT_EXTRA_FIELDS = [
 /** DocType and namespace of the PID in mdoc format (PID Rulebook chapter 4). */
 export const PID_MDOC_NAMESPACE = 'eu.europa.ec.eudi.pid.1';
 
-const mdocField = (name: string, type: string, mandatory = false, children?: unknown[], format?: 'date') => ({
+/**
+ * A claim definition in the PID namespace. Its children carry the namespace too: EUDIPLO does not pass a field's
+ * `namespace` on to its children, so it would publish their claims paths without it (`["nationality", null]`), and
+ * since EUDIPLO/eudiplo#1636 (array steps published as `null`) its OID4VCI library then drops the whole mdoc
+ * configuration as unknown (upstream-findings/mdoc-child-claims-namespace.md). The namespace of a child changes only
+ * its published path.
+ */
+const mdocField = (name: string, type: string, mandatory = false, children?: Record<string, unknown>[], format?: 'date') => ({
   namespace: PID_MDOC_NAMESPACE,
   path: [name],
   type,
   ...(format ? { format } : {}),
   ...(mandatory ? { mandatory: true } : {}),
-  ...(children ? { children } : {}),
+  ...(children ? { children: children.map((child) => ({ namespace: PID_MDOC_NAMESPACE, ...child })) } : {}),
 });
 
 /**
