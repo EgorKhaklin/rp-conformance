@@ -1,0 +1,14 @@
+# Only what the harness needs at runtime: the workspace packages, the adapters and their ICS and known findings.
+**/node_modules
+.git
+.github
+.claude
+reports
+website
+fcaf-overlay
+fcaf-overlay-issuer
+scripts
+**/*.md
+!packages/**/*.md
+**/test
+**/*.test.ts

@@ -4,19 +4,22 @@ import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 import { durationMs, type IssuerAdapter, type IssuerTestCaseDefinition, isExecutable, variantOf } from '@rp-conformance/core';
 import { issuerDefinitions } from '@rp-conformance/issuer-definitions';
+import { type AdapterEntry, resolveAdapter } from '../adapter-module';
 import { loadIssuerIcs } from './ics';
 import { issuerRunOutcome, loadIssuerKnownFindings } from './known-findings';
 import { runIssuerConformance } from './runner';
 
 /** The issuer adapters, by the name `--adapter` takes; `dir` is the adapter's folder under `adapters/`. */
-export const ISSUER_ADAPTERS: Record<string, { load: () => Promise<{ createAdapter(): IssuerAdapter }>; dir: string }> = {
+export const ISSUER_ADAPTERS: Record<string, AdapterEntry<IssuerAdapter>> = {
   eudiplo: { load: () => import('@rp-conformance/adapter-issuer-eudiplo'), dir: 'issuer-eudiplo' },
 };
 
-export const issuerUsage = `Usage: rp-conformance issuer run --adapter <${Object.keys(ISSUER_ADAPTERS).join('|')}> [options]
+export const issuerUsage = `Usage: rp-conformance issuer run --adapter <${Object.keys(ISSUER_ADAPTERS).join('|')}|path> [options]
        rp-conformance issuer --list
 
-Runs the issuer suite: a PID Provider or Attestation Provider as system under test.
+Runs the issuer suite: a PID Provider or Attestation Provider as system under test. --adapter takes a built-in
+adapter or the path of an adapter module of your own (.ts or .js, exporting createAdapter(): IssuerAdapter of
+@rp-conformance/core); such a module needs --ics.
 
 Options:
   --ics <file>           Issuer ICS file (YAML: profiles, items); default: the adapter's ics.yaml
@@ -77,12 +80,15 @@ export async function issuerMain(argv: string[], io: Io, definitions = issuerDef
     io.err(issuerUsage);
     return 2;
   }
-  const entry = ISSUER_ADAPTERS[values.adapter];
-  if (!entry) throw new Error(`unknown issuer adapter ${values.adapter} (adapters: ${Object.keys(ISSUER_ADAPTERS).join(', ')})`);
+  const entry = resolveAdapter(values.adapter, ISSUER_ADAPTERS, 'issuer adapter');
+  if (!values.ics && !entry.dir) {
+    io.err(`--ics is required with the adapter module ${values.adapter}\n`);
+    return 2;
+  }
   const module = await entry.load();
   const adapter = module.createAdapter();
   const root = resolve(dirname(fileURLToPath(import.meta.url)), '../../../..');
-  const ics = await loadIssuerIcs(values.ics ? resolve(values.ics) : join(root, 'adapters', entry.dir, 'ics.yaml'));
+  const ics = await loadIssuerIcs(values.ics ? resolve(values.ics) : join(root, 'adapters', entry.dir!, 'ics.yaml'));
   const maxWait = values['max-wait'];
   const maxWaitSeconds = maxWait === undefined ? 0 : /^\d+$/.test(maxWait) ? Number(maxWait) : (durationMs(maxWait) ?? Number.NaN) / 1000;
   if (Number.isNaN(maxWaitSeconds)) throw new Error(`--max-wait ${maxWait}: not an ISO 8601 duration or a number of seconds`);

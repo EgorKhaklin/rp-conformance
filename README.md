@@ -21,6 +21,7 @@ Status: specification, design, and Phases 1 to 4 of the harness: all 121 baselin
 | [packages/](packages/) | The harness (TypeScript, pnpm workspace): `core` (adapter interface, test definition format, shared FCAF wording), `forge` (test PKI with IACA anchors and mdoc document signers, PID and `default_credential_A` in SD-JWT VC and mdoc format, Status List Tokens in JWT and CWT format, identifier lists, JAdES-sealed LoTE, the test LOTL and `TL-QEAA` as ETSI TS 119 612 Trusted Lists with XAdES signatures, registration certificate, and the fault layer), `wallet` (Conformance Wallet: KB-JWT, mdoc DeviceResponse with the OpenID4VP handover, via redirects and the DC API, with the presentation faults of the forge), `dc-api-shim` (Playwright replaces `navigator.credentials.get` on the Relying Party's page and hands the request to the Conformance Wallet), `status-provider`, `trust-infrastructure`, `validator` (reference validator with one named check per property, including the request-side and trust list checks, and the self-validation of every fault), `reference-rp`, `definitions` (the 279 test definitions, the source of the FCAF test cases), `fcaf-render` (renders the overlay from the definitions and the shared pages), `controller` (CLI, selection, gating, report, JUnit XML, known findings) |
 | [scripts/fcaf-lint.sh](scripts/fcaf-lint.sh) | Runs the patched FCAF lint on the rendered test cases of both overlays, as CI does |
 | [adapters/](adapters/) | RP adapters with their ICS: `reference` (the reference RP, in-process) and `eudiplo` (with a Docker Compose file for EUDIPLO and PostgreSQL, and its known findings) |
+| [Dockerfile](Dockerfile), [action.yml](action.yml) | The harness image (`ghcr.io/cre8/rp-conformance`) and the GitHub Action that runs it, see [Your own adapter, the Docker image and the GitHub Action](#your-own-adapter-the-docker-image-and-the-github-action) |
 | [.github/workflows/nightly-eudiplo.yml](.github/workflows/nightly-eudiplo.yml) | Nightly run of every test case of both suites against `ghcr.io/eudiplo/eudiplo:main`, also started by hand (`workflow_dispatch`) |
 
 ## Approach
@@ -88,6 +89,45 @@ EUDIPLO_PORT=3100 pnpm rp-conformance run --adapter eudiplo
 ```
 
 Decisions on the open points of [harness-design.md](harness-design.md) §12: the executable TypeScript definitions in `packages/definitions` are the source of truth, and `packages/fcaf-render` produces the FCAF markdown from them (§4.2); the reference RP is built on the reference validator; the OIDF bridge is optional and not implemented.
+
+## Your own adapter, the Docker image and the GitHub Action
+
+`--adapter` takes a built-in adapter (`reference`, `eudiplo`) or the path of an adapter module of your own: a `.ts` or `.js` file that exports `createAdapter()`, returning a `RelyingPartyAdapter` (or, for `rp-conformance issuer`, an `IssuerAdapter`) of `@rp-conformance/core` ([packages/core/src/rp/adapter.ts](packages/core/src/rp/adapter.ts)). It configures the system under test for the test environment (`setUp`), starts presentations and reads their result; [adapters/eudiplo](adapters/eudiplo/src/index.ts) is a complete example. An adapter module needs `--ics`:
+
+```bash
+pnpm rp-conformance run --adapter ./my-adapter.ts --ics my-ics.yaml
+```
+
+The image `ghcr.io/cre8/rp-conformance` ([Dockerfile](Dockerfile)) holds the CLI, both suites, the built-in adapters and Chromium for the DC API flow, so a run needs neither a clone nor Node.js. Its working directory `/work` is where relative paths resolve; an adapter module there can import `@rp-conformance/core` without installing it, and is an ES module unless a `package.json` of its own says otherwise. On the host network the system under test and the harness reach each other as with the bare CLI (Linux; Docker Desktop needs host networking turned on):
+
+```bash
+docker run --rm --init --network host --user "$(id -u):$(id -g)" -v "$PWD:/work" ghcr.io/cre8/rp-conformance:main run --adapter ./my-adapter.ts --ics my-ics.yaml
+```
+
+Tags: `main` and `sha-<commit>` from main, `<version>`, `v<major>` and `latest` from a release tag ([.github/workflows/image.yml](.github/workflows/image.yml)).
+
+The GitHub Action ([action.yml](action.yml)) runs that image in a job that has started the system under test, writes the summary to the job summary and uploads the report as an artifact. It fails the step as the CLI fails the run; the outputs `report`, `junit` and `exit-code` name the run's report, for example for a test reporter.
+
+```yaml
+jobs:
+  conformance:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker compose up -d --wait   # the Relying Party under test
+      - uses: cre8/rp-conformance@main
+        env:
+          MY_RP_URL: http://127.0.0.1:8080
+          HARNESS_HOST: host.docker.internal   # if the RP runs in a container
+        with:
+          adapter: ./conformance/adapter.ts
+          ics: conformance/ics.yaml
+          known-findings: conformance/known-findings.yaml
+          env-vars: MY_RP_URL
+          concurrency: 4
+```
+
+`suite: issuer` runs the issuer suite; `only`, `flows`, `max-wait`, `harness-host` and `args` pass the CLI's options; `env-vars` names the variables of the step that reach the adapter in the container (`HARNESS_HOST` always does); `image` pins another image, and `build` builds it from the action's source. The image of `@main` is `main`, of `@v1` it is `v1`. Paths are relative to the workspace. A container of the system under test reaches the harness at `host.docker.internal` when its Compose file maps that name to `host-gateway`, as [adapters/eudiplo/docker-compose.yml](adapters/eudiplo/docker-compose.yml) does.
 
 ## Issuer suite
 

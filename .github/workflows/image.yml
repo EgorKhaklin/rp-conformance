@@ -1,0 +1,107 @@
+name: Harness image
+
+# Builds the harness image (Dockerfile) and publishes it to ghcr.io/cre8/rp-conformance: `main` and `sha-<commit>` from
+# main, `<version>`, `v<major>` and `latest` from a tag v<version>. The GitHub Action (action.yml) of a tag or of main
+# uses the image of the same name. A pull request that touches the image or the action builds the image without
+# publishing it and runs the action from its source against the reference RP, with a built-in adapter and with an
+# adapter module given by path.
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+    paths:
+      - Dockerfile
+      - .dockerignore
+      - action.yml
+      - .github/workflows/image.yml
+      - packages/controller/**
+      - pnpm-lock.yaml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  action:
+    name: Action against the reference RP
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - name: Built-in adapter, both flows
+        id: builtin
+        uses: ./
+        with:
+          adapter: reference
+          image: build
+          only: RP_WS_IA_MainInteraction_*,RP_WS_SM_Revocation_*
+          concurrency: '4'
+          artifact-name: action-builtin
+      - name: An adapter module of the workspace
+        run: |
+          mkdir -p .action-test
+          cat > .action-test/adapter.ts <<'EOF'
+          // Stands for an adapter of the user's own: it imports @rp-conformance/core from the image.
+          import { durationMs } from '@rp-conformance/core';
+          if (durationMs('PT1M') !== 60_000) throw new Error('@rp-conformance/core did not resolve');
+          export { createAdapter } from '/app/adapters/reference/src/index.ts';
+          EOF
+          cp adapters/reference/ics.yaml .action-test/ics.yaml
+      - name: Adapter module given by path
+        uses: ./
+        with:
+          adapter: ./.action-test/adapter.ts
+          ics: .action-test/ics.yaml
+          image: rp-conformance:action
+          only: RP_WS_SM_Revocation_001a
+          flows: redirect
+          artifact-name: action-module
+      - name: Outputs
+        env:
+          REPORT: ${{ steps.builtin.outputs.report }}
+          JUNIT: ${{ steps.builtin.outputs.junit }}
+        run: test -f "$REPORT/report.json" && test -f "$JUNIT"
+
+  publish:
+    name: Publish
+    if: github.event_name != 'pull_request'
+    needs: action
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v7
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/cre8/rp-conformance
+          tags: |
+            type=raw,value=main,enable={{is_default_branch}}
+            type=sha,prefix=sha-,enable={{is_default_branch}}
+            type=semver,pattern=v{{version}}
+            type=semver,pattern={{version}}
+            type=semver,pattern=v{{major}}
+            type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/v') }}
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            VERSION=${{ steps.meta.outputs.version }}
+            REVISION=${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
