@@ -68,7 +68,7 @@ describe('issuer selection', () => {
     expect(await issuerMain(['--list'], io)).toBe(0);
     expect(out).toContain(`${CONTROL} [SD+PA] (positive control)`);
     expect(await issuerMain(['run'], io)).toBe(2);
-    expect(err).toContain('rp-conformance issuer run --adapter <eudiplo>');
+    expect(err).toContain('rp-conformance issuer run --adapter <eudiplo|path>');
   });
 });
 

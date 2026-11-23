@@ -1,0 +1,178 @@
+name: PCAF conformance harness
+description: >-
+  Runs the PCAF test cases against a Relying Party, PID Provider or Attestation Provider that the job started, with
+  the harness's Docker image, and reports the result in the job summary and as an artifact.
+author: cre8
+branding:
+  icon: check-circle
+  color: blue
+
+# The harness runs in its container on the host network, as the bare CLI does on the runner (README, "GitHub Action"):
+# the system under test reaches the harness's status list and trust list servers, and the harness reaches the system
+# under test, both on 127.0.0.1 or, from a container of the system under test, on host.docker.internal. Paths
+# (adapter module, ICS, known findings, report directory) are relative to the workspace, which is the container's
+# working directory.
+
+inputs:
+  suite:
+    description: '`rp` for a Relying Party, `issuer` for a PID Provider or Attestation Provider'
+    default: rp
+  adapter:
+    description: A built-in adapter (`reference`, `eudiplo`) or the path of an adapter module in the workspace
+    required: true
+  ics:
+    description: ICS file (YAML); required with an adapter module
+    default: ''
+  known-findings:
+    description: Known findings (YAML); a FAIL listed there does not fail the step
+    default: ''
+  only:
+    description: Test case IDs or patterns with *, comma separated
+    default: ''
+  flows:
+    description: 'Relying Party suite: flows to run, comma separated (`redirect`, `dc-api`); default: both'
+    default: ''
+  concurrency:
+    description: 'Relying Party suite: how many test case runs execute at a time'
+    default: '1'
+  max-wait:
+    description: 'Issuer suite: longest a step may wait for an artifact to expire (ISO 8601 or seconds)'
+    default: ''
+  harness-host:
+    description: "Host name under which the system under test reaches the harness; default: the adapter's"
+    default: ''
+  env-vars:
+    description: >-
+      Names of environment variables of the step to pass into the container, one per line or comma separated (for
+      example the adapter's EUDIPLO_URL or credentials); HARNESS_HOST is always passed
+    default: ''
+  args:
+    description: Further arguments of `rp-conformance run`, one per line
+    default: ''
+  report-dir:
+    description: Where the reports go, relative to the workspace
+    default: rp-conformance-reports
+  image:
+    description: >-
+      Image of the harness; default: the one published for the version of this action (`main` for a branch).
+      `build` builds it from the action's source.
+    default: ''
+  upload-artifact:
+    description: Upload the report directory as an artifact
+    default: 'true'
+  artifact-name:
+    description: "Name of the artifact; default: rp-conformance-<suite>-<job>; set it in a matrix"
+    default: ''
+  fail-on-error:
+    description: Fail the step when the run fails (an unexpected FAIL, INCONCLUSIVE, REVIEW or a harness error)
+    default: 'true'
+
+outputs:
+  report:
+    description: Directory of this run's report (report.json, summary.md, junit.xml), relative to the workspace
+    value: ${{ steps.run.outputs.report }}
+  junit:
+    description: This run's JUnit XML, relative to the workspace
+    value: ${{ steps.run.outputs.junit }}
+  exit-code:
+    description: Exit code of the harness (0 passed, 1 failed, 2 usage error)
+    value: ${{ steps.run.outputs.exit-code }}
+
+runs:
+  using: composite
+  steps:
+    - name: Harness image
+      id: image
+      shell: bash
+      env:
+        IMAGE: ${{ inputs.image }}
+        ACTION_REF: ${{ github.action_ref }}
+        ACTION_PATH: ${{ github.action_path }}
+      run: |
+        set -euo pipefail
+        if [ "$IMAGE" = build ] || { [ -z "$IMAGE" ] && [ -z "$ACTION_REF" ]; }; then
+          # A local action (`uses: ./`) or an explicit `build`: the image of the action's own source.
+          IMAGE=rp-conformance:action
+          docker build -t "$IMAGE" "$ACTION_PATH"
+        elif [ -z "$IMAGE" ]; then
+          case "$ACTION_REF" in
+            v[0-9]*) tag="$ACTION_REF" ;;
+            *) if [[ "$ACTION_REF" =~ ^[0-9a-f]{40}$ ]]; then tag="sha-${ACTION_REF:0:7}"; else tag=main; fi ;;
+          esac
+          IMAGE="ghcr.io/cre8/rp-conformance:$tag"
+          docker pull --quiet "$IMAGE"
+        else
+          docker pull --quiet "$IMAGE" || docker image inspect "$IMAGE" > /dev/null
+        fi
+        echo "image=$IMAGE" >> "$GITHUB_OUTPUT"
+
+    - name: Run the harness
+      id: run
+      shell: bash
+      env:
+        IMAGE: ${{ steps.image.outputs.image }}
+        SUITE: ${{ inputs.suite }}
+        ADAPTER: ${{ inputs.adapter }}
+        ICS: ${{ inputs.ics }}
+        KNOWN_FINDINGS: ${{ inputs.known-findings }}
+        ONLY: ${{ inputs.only }}
+        FLOWS: ${{ inputs.flows }}
+        CONCURRENCY: ${{ inputs.concurrency }}
+        MAX_WAIT: ${{ inputs.max-wait }}
+        INPUT_HARNESS_HOST: ${{ inputs.harness-host }}
+        ENV_VARS: ${{ inputs.env-vars }}
+        ARGS: ${{ inputs.args }}
+        REPORT_DIR: ${{ inputs.report-dir }}
+      run: |
+        set -uo pipefail
+        cli=()
+        case "$SUITE" in
+          rp) cli+=(run) ;;
+          issuer) cli+=(issuer run) ;;
+          *) echo "::error::suite must be rp or issuer, not $SUITE"; exit 2 ;;
+        esac
+        cli+=(--adapter "$ADAPTER" --report-dir "$REPORT_DIR")
+        [ -n "$ICS" ] && cli+=(--ics "$ICS")
+        [ -n "$KNOWN_FINDINGS" ] && cli+=(--known-findings "$KNOWN_FINDINGS")
+        [ -n "$ONLY" ] && cli+=(--only "$ONLY")
+        [ -n "$INPUT_HARNESS_HOST" ] && cli+=(--harness-host "$INPUT_HARNESS_HOST")
+        if [ "$SUITE" = rp ]; then
+          [ -n "$FLOWS" ] && cli+=(--flows "$FLOWS")
+          cli+=(--concurrency "$CONCURRENCY")
+        elif [ -n "$MAX_WAIT" ]; then
+          cli+=(--max-wait "$MAX_WAIT")
+        fi
+        while IFS= read -r arg; do [ -n "$arg" ] && cli+=("$arg"); done <<< "$ARGS"
+
+        docker_args=(--rm --init --network host --user "$(id -u):$(id -g)" -v "$GITHUB_WORKSPACE:/work" -e HARNESS_HOST)
+        for name in $(echo "$ENV_VARS" | tr ',' '\n'); do docker_args+=(-e "$name"); done
+
+        mkdir -p "$REPORT_DIR"
+        before=$(ls -1 "$REPORT_DIR")
+        docker run "${docker_args[@]}" "$IMAGE" "${cli[@]}"
+        code=$?
+        echo "exit-code=$code" >> "$GITHUB_OUTPUT"
+        run=$(comm -13 <(echo "$before") <(ls -1 "$REPORT_DIR") | tail -n 1)
+        if [ -n "$run" ]; then
+          echo "report=$REPORT_DIR/$run" >> "$GITHUB_OUTPUT"
+          echo "junit=$REPORT_DIR/$run/junit.xml" >> "$GITHUB_OUTPUT"
+          [ -f "$REPORT_DIR/$run/summary.md" ] && cat "$REPORT_DIR/$run/summary.md" >> "$GITHUB_STEP_SUMMARY"
+        fi
+        exit 0
+
+    - name: Upload the report
+      if: ${{ inputs.upload-artifact == 'true' && steps.run.outputs.report != '' }}
+      uses: actions/upload-artifact@v7
+      with:
+        name: ${{ inputs.artifact-name || format('rp-conformance-{0}-{1}', inputs.suite, github.job) }}
+        path: ${{ steps.run.outputs.report }}
+        retention-days: 30
+
+    - name: Result
+      if: ${{ inputs.fail-on-error == 'true' && steps.run.outputs.exit-code != '0' }}
+      shell: bash
+      env:
+        CODE: ${{ steps.run.outputs.exit-code }}
+      run: |
+        echo "::error::the conformance run failed (exit code $CODE); see the job summary and the report"
+        exit "$CODE"

@@ -8,7 +8,7 @@ The harness plays every party around the Relying Party (RP): the wallet, the iss
 
 Key choices:
 
-- **TypeScript monorepo**, same stack as EUDIPLO and WILMA, built on the OWF libraries (`@owf/*`, `@sd-jwt/*`, `@openid4vc/*`). They already create JOSE, COSE, SD-JWT VC, mdoc (including MSO status and identifier lists), Token Status Lists, X.509 certificates and CRLs, LoTEs with JAdES seals, and access and registration certificates.
+- **TypeScript monorepo**, same stack as EUDIPLO, built on the OWF libraries (`@owf/*`, `@sd-jwt/*`, `@openid4vc/*`). They already create JOSE, COSE, SD-JWT VC, mdoc (including MSO status and identifier lists), Token Status Lists, X.509 certificates and CRLs, LoTEs with JAdES seals, and access and registration certificates.
 - **Valid first, then one fault**: every artifact is built valid with the libraries, then a named mutation is applied in a separate fault-injection layer that assembles JOSE/COSE directly, so strict library validation never blocks a deliberately broken artifact.
 - **The harness proves its own faults**: before a mutation is used against an RP, a reference validator confirms that the unmutated artifact passes every check and the mutated one fails exactly the targeted check.
 - **RP-agnostic through adapters**: one small interface (start a presentation, read the verdict, optionally refresh trust). EUDIPLO gets the first adapter; a manual adapter covers RPs without an API.
@@ -25,7 +25,7 @@ Goals:
 
 Non-goals for now:
 
-- Testing wallets or issuers (WILMA and the OIDF suites cover those).
+- Testing wallets or issuers (the OIDF suites cover those).
 - Proximity flows (ISO/IEC 18013-5 device engagement); the FCAF approach is to adopt ISO/IEC TS 18013-6 reader tests by reference.
 - Testing the browser's Digital Credentials API implementation; the harness replaces it with a shim (§4.5).
 - Load, penetration and availability testing.
@@ -324,7 +324,7 @@ Implementation (data model, issue 30). A tenth credential check, `claims` (`pack
 
 - `docker compose up` starts the harness services and, for EUDIPLO runs, the EUDIPLO image with PostgreSQL. The RP under test trusts the harness TLS CA and allows the harness hosts.
 - CI installs Playwright's Chromium headless shell so that the reference run covers the DC API flow.
-- A nightly GitHub Actions job (`.github/workflows/nightly-eudiplo.yml`) runs against EUDIPLO's latest main image. Like WILMA, the harness lives outside eudiplo's CI; eudiplo only triggers it on image publication. The README describes the CLI, the job and when it fails.
+- A nightly GitHub Actions job (`.github/workflows/nightly-eudiplo.yml`) runs against EUDIPLO's latest main image. The harness lives outside eudiplo's CI; eudiplo only triggers it on image publication. The README describes the CLI, the job and when it fails.
 
 ## 9. Reuse
 
@@ -334,7 +334,6 @@ Implementation (data model, issue 30). A tenth credential check, `claims` (`pack
 | `test-trust-lists` (BMI GitLab) | LoTE generation and JAdES sealing patterns |
 | EUDIPLO `apps/client/e2e/support/wallet.ts` | Starting point for the Conformance Wallet |
 | EUDIPLO `apps/backend/test/oidf` | OIDF bridge |
-| WILMA (`cre8/walter`) | Run and verdict model, report conventions |
 
 ## 10. Gaps and risks
 

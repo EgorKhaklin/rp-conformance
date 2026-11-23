@@ -4,16 +4,20 @@ import { dirname, join, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
 import { type Flow, isExecutable, type RelyingPartyAdapter } from '@rp-conformance/core';
 import { definitions, testBook } from '@rp-conformance/definitions';
+import { type AdapterEntry, resolveAdapter } from './adapter-module';
 import { loadIcs } from './ics';
 import { loadKnownFindings, runOutcome } from './known-findings';
 import { runConformance } from './runner';
 
-const ADAPTERS: Record<string, { load: () => Promise<{ createAdapter(): RelyingPartyAdapter }>; dir: string }> = {
+const ADAPTERS: Record<string, AdapterEntry<RelyingPartyAdapter>> = {
   reference: { load: () => import('@rp-conformance/adapter-reference'), dir: 'reference' },
   eudiplo: { load: () => import('@rp-conformance/adapter-eudiplo'), dir: 'eudiplo' },
 };
 
-const usage = `Usage: rp-conformance run --adapter <${Object.keys(ADAPTERS).join('|')}> [options]
+const usage = `Usage: rp-conformance run --adapter <${Object.keys(ADAPTERS).join('|')}|path> [options]
+
+--adapter takes a built-in adapter or the path of an adapter module of your own (.ts or .js, exporting
+createAdapter(): RelyingPartyAdapter of @rp-conformance/core); such a module needs --ics.
 
 Options:
   --only <id>            Test case or test book item ID or pattern with *, repeatable or comma separated
@@ -71,11 +75,15 @@ async function main() {
     process.exitCode = 2;
     return;
   }
-  const entry = ADAPTERS[values.adapter];
-  if (!entry) throw new Error(`unknown adapter ${values.adapter}`);
+  const entry = resolveAdapter(values.adapter, ADAPTERS, 'adapter');
+  if (!values.ics && !entry.dir) {
+    process.stderr.write(`--ics is required with the adapter module ${values.adapter}\n`);
+    process.exitCode = 2;
+    return;
+  }
   const adapter = (await entry.load()).createAdapter();
   const root = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
-  const ics = await loadIcs(values.ics ?? join(root, 'adapters', entry.dir, 'ics.yaml'));
+  const ics = await loadIcs(values.ics ? resolve(values.ics) : join(root, 'adapters', entry.dir!, 'ics.yaml'));
   const knownFindings = values['known-findings'] ? await loadKnownFindings(resolve(values['known-findings'])) : undefined;
   const { report, reportPath } = await runConformance({
     adapter,
