@@ -27,6 +27,7 @@ Checked against `ghcr.io/eudiplo/eudiplo@sha256:1a1f53b77b69cfeaf573f6950de6a709
 | [EUDIPLO/eudiplo#1624](https://github.com/EUDIPLO/eudiplo/issues/1624) | profile (PID_21) | `PP_WS_SM_IssuerIntegrity_005` |
 | [EUDIPLO/eudiplo#1625](https://github.com/EUDIPLO/eudiplo/issues/1625) | profile (ARF WUA_10a; issue 27, not part of the review) | `AP_WS_MS_Metadata_008`, `_100`, `_101`, `AP_WS_SM_KeyAttestation_102`, `_103` |
 | [EUDIPLO/eudiplo#1626](https://github.com/EUDIPLO/eudiplo/issues/1626) | profile (ARF EDP_11; issue 27, not part of the review) | `AP_WS_SM_Revocation_102` |
+| [EUDIPLO/eudiplo#1650](https://github.com/EUDIPLO/eudiplo/issues/1650) | confirmed (OpenID4VCI 1.0 Appendix C.2), regression on `main` since `641b548` (#1636); worked around in the adapter (`mdocField` in `src/subjects.ts`), so no test case shows it | every `MD` variant on `main` before the workaround (`unknown_credential_configuration`) |
 
 The `AP_*` variants of the `PP_*` test cases above (issue 27) share their text and basis.
 
