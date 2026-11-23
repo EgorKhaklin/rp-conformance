@@ -255,11 +255,12 @@ were new (`basis: profile`): a configuration with `keyBinding: false` was publis
 old one valid, EDP_11 ([EUDIPLO/eudiplo#1626](https://github.com/EUDIPLO/eudiplo/issues/1626);
 `AP_WS_SM_Revocation_102`). All of them pass against the reference image since 2026-11-23.
 
-One known finding remains: `AP_WS_SM_ClientAttestation_016_UF` in `E`. EUDIPLO bounds the expiry by the maintenance
-period of the WIA and KA only for configurations with `revokeWithWalletUnit`
-([EUDIPLO/eudiplo#1634](https://github.com/EUDIPLO/eudiplo/pull/1634)), and the non-qualified EAA tenant does not chain
-(ICS-07 No). TS3 1.5 section 2.4.3 (ISSU_12c) states the rule for the PID; for an Attestation Provider that chains,
-`AP_WS_SM_Revocation_101` (ISSU_12d, `P-CHAIN`) tests it and passes in `Q` and `PB`.
+`AP_WS_SM_ClientAttestation_016_UF` is gone since 2026-11-23: the test case is PID only, as `_015`. EUDIPLO bounds the
+expiry by the maintenance period of the WIA and KA only for configurations with `revokeWithWalletUnit`
+([EUDIPLO/eudiplo#1634](https://github.com/EUDIPLO/eudiplo/pull/1634)), so its `E` variant (no chaining, ICS-07 No)
+failed; TS3 1.5 section 2.4.3 (ISSU_12c) states the rule for the PID, and for an Attestation Provider that chains
+`AP_WS_SM_Revocation_101` (ISSU_12d, `P-CHAIN`) tests it. [`known-findings.yaml`](known-findings.yaml) has no entry
+against the reference image.
 
 Not applicable against EUDIPLO, with the reason in the report: `AP_WS_MS_Metadata_102` and `AP_WS_SM_Revocation_102` in
 `PB` and `E` (no embedded disclosure policy configured there, ICS-19), `AP_WS_SM_Revocation_101` in `E` (no chaining),

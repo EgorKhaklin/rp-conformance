@@ -24,6 +24,7 @@ export const PID_ONLY = new Set([
   'PP_WS_MS_Metadata_006',
   'PP_WS_IA_MainInteraction_003',
   'PP_WS_SM_ClientAttestation_015',
+  'PP_WS_SM_ClientAttestation_016_UF',
   'PP_WS_SM_KeyAttestation_002_UF',
   'PP_WS_SM_KeyAttestation_010_UF',
   'PP_WS_SM_KeyAttestation_011',

@@ -319,7 +319,7 @@ Columns as in the RP catalogue: **Objective**, **Stimulus** (mutation on top of 
 | `PP_WS_SM_ClientAttestation_013_UF` | WIA status that cannot be obtained (list unreachable, bad signature, expired, signed under a wrong anchor) gives no successful issuance of a PID. | Each TSP mutation of the RP catalogue's `RP_PP_SM_Revocation` | REJ (PID); POLICY (others, ICS-18) | ISSU_21; WUA_25 | | S/R |
 | `PP_WS_SM_ClientAttestation_014_UF` | WIA signed with a non-ECCG algorithm is rejected. | ES256K; HS256 | REJ:invalid_client | WUA_04; OIA_03 | | S/R |
 | `PP_WS_SM_ClientAttestation_015` | The PID's expiry is no later than the end of the WIA's revocation maintenance period. | WIA with maintenance period ending in 31 days (the minimum TS3 §2.4.2 guarantees; §8.3) | CONF | ISSU_12c; WUA_30; TS3 §2.4.3 (EUDI/TS3 only) | **PID only** | S/R |
-| `PP_WS_SM_ClientAttestation_016_UF` | A WIA below the SUT's declared minimum remaining maintenance period is rejected, or the PID is shortened. | Maintenance period ending tomorrow | REJ or CONF (`exp` ≤ end) | ISSU_12c; TS3 §2.4.3 (EUDI/TS3 only) | | S/R |
+| `PP_WS_SM_ClientAttestation_016_UF` | A WIA below the SUT's declared minimum remaining maintenance period is rejected, or the PID is shortened. | Maintenance period ending tomorrow | REJ or CONF (`exp` ≤ end) | ISSU_12c; TS3 §2.4.3 (EUDI/TS3 only) | **PID only** | S/R |
 
 ##### PP_WS_SM_KeyAttestation (KA, at the credential endpoint)
 
@@ -769,7 +769,7 @@ upstream texts are in `adapters/issuer-eudiplo/upstream-findings/`.
 | `PP_Inf_SM_TrustMechanisms_004_UF` | Steps 2 and 4 are `POLICY` (new ICS-15.invalid_version: `keep` gives `ISS`, `discard` `REJ`). | No specification requires a last-known-good list; fail-closed conforms. The EUDIPLO adapter's `refreshTrust` empties the cache itself. |
 | `SM_ClientAttestation_015`, `SM_KeyAttestation_011` | Stimulus 31 days instead of 30; references TS3 section 2.4.3. | TS3 section 2.4.2 guarantees a Wallet Unit can present at least 31 days; 30 days was below that guarantee. |
 | `AP_WS_SM_Revocation_101` | Stimulus 31 days instead of 30, as `SM_ClientAttestation_015` and `SM_KeyAttestation_011`. | TS3 section 2.4.2, as above. The other `AP_*` variants of the test cases in this table take the change from the `PP_*` definition. |
-| `SM_ClientAttestation_016_UF` | References TS3 section 2.4.3 and ISSU_12c; WUA_32 dropped. | WUA_32 is about communicating a minimum period, not about the PID's expiry. |
+| `SM_ClientAttestation_016_UF` | References TS3 section 2.4.3 and ISSU_12c; WUA_32 dropped. **PID only** since 2026-11-23, as `SM_ClientAttestation_015`. | WUA_32 is about communicating a minimum period, not about the PID's expiry. ISSU_12c and TS3 section 2.4.3 bound the PID; an Attestation Provider is bound only when it chains (ISSU_12d), which `AP_WS_SM_Revocation_101` tests. |
 | `SH_Encoding_004_UF` | Steps 5 and 6 put the private address in a top-level `status` (before TS3 1.5), recorded as INFO. | Steps 3 and 4 use the TS3 1.5 claims; a Provider that reads only the earlier claim never reads the address there, so they say nothing about request forgery. |
 | `DM_PidMdoc_002`, `SM_IssuerIntegrity_005` | References: PID Rulebook v1.7 section 3.1.2 (not "4.2"), ISO/IEC 18013-5 not verified; PID_21 is the SHALL, RFC 9901 section 4.2.2 only permits array element disclosures; ARB_30 dropped. | EUDI profile requirements. |
 

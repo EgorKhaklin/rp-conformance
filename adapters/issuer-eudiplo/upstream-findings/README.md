@@ -17,8 +17,8 @@ The findings were found against `ghcr.io/eudiplo/eudiplo@sha256:1a1f53b77b69cfea
 `ae0792a98991c28607879c2291d26b26b9ee9817`. On 2026-11-23 the reference image moved to
 `ghcr.io/eudiplo/eudiplo@sha256:ab07b8101f19debaa1382a75202101cdd82d1698947c04efd4e8d9ccb862ee02`
 (`10.0.0-main.7586139`, [`../reference.env`](../reference.env)): the full issuer suite against it passes every test case
-below, and their entries are removed from the findings list, except the `E` variant of
-`AP_WS_SM_ClientAttestation_016_UF` (see the last column).
+below, and their entries are removed from the findings list. The `E` variant of `AP_WS_SM_ClientAttestation_016_UF`
+still failed (see the last column); it went with the test case, which is PID only since 2026-11-23.
 
 | Issue | Basis | Test cases | Fixed by (EUDIPLO main, 7586139) |
 | --- | --- | --- | --- |
@@ -26,7 +26,7 @@ below, and their entries are removed from the findings list, except the `E` vari
 | [EUDIPLO/eudiplo#1619](https://github.com/EUDIPLO/eudiplo/issues/1619) | confirmed, minor (OpenID4VCI 1.0 §8.3.1.2) | `PP_WS_SM_ProofOfPossession_002_UF` | [#1631](https://github.com/EUDIPLO/eudiplo/pull/1631) |
 | [EUDIPLO/eudiplo#1620](https://github.com/EUDIPLO/eudiplo/issues/1620) | profile (TS3 ≥ 1.5) | `PP_WS_SM_ClientAttestation_012_UF`, `_013_UF`, `PP_WS_SM_KeyAttestation_008_UF`, `_009_UF`, `PP_WS_SM_Revocation_007`, `PP_WS_IA_Reissuance_005_UF`, `PP_WS_SH_Encoding_004_UF` (and `_005_UF`, which it keeps from showing anything) | [#1632](https://github.com/EUDIPLO/eudiplo/pull/1632) |
 | [EUDIPLO/eudiplo#1621](https://github.com/EUDIPLO/eudiplo/issues/1621) | profile (TS3 1.5 §2.4.3, WURevocation_18) | `PP_WS_SM_Revocation_006` | [#1633](https://github.com/EUDIPLO/eudiplo/pull/1633) |
-| [EUDIPLO/eudiplo#1622](https://github.com/EUDIPLO/eudiplo/issues/1622) | profile (TS3 1.5 §2.4.3, ISSU_12c) | `PP_WS_SM_ClientAttestation_016_UF` | [#1634](https://github.com/EUDIPLO/eudiplo/pull/1634), for configurations with `revokeWithWalletUnit` only: the `E` variant of `AP_WS_SM_ClientAttestation_016_UF` (no chaining, ICS-07 No) stays a known finding |
+| [EUDIPLO/eudiplo#1622](https://github.com/EUDIPLO/eudiplo/issues/1622) | profile (TS3 1.5 §2.4.3, ISSU_12c) | `PP_WS_SM_ClientAttestation_016_UF` | [#1634](https://github.com/EUDIPLO/eudiplo/pull/1634), for configurations with `revokeWithWalletUnit` only, so the `E` variant of `AP_WS_SM_ClientAttestation_016_UF` (no chaining, ICS-07 No) failed; the test case is PID only since 2026-11-23 (TS3 1.5 §2.4.3 bounds the PID; ISSU_12d is tested by `AP_WS_SM_Revocation_101`) |
 | [EUDIPLO/eudiplo#1623](https://github.com/EUDIPLO/eudiplo/issues/1623) | profile (PID Rulebook v1.7 §3.1.2, PID_09) | `PP_WS_DM_PidMdoc_002` | [#1635](https://github.com/EUDIPLO/eudiplo/pull/1635) |
 | [EUDIPLO/eudiplo#1624](https://github.com/EUDIPLO/eudiplo/issues/1624) | profile (PID_21) | `PP_WS_SM_IssuerIntegrity_005` | [#1636](https://github.com/EUDIPLO/eudiplo/pull/1636) |
 | [EUDIPLO/eudiplo#1625](https://github.com/EUDIPLO/eudiplo/issues/1625) | profile (ARF WUA_10a; issue 27, not part of the review) | `AP_WS_MS_Metadata_008`, `_100`, `_101`, `AP_WS_SM_KeyAttestation_102`, `_103` | [#1637](https://github.com/EUDIPLO/eudiplo/pull/1637) |

@@ -19,22 +19,10 @@
 # specification) remain. Findings whose test was wrong are gone with their tests corrected; findings without a MUST are
 # no longer FAILs (INFO or POLICY), and the texts kept for them are suggestions in upstream-findings/suggestions/.
 # All findings were reported upstream on 2026-11-21 and 2026-11-22 (EUDIPLO/eudiplo#1618 to #1626) and fixed on EUDIPLO's
-# main, which is the reference image since 2026-11-23 (reference.env: 10.0.0-main.7586139). The full issuer suite against
-# it passes except for the entry below; the fixed entries are removed (git history and upstream-findings/README.md).
-
-# --- Attestation Provider variants (issue 27) ------------------------------------------------------------------------
-
-# EUDIPLO/eudiplo#1622 (fixed by EUDIPLO/eudiplo#1634) bounds the expiry by the WIA's and KA's maintenance period only
-# for configurations with revokeWithWalletUnit: TS3 1.5 section 2.4.3 states the rule for the PID, and an Attestation
-# Provider that does not chain revocation chooses the validity itself. The non-qualified EAA tenant does not chain
-# (ICS-07 No), so its variant still fails; the PID Provider and the chaining QEAA and PuB-EAA tenants pass. For an
-# Attestation Provider the bound is tested by AP_WS_SM_Revocation_101 (ISSU_12d, P-CHAIN only), which passes.
-- testCase: AP_WS_SM_ClientAttestation_016_UF
-  variants: [SD+PA+E]
-  basis: profile
-  finding: >-
-    The non-qualified EAA tenant (revokeWithWalletUnit off, ICS-07 No) issues default_credential_A with an expiry after
-    the WIA's client_status.exp. EUDIPLO bounds the expiry only for configurations that chain revocation, by design
-    since EUDIPLO/eudiplo#1634: the TS3 1.5 section 2.4.3 rule (ISSU_12c) is a PID rule, so the test case is arguably
-    PID only for a Provider that does not chain
-  reference: EUDIPLO/eudiplo#1622
+# main, which is the reference image since 2026-11-23 (reference.env: 10.0.0-main.7586139); their entries are removed
+# (git history and upstream-findings/README.md). The last one, AP_WS_SM_ClientAttestation_016_UF in E, went with the test
+# case: PP_WS_SM_ClientAttestation_016_UF is PID only since 2026-11-23, as _015 (ISSU_12c and TS3 1.5 section 2.4.3
+# bound the PID; an Attestation Provider that chains is tested by AP_WS_SM_Revocation_101, ISSU_12d).
+#
+# No known finding against the reference image. The list stays explicit, so the file still parses as a list.
+[]
