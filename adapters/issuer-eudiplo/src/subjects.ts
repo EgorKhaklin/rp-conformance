@@ -66,7 +66,7 @@ export const PID_MDOC_NAMESPACE = 'eu.europa.ec.eudi.pid.1';
  * A claim definition in the PID namespace. Its children carry the namespace too: EUDIPLO does not pass a field's
  * `namespace` on to its children, so it would publish their claims paths without it (`["nationality", null]`), and
  * since EUDIPLO/eudiplo#1636 (array steps published as `null`) its OID4VCI library then drops the whole mdoc
- * configuration as unknown (upstream-findings/mdoc-child-claims-namespace.md). The namespace of a child changes only
+ * configuration as unknown (EUDIPLO/eudiplo#1650). The namespace of a child changes only
  * its published path.
  */
 const mdocField = (name: string, type: string, mandatory = false, children?: Record<string, unknown>[], format?: 'date') => ({
