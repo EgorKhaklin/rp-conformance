@@ -8,8 +8,8 @@
 The suite is validated against a digest of EUDIPLO's main image, pinned in [`reference.env`](reference.env) (read by
 `docker compose --env-file` and by `REFERENCE_EUDIPLO` in [`src/reference.ts`](src/reference.ts); change it there only):
 
-`EUDIPLO_IMAGE` (the digest), `EUDIPLO_EXPECT_VERSION` (what `GET /api/version` reports, `9.1.0-main.ae0792a` when
-this was written) and `EUDIPLO_REVISION` (the source revision, which the CI job `eudiplo` compares with the image's
+`EUDIPLO_IMAGE` (the digest), `EUDIPLO_EXPECT_VERSION` (what `GET /api/version` reports: `10.0.0-main.7586139`
+since 2026-11-23, `9.1.0-main.ae0792a` before) and `EUDIPLO_REVISION` (the source revision, which the CI job `eudiplo` compares with the image's
 `org.opencontainers.image.revision` label).
 
 It stays a digest of the main image until a release of EUDIPLO has the features below (decision of 2026-11-20). The
@@ -55,9 +55,10 @@ second in the document signer profile of ISO/IEC 18013-5 Annex B.
 
 The mdoc fields `birth_date`, `issuance_date` and `expiry_date` of the PID (and `attribute_C` of `default_credential_A`)
 declare `format` `date`, so EUDIPLO issues them as `full-date` (tag 1004) as the PID Rulebook v1.7 section 3.1.2
-requires ([EUDIPLO/eudiplo#1635](https://github.com/EUDIPLO/eudiplo/pull/1635)). A release before it, such as the pinned
-reference image, does not know the key: the adapter leaves it out and the dates are text strings, the known finding
-`PP_WS_DM_PidMdoc_002` ([EUDIPLO/eudiplo#1623](https://github.com/EUDIPLO/eudiplo/issues/1623)). The
+requires ([EUDIPLO/eudiplo#1635](https://github.com/EUDIPLO/eudiplo/pull/1635)), so `PP_WS_DM_PidMdoc_002` passes
+against the reference image since 2026-11-23 ([EUDIPLO/eudiplo#1623](https://github.com/EUDIPLO/eudiplo/issues/1623)). A
+release before it, such as the earlier reference image `ae0792a`, does not know the key: the adapter leaves it out and
+the dates are text strings. The
 portrait opt-out (`DM_Portrait_001`) is not offered: the PID configurations have no portrait, and inline JSON claims
 cannot carry the empty byte string an mdoc needs (`ICS-17.portrait_opt_out` No).
 
@@ -119,8 +120,8 @@ identifier lists and the adapter configures no mdoc PID, so `PP_WS_SM_Revocation
 - **Chaining** (`PP_WS_SM_Revocation_006`, `_007`): `revokeWithWalletUnit` is on for both PID configurations, and the
   Compose file polls wallet units every 30 s (`WALLET_UNIT_STATUS_CHECK_INTERVAL`). The test case serves `SL-WP-A`
   under a URL of its own, the WIA or KA of the issuance points there, and the Test Wallet Provider then revokes the
-  entry in place. Both fail against TS3 1.5 (EUDI profile): EUDIPLO never reads the TS3 1.5 status claims, and
-  `revokeWithWalletUnit` follows the KA only, so a revoked Wallet Instance never chains.
+  entry in place. Both pass against the reference image since 2026-11-23; against `ae0792a` they failed (TS3 1.5,
+  EUDI profile): EUDIPLO did not read the TS3 1.5 status claims, and `revokeWithWalletUnit` followed the KA only.
 - **Suspension** (`_005`): status lists have 2 bits per entry; suspend, reinstate and revoke show within a second.
 - **Change of subject data** (`_008`): EUDIPLO keeps no subject record, so `changeSubject` plays the back office. It
   revokes every session issued for the subject, and later offers carry the new data. The test case runs alone, last.
@@ -132,10 +133,11 @@ identifier lists and the adapter configures no mdoc PID, so `PP_WS_SM_Revocation
   treats as untrusted.
 - **Signed metadata** carries the access certificate (`PP_Inf_SM_TrustMechanisms_007`, `anchor-access`).
 
-| Finding | Test cases |
-| --- | --- |
-| A TS3 1.5 WIA or KA status is never read ([EUDIPLO/eudiplo#1620](https://github.com/EUDIPLO/eudiplo/issues/1620)); `revokeWithWalletUnit` follows the KA only ([EUDIPLO/eudiplo#1621](https://github.com/EUDIPLO/eudiplo/issues/1621)); EUDI profile | `PP_WS_SM_Revocation_006`, `_007` (SD, MD) |
-| Array elements of an SD-JWT VC are never disclosable one by one, PID_21 ([EUDIPLO/eudiplo#1624](https://github.com/EUDIPLO/eudiplo/issues/1624)); EUDI profile | `PP_WS_SM_IssuerIntegrity_005` |
+Findings against `ae0792a`, fixed in the reference image since 2026-11-23: a TS3 1.5 WIA or KA status was never read
+([EUDIPLO/eudiplo#1620](https://github.com/EUDIPLO/eudiplo/issues/1620)) and `revokeWithWalletUnit` followed the KA only
+([EUDIPLO/eudiplo#1621](https://github.com/EUDIPLO/eudiplo/issues/1621)), `PP_WS_SM_Revocation_006`, `_007`; array
+elements of an SD-JWT VC were not disclosable one by one, PID_21
+([EUDIPLO/eudiplo#1624](https://github.com/EUDIPLO/eudiplo/issues/1624)), `PP_WS_SM_IssuerIntegrity_005`.
 
 SD-JWT VC salts have 64 bits, below the 128 bits RFC 9901 section 9.3 RECOMMENDS; `PP_WS_SM_IssuerIntegrity_006` records
 it (suggestion in [`upstream-findings/suggestions/sd-jwt-salt-length.md`](upstream-findings/suggestions/sd-jwt-salt-length.md)).
@@ -159,7 +161,8 @@ would test the same against EUDIPLO plus a test IdP, at the cost of a second ser
 
 ## What the pinned image still lacks, and the test cases it leaves not validated
 
-Checked against the running image and EUDIPLO's source at `ae0792a`.
+Checked against the running image and EUDIPLO's source at `ae0792a`. The full reference run against `7586139`
+(2026-11-23) gives the same NOT APPLICABLE test cases.
 
 | Gap | Effect | Test cases not validated against EUDIPLO |
 | --- | --- | --- |
@@ -174,14 +177,12 @@ Checked against the running image and EUDIPLO's source at `ae0792a`.
 | Pre-authorized codes live as long as the session (`SESSION_TTL` 24 h) | The expiry is tested one hour after it: 25 hours, above any reference run's `--max-wait`, so NOT APPLICABLE there | `PP_WS_IA_PreAuthorized_003_UF` |
 | PAR `request_uri` lives 60 s | Its expiry half waits 61 minutes; NOT APPLICABLE in the reference run (default `--max-wait` 0), validated once with `--max-wait PT1H5M` | `PP_WS_IA_AuthorizationCode_004_UF` step 3 |
 
-Known findings of the security mechanism test cases (issue 19), each with its prepared upstream issue text in
-[`upstream-findings/`](upstream-findings) and its entries in [`known-findings.yaml`](known-findings.yaml):
-
-| Finding | Test cases |
-| --- | --- |
-| The status of a TS3 1.5 WIA or KA (`client_status.status`, `key_storage_status.status`) is never read; only a top-level `status` claim is (OpenID4VCI 1.0, TS3 1.4.1), so strict mode never fetches `SL-WP-A`. EUDI profile | `PP_WS_SM_ClientAttestation_012_UF`, `_013_UF`, `PP_WS_SM_KeyAttestation_008_UF`, `_009_UF` |
-| The PID's expiry is not bounded by the WIA's revocation maintenance period (TS3 1.5 section 2.4.3, ISSU_12c). EUDI profile | `PP_WS_SM_ClientAttestation_016_UF` |
-| A key proof with `alg` `none` is rejected with `invalid_credential_request` instead of `invalid_proof` (OpenID4VCI 1.0 section 8.3.1.2; minor) | `PP_WS_SM_ProofOfPossession_002_UF` |
+Known findings of the security mechanism test cases (issue 19) against `ae0792a`, all fixed in the reference image
+since 2026-11-23 (the issues and their fixes are listed in [`upstream-findings/`](upstream-findings)): the status of a
+TS3 1.5 WIA or KA (`client_status.status`, `key_storage_status.status`) was never read
+(`PP_WS_SM_ClientAttestation_012_UF`, `_013_UF`, `PP_WS_SM_KeyAttestation_008_UF`, `_009_UF`), the PID's expiry was not
+bounded by the WIA's revocation maintenance period (`PP_WS_SM_ClientAttestation_016_UF`), and a key proof with `alg`
+`none` was rejected with `invalid_credential_request` instead of `invalid_proof` (`PP_WS_SM_ProofOfPossession_002_UF`).
 
 Not findings since the spec review of 2026-11-20: WIA and KA under each other's anchor of the same Wallet Provider
 (`PP_WS_SM_ClientAttestation_006_UF`, `PP_WS_SM_KeyAttestation_004_UF`: TS3 binds anchors per Wallet Provider, INFO),
@@ -209,19 +210,17 @@ Not configured by the adapter although EUDIPLO supports it; each can be added wh
 ## DPoP, batch, re-issuance, deferred, notification and robustness (issue 25)
 
 The test cases of `PP_WS_SM_TokenBinding`, `PP_WS_IA_Batch`, `_Reissuance`, `_Deferred`, `_Notification`,
-`PP_WS_SH_Encoding` and `_Encryption` run against the pinned image. Since the spec review of 2026-11-20, four of them
-fail, as [`known-findings.yaml`](known-findings.yaml) records: HTTP 500 for a malformed `transaction_id`
-(`PP_WS_IA_Deferred_002_UF`, confirmed), and three on the missing status check of a TS3 1.5 WIA or KA (EUDI profile):
-EUDIPLO reads the top-level `status`, while TS3 1.5 carries the reference in `client_status` and `key_storage_status`.
-The others pass or record what the specifications leave open (INFO): `batch_size` exceeded with `jwt` proofs, refresh
+`PP_WS_SH_Encoding` and `_Encryption` run against the pinned image and pass since 2026-11-23. Against `ae0792a`
+four of them failed: HTTP 500 for a malformed `transaction_id` (`PP_WS_IA_Deferred_002_UF`, confirmed), and three on the
+missing status check of a TS3 1.5 WIA or KA (EUDI profile). The others pass or record what the specifications leave open (INFO): `batch_size` exceeded with `jwt` proofs, refresh
 after revocation, HTTP 201 at the notification endpoint (any 2xx is allowed), the error body for an unknown event, 413
 without an OAuth error object, deeply nested JSON, and `jku`/`x5u` headers, which EUDIPLO does not fetch. The refresh
 token is bound to the Wallet Unit's client authentication, as RFC 9449 section 5 allows for a confidential client:
 `PP_WS_IA_Reissuance_002_UF` presents it as another Wallet Unit.
 
-`PP_WS_IA_Reissuance_005_UF` and `PP_WS_SH_Encoding_005_UF` fail on the same missing status check: the revoked Wallet
-Instance and the decompression bomb are served by issue 19's `wallet-event` step in a version of `SL-WP-A` under a URL of
-the test case, which EUDIPLO never requests. `PP_WS_SM_TokenBinding_007_UF` waits out the access token: the adapter sets the built-in authorization
+`PP_WS_IA_Reissuance_005_UF` and `PP_WS_SH_Encoding_005_UF` serve the revoked Wallet Instance and the decompression
+bomb through issue 19's `wallet-event` step in a version of `SL-WP-A` under a URL of the test case; against `ae0792a`
+they failed on the same missing status check, as EUDIPLO never requested it. `PP_WS_SM_TokenBinding_007_UF` waits out the access token: the adapter sets the built-in authorization
 server's `token.lifetimeSeconds` to EUDIPLO's minimum of 60 s (ICS-14.access_token PT1M), and the step waits
 `expires_in` plus the declared `T_skew` plus one minute (126 s).
 
@@ -245,18 +244,22 @@ configuration. `AP_WS_SM_Revocation_102` issues from a configuration of its own 
 whose policy `changeDisclosurePolicy` changes with `PATCH /api/issuer/credentials/{id}?revokeOnDisclosurePolicyChange=true`
 ([EUDIPLO/eudiplo#1642](https://github.com/EUDIPLO/eudiplo/pull/1642)): EUDIPLO then revokes every attestation issued
 under the old policy, which on a shared configuration would revoke those of the test cases running at the same time. A
-release before it, such as the pinned reference image, ignores the parameter.
+release before it, such as the earlier reference image `ae0792a`, ignores the parameter.
 
 The `AP_*` variants of `PP_*` test cases fail where the `PP_*` test case fails, for the same reason: EUDIPLO's behaviour
-does not depend on the credential type. [`known-findings.yaml`](known-findings.yaml) lists them in its Attestation
-Provider block, each naming the finding it repeats and with its basis; the `AP_*` variants of the `PP_*` findings that
-the spec review of 2026-11-20 removed are gone with them, and `AP_WS_SM_Revocation_101` uses the 31-day stimulus of
-`PP_WS_SM_ClientAttestation_015`. Two findings are new (`basis: profile`; they were not part of the review):
+does not depend on the credential type. `AP_WS_SM_Revocation_101` uses the 31-day stimulus of
+`PP_WS_SM_ClientAttestation_015`. Against `ae0792a` the `AP_*` variants of the `PP_*` findings failed, and two findings
+were new (`basis: profile`): a configuration with `keyBinding: false` was published and handled as device-bound
+([EUDIPLO/eudiplo#1625](https://github.com/EUDIPLO/eudiplo/issues/1625); `AP_WS_MS_Metadata_008`, `_100`, `_101`,
+`AP_WS_SM_KeyAttestation_102`, `_103`), and changing the embedded disclosure policy left the attestations issued under the
+old one valid, EDP_11 ([EUDIPLO/eudiplo#1626](https://github.com/EUDIPLO/eudiplo/issues/1626);
+`AP_WS_SM_Revocation_102`). All of them pass against the reference image since 2026-11-23.
 
-| Behaviour | Test cases |
-| --- | --- |
-| A configuration with `keyBinding: false` is published with `cryptographic_binding_methods_supported` and proof types, and a credential request without `proofs` is rejected (`invalid_proof`), though the credential is issued without `cnf` ([EUDIPLO/eudiplo#1625](https://github.com/EUDIPLO/eudiplo/issues/1625)) | `AP_WS_MS_Metadata_008`, `_100`, `_101`; `AP_WS_SM_KeyAttestation_102`, `_103` (`Q`, `PB`, `E`) |
-| Changing the embedded disclosure policy leaves the attestations issued under the old one valid, EDP_11 ([EUDIPLO/eudiplo#1626](https://github.com/EUDIPLO/eudiplo/issues/1626)) | `AP_WS_SM_Revocation_102` (`Q`) |
+One known finding remains: `AP_WS_SM_ClientAttestation_016_UF` in `E`. EUDIPLO bounds the expiry by the maintenance
+period of the WIA and KA only for configurations with `revokeWithWalletUnit`
+([EUDIPLO/eudiplo#1634](https://github.com/EUDIPLO/eudiplo/pull/1634)), and the non-qualified EAA tenant does not chain
+(ICS-07 No). TS3 1.5 section 2.4.3 (ISSU_12c) states the rule for the PID; for an Attestation Provider that chains,
+`AP_WS_SM_Revocation_101` (ISSU_12d, `P-CHAIN`) tests it and passes in `Q` and `PB`.
 
 Not applicable against EUDIPLO, with the reason in the report: `AP_WS_MS_Metadata_102` and `AP_WS_SM_Revocation_102` in
 `PB` and `E` (no embedded disclosure policy configured there, ICS-19), `AP_WS_SM_Revocation_101` in `E` (no chaining),
@@ -271,7 +274,7 @@ accepts a credential that already has the new status.
 Issue 20 chose the built-in authorization server (see "The authorization code flow" above). A chained server with a
 scripted login remains possible, as follows:
 
-The pinned image can run the authorization code flow with a real login through a **chained** authorization server
+EUDIPLO can run the authorization code flow with a real login through a **chained** authorization server
 (docs `issuance/authorization-servers.md`, "Chained"). EUDIPLO is the authorization server towards the wallet: PAR,
 PKCE `S256`, DPoP and wallet attestation stay EUDIPLO's. It delegates the login to an upstream OpenID provider:
 

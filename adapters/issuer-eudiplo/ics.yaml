@@ -1,6 +1,6 @@
 # Implementation Conformance Statement of EUDIPLO as PID Provider and, under `categories` (issue 27), as Attestation
 # Provider (issuer test catalogue section 4), as the EUDIPLO issuer adapter configures the reference image pinned in
-# reference.env (main image 9.1.0-main.ae0792a, by digest).
+# reference.env (main image 10.0.0-main.7586139, by digest; 9.1.0-main.ae0792a until 2026-11-23).
 # `profiles` are the profiles the answers select; `items` the declared values, keyed by ICS item or `<item>.<name>`
 # (IssuerIcs). "live" marks a value checked against the running pinned image by the adapter's integration test or by a
 # call to its API; "source" one read from EUDIPLO at revision ae0792a (apps/backend/src/..., apps/docs/docs/...) that
