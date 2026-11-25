@@ -12,27 +12,12 @@
 # confirmed findings were reported upstream on 2026-11-21: `reference` names the issue.
 # Re-run of 2026-11-22 against ghcr.io/eudiplo/eudiplo:main (7586139): the findings fixed there are removed.
 
-# --- confirmed -------------------------------------------------------------------------------------------------------
-
-# Fixed on EUDIPLO's main (7586139, 2026-11-22) and removed: RP_WS_SM_IssuerIntegrity_013_UF, _025_UF (EUDIPLO/eudiplo#1615),
+# Re-run of 2026-11-24 against ghcr.io/eudiplo/eudiplo:main (10.1.0-main.1c527a3): the last two findings are fixed and
+# removed. RP_WS_SH_Encoding_003_UF (EUDIPLO/eudiplo#1649) by EUDIPLO/eudiplo#1660, which refuses an mDOC whose CBOR
+# repeats a map key; RP_WS_SM_Validity_005b_UF by @owf/mdoc 0.11.0 (openwallet-foundation-labs/identity-common-ts#478,
+# the validity before the status), which EUDIPLO takes since EUDIPLO/eudiplo#1663. The full suite passes (541 PASS,
+# 23 NOT APPLICABLE). Earlier fixed findings: RP_WS_SM_IssuerIntegrity_013_UF, _025_UF (EUDIPLO/eudiplo#1615),
 # _034a_UF, _034b_UF, _037a_UF, _037b_UF (EUDIPLO/eudiplo#1616), RP_WS_DM_IdentifyingData_001b (EUDIPLO/eudiplo#1617).
-
-- testCase: RP_WS_SH_Encoding_003_UF
-  basis: confirmed
-  finding: >-
-    EUDIPLO accepts an mdoc whose IssuerAuth protected header carries the label alg twice (step 5,
-    mdoc.issuer-auth-duplicate-label), which makes the COSE message malformed (RFC 9052 section 3). Found 2026-11-22 with
-    the stimulus of PR 66; the pinned ae0792a accepts it too, so it is no regression
-  reference: EUDIPLO/eudiplo#1649
-
-# --- EUDI profile only ----------------------------------------------------------------------------------------------
-
-- testCase: RP_WS_SM_Validity_005b_UF
-  basis: profile
-  finding: >-
-    EUDIPLO rejects an expired mdoc but fetches its status list first (@owf/mdoc IssuerAuth.verify runs verifyStatus
-    before the validityInfo check), against Token Status List section 8.3 as the FCAF pins it (draft-20; "MUST NOT" from
-    draft-19). HAIP 1.0 pins draft-14, which has no such rule. Low severity. Fixed in @owf/mdoc by
-    openwallet-foundation-labs/identity-common-ts#478 (merged 2026-11-17, after 0.10.0); EUDIPLO main (7586139) still
-    resolves @owf/mdoc 0.10.0, so the finding goes once EUDIPLO takes a release that contains the fix (0.11.0)
-  reference: openwallet-foundation-labs/identity-common-ts#478
+#
+# No known finding against EUDIPLO's main. The list stays explicit, so the file still parses as a list.
+[]
