@@ -12,6 +12,7 @@ The test cases are rendered from the executable definitions into a second FCAF o
 | --- | --- |
 | [Test catalogue](issuer-test-catalogue.md) | The test objectives for PID Providers and Attestation Providers, traced to the ARF high-level requirements, with the test environment, the Provider ICS and the decisions taken |
 | [Harness design](issuer-harness-design.md) | What the issuer suite reuses from the Relying Party harness, the issuance client, Test Wallet Provider and Test Registrar, the issuer adapter, faults, expected results and delivery phases |
+| [Testing your own Provider](../rp/adapter-guide.md#issuer-adapters) | How to run the suite against your PID Provider or Attestation Provider: writing its adapter from the template, the Provider ICS, networking, reading the report |
 
 ## EUDIPLO as reference issuer
 

@@ -1,0 +1,65 @@
+# Template of an Implementation Conformance Statement (ICS) for a PID Provider. Every item is defined in
+# fcaf-overlay-issuer/docs/fcaf/ics-issuer.md; adapter-guide.md, "Issuer adapters", says how it selects test cases.
+# `profiles` select the test cases and variants; `items` declare the values, keyed by item or `<item>.<name>`.
+# Declare what your Provider does, not what it should do: a wrong profile gives FAILs, a missing one hides test cases
+# (NOT APPLICABLE). The values below are a cautious start: a PID Provider in both formats, pre-authorized code only.
+# adapters/issuer-eudiplo/ics.yaml is a complete example with every profile.
+
+profiles:
+  - P-PID    # ICS-01: a PID Provider
+  - P-SD     # ICS-02: issues SD-JWT VC
+  - P-MD     # ICS-02: issues mdoc
+  - P-PA     # ICS-03: pre-authorized code grant
+  # - P-AC   # ICS-03: authorization code grant; needs authenticateSubject to get through your login
+  - P-DB     # ICS-04: device-bound credentials (always for a PID)
+  - P-REV    # ICS-05: Token Status List
+  - P-HOOK   # ICS-06: the adapter can revoke (setStatus); needs ICS-06.T_rev
+  - P-CHAIN  # ICS-07: revokes the PID when its wallet unit is revoked; needs ICS-07.T_chain
+  # Further profiles, each with the hooks or values it needs: P-SHORT (short-lived), P-SUSP (suspension), P-BATCH,
+  # P-REISS (refresh tokens), P-DEF (deferred, completeDeferred), P-NOT (notification endpoint), P-ENC (encryption),
+  # P-DPN (DPoP server nonce), P-IL (identifier lists).
+
+items:
+  ICS-01: PID Provider
+  ICS-02: SD-JWT VC and mdoc
+  ICS-02.SD: pid-sd-jwt-vc           # your configuration ID of the PID in SD-JWT VC; the test cases name it ICS-02.SD
+  ICS-02.MD: pid-mso-mdoc            # your configuration ID of the PID in mdoc
+  ICS-02.second: pid-sd-jwt-vc-2     # a second SD-JWT VC configuration that no PID offer names
+  ICS-03: pre-authorized code
+  ICS-03.tx_code: with and without   # whether offers can carry a transaction code
+  ICS-04: device-bound
+  ICS-04.key_storage: [iso_18045_high]          # key attestation levels it requires
+  ICS-04.user_authentication: [iso_18045_high]
+  ICS-05: Token Status List
+  ICS-05.token_formats: [jwt]        # Status List Token formats it serves: jwt, cwt
+  ICS-05.validity_period: P30D       # lifetime of ICS-02.SD and ICS-02.MD
+  ICS-05.identifier_list: "No"
+  ICS-05.suspension: "No"
+  ICS-06: revoke                     # what setStatus can do: revoke, suspend, unsuspend
+  ICS-06.change_subject: "No"        # changeSubject is not implemented
+  ICS-06.user_revocation_request: "No"
+  ICS-06.T_rev: PT5M                 # a revocation is on the status list within T_rev (at most 24 h)
+  ICS-07: "Yes"
+  ICS-07.T_chain: PT1H               # a revoked wallet unit leads to a revoked PID within T_chain (at most 24 h)
+  ICS-08: "No"                       # batch issuance
+  ICS-09: "No"                       # re-issuance with a refresh token
+  ICS-10: "No"                       # deferred issuance
+  ICS-11: "No"                       # notification endpoint
+  ICS-12: "No"                       # credential request and response encryption
+  ICS-13.dpop_nonce: "No"            # DPoP server nonce
+  ICS-13.nonce_endpoint: "Yes"
+  ICS-13.dpop_required: "Yes"
+  ICS-14.T_proof: PT5M               # maximum age of a key proof (at most 5 minutes)
+  ICS-14.T_skew: PT30S               # clock tolerance (at most 5 minutes)
+  ICS-14.pre_authorized_code: PT10M  # lifetime of a pre-authorized code
+  ICS-14.c_nonce: PT5M               # lifetime of a c_nonce
+  ICS-14.access_token: PT5M          # lifetime of an access token
+  ICS-15.T_refresh: PT5M             # refresh interval of TL-WP
+  ICS-15.invalid_version: keep       # after a TL-WP whose seal fails: keep the last valid one, or discard
+  ICS-15.next_update_grace: PT0S     # grace period after the NextUpdate of TL-WP
+  ICS-16.min_entries: 10000          # minimum entries per status list (at least 10 000)
+  ICS-16.timestamp_precision: PT1S   # precision of iat and exp in batch issuance
+  ICS-17: seeds SUBJ-1 and SUBJ-2    # the adapter hands the subjects' data to the Provider
+  ICS-17.portrait_opt_out: "No"
+  ICS-18: reject                     # a PID Provider rejects a wallet or key attestation without obtainable status
+  ICS-19: "No"                       # embedded disclosure policies
