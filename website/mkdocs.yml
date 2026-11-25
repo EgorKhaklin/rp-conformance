@@ -132,7 +132,7 @@ nav:
           - Overview: rp/index.md
           - Test catalogue: rp/rp-test-catalogue.md
           - Harness design: rp/harness-design.md
-          - Testing your own Relying Party: rp/adapter-guide.md
+          - Testing your own RP or issuer: rp/adapter-guide.md
           - EUDIPLO reference verifier:
               - ICS: rp/eudiplo/ics.md
               - Known findings: rp/eudiplo/known-findings.md

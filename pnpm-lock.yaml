@@ -52,6 +52,12 @@ importers:
         specifier: workspace:*
         version: link:../../packages/wallet-provider
 
+  adapters/issuer-template:
+    dependencies:
+      '@rp-conformance/core':
+        specifier: workspace:*
+        version: link:../../packages/core
+
   adapters/reference:
     dependencies:
       '@rp-conformance/core':

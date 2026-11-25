@@ -1,4 +1,4 @@
-# Testing your own Relying Party: writing an adapter
+# Testing your own Relying Party or issuer: writing an adapter
 
 The project has two suites, and neither tests wallets: in both, the harness plays the wallet and everything else
 around the system under test (SUT).
@@ -16,10 +16,11 @@ Most of this guide covers the **Relying Party adapter**. Start from its template
 [adapters/template/ics.yaml](adapters/template/ics.yaml). The template talks to a made-up REST API and marks every call
 with `TODO`. Replace those calls with your Relying Party's API and fill in the ICS, and you can run the suite.
 
-For an **issuer adapter**, the sections on networking and known findings apply as they are, and the report has the
-same layout. Its ICS is a different one, with profiles and items of its own. [Issuer adapters](#issuer-adapters) at
-the end covers its hooks and what differs. There is no issuer template yet; the EUDIPLO issuer adapter is the worked
-example.
+For an **issuer adapter** (PID Provider or Attestation Provider), start from
+[adapters/issuer-template/src/index.ts](adapters/issuer-template/src/index.ts) and its ICS,
+[adapters/issuer-template/ics.yaml](adapters/issuer-template/ics.yaml), in the same way.
+[Issuer adapters](#issuer-adapters) at the end walks through it. The sections on networking and known findings apply
+to it as they are, and the report has the same layout; its ICS is a different one, with profiles and items of its own.
 
 ## How a run works
 
@@ -246,26 +247,79 @@ The run fails (exit code 1) on any FAIL or INCONCLUSIVE.
 
 ## Issuer adapters
 
-The issuer suite tests a PID Provider or Attestation Provider; the harness plays the wallet, the Wallet Provider and
-the Registrar. Its adapter is an `IssuerAdapter` ([packages/core/src/issuer/adapter.ts](packages/core/src/issuer/adapter.ts)),
-loaded the same way (`createAdapter()`) and run with `rp-conformance issuer run --adapter <path> --ics <file>`. Its
-ICS items are defined in [ics-issuer.md](fcaf-overlay-issuer/docs/fcaf/ics-issuer.md).
+The issuer suite tests a PID Provider or Attestation Provider. The harness plays the wallet (Wallet Units with their
+wallet and key attestations), the Wallet Provider, the Registrar that certifies the Provider's keys, and the trust
+lists. It runs every issuance itself, against the Provider's public OpenID4VCI endpoints, and checks every credential
+the Provider issues. The adapter only does what a wallet cannot: enrol and configure the Provider, create offers, and
+act as its back office.
+
+Start from the template, [adapters/issuer-template/src/index.ts](adapters/issuer-template/src/index.ts), and its ICS,
+[adapters/issuer-template/ics.yaml](adapters/issuer-template/ics.yaml). Like the Relying Party template, it talks to a
+made-up admin API and marks every call with `TODO`. It is written for a PID Provider. Copy it to a folder of your own
+under `adapters/`, then run the positive controls of the PID:
+
+```bash
+MY_ISSUER_URL=http://127.0.0.1:8080 pnpm rp-conformance issuer run --adapter adapters/my-issuer/src/index.ts --ics adapters/my-issuer/ics.yaml --only PP_WS_IA_MainInteraction_001
+```
+
+`pnpm rp-conformance issuer --list` lists every test case with its variants, and marks the positive controls.
+
+### What the issuer adapter implements
+
+The interface is `IssuerAdapter` in [packages/core/src/issuer/adapter.ts](packages/core/src/issuer/adapter.ts).
 
 | Member | Required | What it does |
 | --- | --- | --- |
-| `enrol(namespace)` | yes | Returns CSRs for the Provider's keys, which the Test Registrar certifies, or `undefined` to let the Registrar generate the keys |
-| `setUp(env, namespace)` | yes | Imports the certificates, trusts `TL-WP` for wallet and key attestations, creates the credential configurations the ICS declares |
-| `createOffer(req)` | yes | Creates a credential offer (pre-authorized code or authorization code) for a test subject |
-| `authenticateSubject` | for the authorization code flow | Completes the subject's authentication and returns the redirect to the wallet |
-| `setStatus` | for revocation | Revokes, suspends or reinstates what a session issued |
-| `completeDeferred`, `changeSubject`, `changeDisclosurePolicy` | for the test cases that need them | Deferred issuance, changed subject data, a changed disclosure policy |
-| `refreshTrust`, `describe`, `tearDown` | no | As for a Relying Party |
+| `enrol(namespace)` | yes | Returns CSRs for the Provider's keys, which the Test Registrar certifies: the credential signing keys (an SD-JWT VC signer, and for mdoc a document signer, each named in `credentialSigningProfiles`), the status list signer, and the access certificate key. Return `undefined` if your Provider cannot create CSRs: the Registrar then generates the keys, and `setUp` gets them to import |
+| `setUp(env, namespace)` | yes | Configures the Provider; see below |
+| `createOffer(req)` | yes | Creates a credential offer for the test subject and the configurations `req` names, with the grant it names, by value or by reference, optionally with a transaction code or deferred |
+| `authenticateSubject` | for `P-AC` | Completes the subject's authentication for the authorization request and returns the redirect to the wallet; see below |
+| `setStatus` | for `P-HOOK` | Revokes, suspends or reinstates what a session issued, and resolves once the Provider reports it done |
+| `completeDeferred` | for `P-DEF` | Completes a deferred issuance, so the wallet's next poll returns the credential |
+| `changeSubject` | no | The subject's data change in the Provider's records (`PP_WS_SM_Revocation_008`) |
+| `changeDisclosurePolicy` | for `P-EDP` | Changes the embedded disclosure policy of a configuration (Attestation Providers) |
+| `refreshTrust`, `describe`, `tearDown` | no | As for a Relying Party; `refreshTrust` makes the Provider fetch `TL-WP` now |
 
-What differs from the Relying Party suite:
+A hook you leave out goes with its profile: without `setStatus`, do not declare `P-HOOK`; without
+`authenticateSubject`, do not declare `P-AC`. Without `changeSubject`, `PP_WS_SM_Revocation_008` is NOT APPLICABLE.
 
-- **The ICS** has profiles as well as items (`--ics`, YAML). The profiles select the test cases and variants, such
-  as mdoc (`P-MD`), deferred issuance (`P-DEF`) or short-lived credentials (`P-SHORT`). See
-  [the EUDIPLO issuer ICS](adapters/issuer-eudiplo/ics.yaml) for the shape.
+### What the issuer setUp configures
+
+| `IssuerTestEnvironment` field | What your Provider does with it |
+| --- | --- |
+| `credentialSigningCertificates`, `credentialSigningProfiles` | Signs credentials with them: the SD-JWT VC signer and the mdoc document signer, in the order `enrol` named them. With a private key when the Registrar generated it |
+| `statusListSigningCertificate` | Signs its status lists with it; absent when it signs them with the credential signing key |
+| `accessCertificate` | Its access certificate from `AC-A` |
+| `registrationCertificate` | Publishes this JWT in its metadata (ETSI TS 119 475) |
+| `trustLists`, the entry with `id` `TL-WP` | Fetches the list from `url`, verifies its seal with `schemeOperatorCertificatePem`, and accepts wallet and key attestations only from the Wallet Providers on it |
+| `ics` | Creates the credential configurations the ICS names (`ICS-02.SD`, `ICS-02.MD`, …) and sets what it has settings for: batch size, status list size, key attestation levels, the policy for attestations without obtainable status |
+
+The test cases name a configuration by its ICS item, for example `ICS-02.SD`, and the ICS maps it to your
+configuration ID (`ICS-02.SD: pid-sd-jwt-vc`). `createOffer` gets your IDs.
+
+### Subjects, authentication and status
+
+- **The test subjects.** The Conformance Wallet compares every issued value with the data of `SUBJ-1` and `SUBJ-2`
+  (`PID_TEST_SUBJECTS` of `@rp-conformance/core`; `ATTESTATION_TEST_SUBJECTS` for `default_credential_A`). The
+  template sends them with each offer, in the claim names of the format (`pidClaimsOf`). If your Provider takes the
+  data from its own records, seed the two subjects there instead (ICS-17). The Provider adds the issuance metadata and
+  the age attributes itself.
+- **`authenticateSubject`.** In the authorization code grant the wallet opens your authorization endpoint, and the
+  subject would log in. The template follows the redirect of an Authorization Server without a login step. If yours
+  has one, drive it here, for example through a test identity provider, and return where the Authorization Server
+  redirects: the wallet's `redirect_uri` with `code`, `state` and `iss`, or with `error`. An answer that is not a
+  redirect is thrown as `AuthorizationEndpointError`, which the harness records as the endpoint's answer.
+- **`setStatus`.** Resolve only once your Provider reports the change done. The harness then expects it on the status
+  list within `T_rev` (ICS-06.T_rev).
+
+### What differs from the Relying Party suite
+
+- **The ICS** has profiles as well as items. The profiles select the test cases and variants, such as mdoc (`P-MD`),
+  the authorization code grant (`P-AC`), deferred issuance (`P-DEF`) or short-lived credentials (`P-SHORT`); the items
+  declare values, keyed by item or `<item>.<name>`. Its items are defined in
+  [ics-issuer.md](fcaf-overlay-issuer/docs/fcaf/ics-issuer.md). The template ICS starts with a PID Provider in both
+  formats and the pre-authorized code grant; [the EUDIPLO issuer ICS](adapters/issuer-eudiplo/ics.yaml) declares
+  nearly every profile.
 - **The verdicts** judge what the Provider issues, not what it accepts. An issuance passes (`ISS`) when every
   credential it issues passes the reference validator with the suite's trust configuration. A refusal passes (`REJ`)
   when the request the flow ended at got a 4xx with an OAuth error object and nothing was issued. A 5xx answer is
@@ -274,6 +328,6 @@ What differs from the Relying Party suite:
   (default 0); a step that would wait longer is NOT APPLICABLE.
 - **`--only`** adds the positive controls the selected test cases depend on, so a single negative test case can be
   run on its own.
-
-There is no template for it yet. [The EUDIPLO issuer adapter's README](adapters/issuer-eudiplo/README.md) lists each
-hook with the calls it makes, which is the closest thing to a walkthrough.
+- **Attestation Providers** issue `default_credential_A` instead of the PID, and the ICS can declare one Provider
+  instance per category (`categories`). The template does not cover that; the EUDIPLO issuer adapter does, with one
+  tenant per category, and [its README](adapters/issuer-eudiplo/README.md) lists each hook with the calls it makes.
