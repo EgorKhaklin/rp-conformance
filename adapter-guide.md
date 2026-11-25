@@ -1,14 +1,25 @@
 # Testing your own Relying Party: writing an adapter
 
-This guide is for the developers of a Relying Party (a verifier) who want to run the PCAF test cases against it. The
-suite does not test wallets: the harness plays the wallet, the PID and attestation providers, the status lists and
-the trust lists, and your Relying Party is the system under test. The one piece you write is the **adapter**, a
-TypeScript module that lets the harness drive your Relying Party.
+The project has two suites, and neither tests wallets: in both, the harness plays the wallet and everything else
+around the system under test (SUT).
 
-Start from the template, [adapters/template/src/index.ts](adapters/template/src/index.ts), and its ICS,
+| Suite | System under test | What the harness plays | Adapter interface |
+| --- | --- | --- | --- |
+| Relying Party suite (`rp-conformance run`) | A Relying Party (verifier) | The wallet, the PID and attestation providers, the status lists, the trust lists | `RelyingPartyAdapter` |
+| Issuer suite (`rp-conformance issuer run`) | A PID Provider or Attestation Provider | The wallet, the Wallet Provider with its attestations, the Registrar, the trust lists | `IssuerAdapter` |
+
+For either suite, the one piece you write is the **adapter**: a TypeScript module that lets the harness drive your
+system. The two interfaces differ, because a verifier and an issuer are driven differently.
+
+Most of this guide covers the **Relying Party adapter**. Start from its template,
+[adapters/template/src/index.ts](adapters/template/src/index.ts), and its ICS,
 [adapters/template/ics.yaml](adapters/template/ics.yaml). The template talks to a made-up REST API and marks every call
-with `TODO`. Replace those calls with your Relying Party's API and fill in the ICS, and you can run the suite. For the
-issuer suite (PID Providers and Attestation Providers), see [Issuer adapters](#issuer-adapters) at the end.
+with `TODO`. Replace those calls with your Relying Party's API and fill in the ICS, and you can run the suite.
+
+For an **issuer adapter**, the sections on networking and known findings apply as they are, and the report has the
+same layout. Its ICS is a different one, with profiles and items of its own. [Issuer adapters](#issuer-adapters) at
+the end covers its hooks and what differs. There is no issuer template yet; the EUDIPLO issuer adapter is the worked
+example.
 
 ## How a run works
 
@@ -249,6 +260,20 @@ ICS items are defined in [ics-issuer.md](fcaf-overlay-issuer/docs/fcaf/ics-issue
 | `setStatus` | for revocation | Revokes, suspends or reinstates what a session issued |
 | `completeDeferred`, `changeSubject`, `changeDisclosurePolicy` | for the test cases that need them | Deferred issuance, changed subject data, a changed disclosure policy |
 | `refreshTrust`, `describe`, `tearDown` | no | As for a Relying Party |
+
+What differs from the Relying Party suite:
+
+- **The ICS** has profiles as well as items (`--ics`, YAML). The profiles select the test cases and variants, such
+  as mdoc (`P-MD`), deferred issuance (`P-DEF`) or short-lived credentials (`P-SHORT`). See
+  [the EUDIPLO issuer ICS](adapters/issuer-eudiplo/ics.yaml) for the shape.
+- **The verdicts** judge what the Provider issues, not what it accepts. An issuance passes (`ISS`) when every
+  credential it issues passes the reference validator with the suite's trust configuration. A refusal passes (`REJ`)
+  when the request the flow ended at got a 4xx with an OAuth error object and nothing was issued. A 5xx answer is
+  never a pass.
+- **Waiting for expiry.** Some test cases wait for an artifact to expire. `--max-wait` sets how long a step may wait
+  (default 0); a step that would wait longer is NOT APPLICABLE.
+- **`--only`** adds the positive controls the selected test cases depend on, so a single negative test case can be
+  run on its own.
 
 There is no template for it yet. [The EUDIPLO issuer adapter's README](adapters/issuer-eudiplo/README.md) lists each
 hook with the calls it makes, which is the closest thing to a walkthrough.
