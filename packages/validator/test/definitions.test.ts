@@ -83,8 +83,8 @@ async function selfValidate(definition: TestCaseDefinition, flow: Flow) {
 }
 
 describe('executable definitions against the reference validator', () => {
-  it('all 306 test definitions are executable: the 121 of the baseline (Phases 1 to 4), 97 of Phase 5, 16 of IA_Engagement and IA_ProtocolFlow, 24 of the data model (issue 30), 21 of UC_Presentation and 27 of issue 32', () => {
-    expect(executableDefinitions).toHaveLength(306);
+  it('all 320 test definitions are executable: the 121 of the baseline (Phases 1 to 4), 97 of Phase 5, 16 of IA_Engagement and IA_ProtocolFlow, 24 of the data model (issue 30), 21 of UC_Presentation, 27 of issue 32 and 14 of issue 10', () => {
+    expect(executableDefinitions).toHaveLength(320);
   });
 
   const runs = executableDefinitions.flatMap((d) => flowsOf(d).map((flow) => [d.id, flow, d] as const));
