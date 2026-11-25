@@ -1,6 +1,6 @@
 # The conformance harness as one image: the CLI (`rp-conformance`), both suites, the built-in adapters, and Chromium's
 # headless shell for the DC API shim. Run it on the host network, so the system under test and the harness reach each
-# other as with the bare CLI (README, "Docker image"):
+# other as with the bare CLI (running.md, "Docker image"):
 #
 #   docker run --rm --init --network host -v "$PWD:/work" ghcr.io/cre8/rp-conformance run --adapter ./my-adapter.ts --ics ics.yaml
 #

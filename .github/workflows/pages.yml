@@ -11,6 +11,9 @@ on:
       # The project documents of both suites on the site (scripts/site-project-pages.py).
       - rp-test-catalogue.md
       - harness-design.md
+      - adapter-guide.md
+      - running.md
+      - adapters/eudiplo/README.md
       - adapters/eudiplo/ics.yaml
       - adapters/eudiplo/known-findings.yaml
       - adapters/eudiplo/upstream-findings/**

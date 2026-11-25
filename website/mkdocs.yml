@@ -132,8 +132,10 @@ nav:
           - Overview: rp/index.md
           - Test catalogue: rp/rp-test-catalogue.md
           - Harness design: rp/harness-design.md
+          - Running the harness: rp/running.md
           - Testing your own RP or issuer: rp/adapter-guide.md
           - EUDIPLO reference verifier:
+              - Adapter: rp/eudiplo/index.md
               - ICS: rp/eudiplo/ics.md
               - Known findings: rp/eudiplo/known-findings.md
               - Upstream findings: rp/eudiplo/upstream-findings/index.md

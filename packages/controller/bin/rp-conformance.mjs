@@ -4,7 +4,7 @@ import { setDefaultResultOrder } from 'node:dns';
 import { register } from 'tsx/esm/api';
 
 // Host names such as `localhost` resolve to IPv4 first: the harness services and Docker's published ports listen on
-// IPv4, and another process may hold the same port on `::1` (README, "Running the harness").
+// IPv4, and another process may hold the same port on `::1` (running.md, "Options").
 setDefaultResultOrder('ipv4first');
 register();
 await import('../src/cli.ts');
