@@ -19,7 +19,11 @@ LINK = re.compile(r"\]\((?!https?:|mailto:|#)([^)\s]+)\)")
 # Site directory -> the suite's documents and its EUDIPLO adapter. The two suites get the same pages.
 SUITES = {
     "rp": {
-        "documents": {"rp-test-catalogue.md": "rp-test-catalogue.md", "harness-design.md": "harness-design.md"},
+        "documents": {
+            "rp-test-catalogue.md": "rp-test-catalogue.md",
+            "harness-design.md": "harness-design.md",
+            "adapter-guide.md": "adapter-guide.md",
+        },
         "adapter": "adapters/eudiplo",
         "role": "Relying Party",
         "suite": "Relying Party suite",
