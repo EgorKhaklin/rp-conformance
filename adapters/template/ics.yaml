@@ -1,0 +1,42 @@
+# Template of an Implementation Conformance Statement (ICS) for a Relying Party. Every item is defined in
+# fcaf-overlay/docs/fcaf/ics-rp.md; adapter-guide.md, "The ICS", says how the items select test cases and evaluate
+# them. Declare what your Relying Party does, not what it should do: a wrong Yes gives FAILs, a wrong No hides test
+# cases (NOT APPLICABLE). The values below are a cautious start: PIDs only, presentations via redirects only.
+
+# Generic
+RP.G.1: "Yes"   # requests credentials in IETF SD-JWT VC format
+RP.G.2: "Yes"   # requests credentials in ISO/IEC 18013-5 mdoc format
+RP.G.3: "No"    # requests QEAAs (trusts the test LOTL)
+RP.G.4: "No"    # requests PuB-EAAs (trusts TL-PUB)
+RP.G.5: "No"    # requests non-qualified EAAs (trusts the rulebook anchor)
+RP.G.6: API     # the adapter reads the verification result through an API
+
+# Presentation
+RP.P.1: "Yes"   # presentations via redirects (direct_post.jwt)
+RP.P.2: "No"    # presentations via the W3C Digital Credentials API (dc_api.jwt); needs a page of the RP
+RP.P.3: "No"    # uses trusted_authorities in its DCQL queries
+RP.P.4: 60      # clock tolerance T_skew, seconds (at most 300)
+RP.P.5: "Yes"   # applies a clock tolerance greater than zero
+RP.P.6: 300     # freshness window T_kb for KB-JWTs and device authentication, seconds (at most 300)
+RP.P.7: PT5M    # transaction lifetime T_tx; a later response is rejected
+RP.P.8: "No"    # sets request_uri_method to post
+RP.P.9: "No"    # redeems the response code at its own front end (needs the adapter's frontEnd hook)
+RP.P.10: "No"   # binds the credentials of a combined presentation by their identifying attributes
+RP.P.11: 1048576  # largest Authorization Response it accepts, bytes
+RP.P.12: Reject  # a PID whose administrative expiry date has passed: Reject or Accept
+
+# Revocation
+RP.R.1: "Yes"   # checks the revocation status of PIDs
+RP.R.2: Reject  # an EAA without reliable status: Reject, or Accept and flag as status unknown (flag status-unknown)
+RP.R.3: None    # meaning of application-specific status values, for example "0x03=valid; 0x04=invalid", or None
+RP.R.4: 1048576  # largest decompressed status list, bytes
+RP.R.5: "Yes"   # caches Status List Tokens until their ttl or exp
+RP.R.6: PT5S    # timeout for retrieving a status list or identifier list
+RP.R.7: None    # maximum age of a Status List Token by its iat, or None
+RP.R.8: "Yes"   # refuses a Status List Token whose iat is in the future by more than T_skew
+
+# Trust infrastructure
+RP.T.1: PT1H    # trust list refresh interval T_refresh
+RP.T.2: PT0S    # grace period after NextUpdate; during it the result carries the flag trust-list-stale
+RP.T.3: "No"    # Yes when RP.T.2 is longer than zero
+RP.T.4: Keep    # after a version whose seal fails: Keep the last valid version, or Discard and use none
