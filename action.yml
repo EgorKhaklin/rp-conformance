@@ -7,7 +7,7 @@ branding:
   icon: check-circle
   color: blue
 
-# The harness runs in its container on the host network, as the bare CLI does on the runner (README, "GitHub Action"):
+# The harness runs in its container on the host network, as the bare CLI does on the runner (running.md, "GitHub Action"):
 # the system under test reaches the harness's status list and trust list servers, and the harness reaches the system
 # under test, both on 127.0.0.1 or, from a container of the system under test, on host.docker.internal. Paths
 # (adapter module, ICS, known findings, report directory) are relative to the workspace, which is the container's

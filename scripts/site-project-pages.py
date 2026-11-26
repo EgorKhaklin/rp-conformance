@@ -23,6 +23,7 @@ SUITES = {
             "rp-test-catalogue.md": "rp-test-catalogue.md",
             "harness-design.md": "harness-design.md",
             "adapter-guide.md": "adapter-guide.md",
+            "running.md": "running.md",
         },
         "adapter": "adapters/eudiplo",
         "role": "Relying Party",

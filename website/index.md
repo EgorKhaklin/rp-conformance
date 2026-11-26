@@ -60,7 +60,7 @@ The harness is not a hosted test platform like the [OIDF conformance suite](http
 | Focus | Mostly the happy flow | Mostly what the SUT must reject |
 | Certification | OpenID Foundation certification | None; an unofficial draft meant for upstream contribution to the FCAF |
 
-The [README](https://github.com/cre8/rp-conformance#readme) shows how to run the harness; the adapters for EUDIPLO show how a SUT is connected. Each suite has its test catalogue, which traces every test objective to the ARF, and its harness design: [Relying Party suite](rp/index.md), [issuer suite](issuer/index.md).
+[Running the harness](rp/running.md) shows how to run the harness; the adapters for EUDIPLO show how a SUT is connected. Each suite has its test catalogue, which traces every test objective to the ARF, and its harness design: [Relying Party suite](rp/index.md), [issuer suite](issuer/index.md).
 
 ## Licence
 

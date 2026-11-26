@@ -66,7 +66,7 @@ MY_RP_URL=http://127.0.0.1:8080 pnpm rp-conformance run --adapter adapters/my-rp
 ```
 
 Outside a clone, keep the adapter in your own repository and run it with the Docker image, which can resolve
-`@rp-conformance/core` from any directory (README, "Your own adapter, the Docker image and the GitHub Action"). The
+`@rp-conformance/core` from any directory ([running.md](running.md#docker-image)). The
 packages are not published to npm, so for type checking in your editor you still need a clone.
 
 `pnpm rp-conformance --list` lists every test case and marks the positive controls.
@@ -243,7 +243,7 @@ The run fails (exit code 1) on any FAIL or INCONCLUSIVE.
      reference: https://github.com/example/my-rp/issues/42   # optional: where it is tracked
    ```
 
-6. Run it in CI with the GitHub Action (README, "Your own adapter, the Docker image and the GitHub Action").
+6. Run it in CI with the [GitHub Action](running.md#github-action).
 
 ## Issuer adapters
 
