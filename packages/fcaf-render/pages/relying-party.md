@@ -8,7 +8,7 @@ The Relying Party is tested as a black box in the controlled environment describ
 
 - **RelyingParty_WalletSolution (RP_WS)**: presentation interface, including all checks the Relying Party performs on the presented credentials.
 - **RelyingParty_PidProvider (RP_PP)**: retrieval and validation of status information published for PIDs.
-- **RelyingParty_AttestationProvider (RP_AP)**: retrieval and validation of status information published for attestations. Not yet defined; the `RP_PP` test cases are expected to apply with the same numbers.
+- **RelyingParty_AttestationProvider (RP_AP)**: retrieval and validation of status information published for QEAAs, PuB-EAAs and non-qualified EAAs: the `RP_PP` test cases with the same numbers, in the category variants `Q`, `PB` and `E`.
 - **RelyingParty_Infrastructure (RP_Inf)**: retrieval and validation of trust lists.
 
 ## Decisions applied in these test cases

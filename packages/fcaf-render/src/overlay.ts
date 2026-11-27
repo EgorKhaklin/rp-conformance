@@ -20,6 +20,7 @@ export interface SharedPages {
   relyingParty: string;
   rpWs: string;
   rpPp: string;
+  rpAp: string;
   rpInf: string;
   navRp: string;
 }
@@ -45,6 +46,7 @@ export async function loadSharedPages(): Promise<SharedPages> {
     relyingParty: await read('pages/relying-party.md'),
     rpWs: await read('pages/rp-ws.md'),
     rpPp: await read('pages/rp-pp.md'),
+    rpAp: await read('pages/rp-ap.md'),
     rpInf: await read('pages/rp-inf.md'),
     navRp: await read('pages/nav-rp.yml'),
   };
@@ -90,6 +92,7 @@ export function renderOverlay(
   write(`${rp}/index.md`, pages.relyingParty);
   write(`${rp}/wallet_solution/rp_ws.md`, pages.rpWs);
   write(`${rp}/pid_provider/rp_pp.md`, pages.rpPp);
+  write(`${rp}/attestation_provider/rp_ap.md`, pages.rpAp);
   write(`${rp}/infrastructure/rp_inf.md`, pages.rpInf);
   for (const [sutClass, classDir] of Object.entries(CLASS_DIR)) {
     const mine = definitions.filter((d) => parseTestCaseId(d.id).sutClass === sutClass);
@@ -98,7 +101,9 @@ export function renderOverlay(
     const list = inBaseline.map((d) => `- [${d.id}](${testCasePathInSut(d.id).slice(classDir.length + 1)})`).join('\n');
     write(
       `${rp}/${classDir}/baseline-tests.md`,
-      [`# ${CLASS_TITLE[sutClass]} baseline tests`, `The following ${inBaseline.length} test cases form the baseline test set.`, list].join('\n\n'),
+      inBaseline.length
+        ? [`# ${CLASS_TITLE[sutClass]} baseline tests`, `The following ${inBaseline.length} test cases form the baseline test set.`, list].join('\n\n')
+        : [`# ${CLASS_TITLE[sutClass]} baseline tests`, 'No test case of this class is part of the baseline test set.'].join('\n\n'),
     );
     const layers = [...new Set(mine.map((d) => parseTestCaseId(d.id).layer))].sort();
     for (const layer of layers) {

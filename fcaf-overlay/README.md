@@ -1,6 +1,6 @@
 # FCAF overlay: Relying Party baseline test cases
 
-Draft of 2026-11-06. This overlay adds a **Relying Party** System Under Test to the EU Functional Conformance Assessment Framework (FCAF, [conformance.eudi.dev](https://conformance.eudi.dev)), with 121 baseline test cases and 185 further test cases written in the FCAF test case format. The objectives and the decisions behind them are in [rp-test-catalogue.md](../rp-test-catalogue.md).
+Draft of 2026-11-06. This overlay adds a **Relying Party** System Under Test to the EU Functional Conformance Assessment Framework (FCAF, [conformance.eudi.dev](https://conformance.eudi.dev)), with 121 baseline test cases and 335 further test cases written in the FCAF test case format. The objectives and the decisions behind them are in [rp-test-catalogue.md](../rp-test-catalogue.md).
 
 ## Base
 
@@ -16,6 +16,7 @@ New files:
 | `docs/fcaf/suts/relying_party/wallet_solution/` | Class `RP_WS`: overview, baseline list, test case page, 245 test cases (84 of the baseline) |
 | `docs/fcaf/suts/relying_party/infrastructure/` | Class `RP_Inf`: overview, baseline list, test case page, 9 test cases |
 | `docs/fcaf/suts/relying_party/pid_provider/` | Class `RP_PP`: overview, baseline list, test case page, 52 test cases |
+| `docs/fcaf/suts/relying_party/attestation_provider/` | Class `RP_AP`: overview, baseline list (empty), test case page, 150 test cases |
 | `docs/fcaf/ics-rp.md` | Relying Party ICS (capabilities, policies, time values, surrogate technology items) |
 
 Modified copies of existing files (the base content plus additions):
@@ -70,7 +71,9 @@ The remaining catalogue areas are written as test cases one area at a time (harn
 | `RP_WS_SM_Validity` (`_004`, `_020`) | 3 | 0 |
 | `RP_WS_SM_Revocation` (`_011`) | 1 | 0 |
 | `RP_PP_SM_Revocation` (`_014`, `_031`) | 3 | 2 |
-| **Total** | **185** | **110** |
+| `RP_AP_SM_Revocation` | 114 | 93 |
+| `RP_AP_IA_Supportive` | 36 | 18 |
+| **Total** | **335** | **221** |
 
 Variant letters are the credential format, as in the baseline. Most of these test cases are for one format and run in every presentation flow; `SessionBinding_002` and `_008` are for redirects, `_006`, `_007` and `_009` for the W3C Digital Credentials API, because the audience of a KB-JWT and the handover of an mdoc differ between the flows. The request-side test cases (`RP_WS_MS_*`, `RP_WS_SM_RpIntegrity`) check the requests the Relying Party sends, without answering them; `ProtocolMessages_001`, `_002` and `_004` are for redirects, `ProtocolMessages_005` and `RpIntegrity_007` for the W3C Digital Credentials API. The `RP_Inf` test cases, in the new class directory `infrastructure/`, publish a new version of `TL-PID` or `TL-QEAA` and present a credential whose acceptance depends on it.
 
@@ -81,6 +84,10 @@ The `RP_WS_UC_Presentation` test cases, in the new layer directory `UseCases/`, 
 `RP_WS_IA_Engagement` and `RP_WS_IA_ProtocolFlow` (issue 29) cover how the Relying Party invokes the wallet and handles the steps around the presentation. `Engagement_001` and `ProtocolFlow_001` to `_003` are request-side test cases; `ProtocolFlow_002` retrieves the request object twice, `_003` with POST and `wallet_nonce` and applies only when the Relying Party sets `request_uri_method` to `post` (ICS RP.P.8). `ProtocolFlow_004_UF` retrieves the `request_uri` of a completed and of an unknown transaction; `_005` checks the `redirect_uri` with its response code; `_006_UF` to `_009_UF` open the `redirect_uri` in the user agent that started the transaction, in a fresh one, twice, or with a forged response code, and apply only when the Relying Party redeems the response code at its own front end (ICS RP.P.9); `_010` and `_014` send the wallet's error response; `_011_UF` sends the Authorization Response after the transaction lifetime `T_tx` (ICS RP.P.7), in both flows; `_012_UF` sends it twice; `_013_UF` changes or removes its `state`. Not written: `RP_WS_IA_Engagement_002` (the cross-device QR code encodes the same request as same-device): the harness receives one invocation URI per transaction and does not read the QR code the Relying Party renders in its user interface. The catalogue rows of `Engagement_001`, `ProtocolFlow_003`, `_004_UF`, `_006_UF` to `_009_UF` and `_014` were changed to what is executable; each row says why.
 
 The data model test cases (`RP_WS_DM_*`, in the new layer directory `DataModel/`) present attribute variants of `default_credential_pid`, several of them for a variant of `default_query_pid` that the preconditions name: every mandatory attribute of the PID rulebook, the age-over attribute for 18 without and with a `values` constraint, three members of the structured address. They need the attributes the Relying Party releases, which every adapter reports with its verification result. `RP_WS_DM_IdentifyingData_006` and `_007` are written for SD-JWT VC only: the mdoc PID has no structured address, and an unknown mdoc element reaches the Relying Party only when the wallet presents an element the query does not request, which is `RP_WS_DM_CredentialMetadata_001b_UF`. `RP_WS_DM_IdentifyingData_004` accepts a rejection, or an acceptance whose verification result flags the attribute (`attribute-invalid`); `RP_WS_DM_CredentialMetadata_001` a rejection, or an acceptance that does not release the extra attributes. Whether the Relying Party retains them cannot be observed and stays with the test book (`RP_TB_001`).
+
+## Class RP_AP
+
+The `RP_AP` test cases (in the new class directory `attestation_provider/`) are the `RP_PP` test cases with the same numbers for `default_credential_A` issued as a QEAA by `QP-A` (category variant `Q`), as a PuB-EAA by `PB-A` (`PB`) or as a non-qualified EAA by `EP-A` (`E`), presented for the category's default query: `RP_AP_SM_Revocation_002aQ_UF` is `RP_PP_SM_Revocation_002a_UF` for a QEAA. They are derived from the `RP_PP` definitions (`packages/definitions/src/attestation_provider/variants.ts`), so the steps, faults and expected results are the same; what changes is the anchor a status list must be signed under (`default_trust_configuration_rp`: the granted qualified EAA service of `QP-A` in `TL-QEAA`, the PubEAA/Revocation service of `PB-A` in `TL-PUB`, the rulebook anchor `CA-EP-A`) and `NOSTAT`, which for an attestation is the policy the Relying Party declares in RP.R.2. The ICS item RP.R.9 (the Relying Party checks the revocation status of attestations) selects them, together with RP.G.3 to RP.G.5. `RP_PP_SM_Revocation_011a_UF` and `_011b_UF` have no counterpart: no entity of the attestation categories publishes a revocation anchor separate from its issuance anchor. None of the `RP_AP` test cases is in the baseline.
 
 ## Test book
 
@@ -104,7 +111,7 @@ CI fails when the committed files differ from the rendered ones, and runs the li
 
 ## Verification done
 
-- The FCAF lint (`tools/fcaf_lint.py` from the `site` branch at `e2f076a`, with the patch above) reports 0 blocking findings and 0 warnings for the 306 files, including the advisory checks for ICS vocabulary, reference keys, `default_*` definitions, relative links and identifier markup. CI runs it with `--enforce-all`, so any finding fails the build.
+- The FCAF lint (`tools/fcaf_lint.py` from the `site` branch at `e2f076a`, with the patch above) reports 0 blocking findings and 0 warnings for the 456 files, including the advisory checks for ICS vocabulary, reference keys, `default_*` definitions, relative links and identifier markup. CI runs it with `--enforce-all`, so any finding fails the build.
 - The lint over the whole corpus reports the same 3,779 warnings with and without the overlay, so the modified shared pages change nothing for the existing Wallet Solution test cases.
 - The MkDocs build of the FCAF site (the `site` branch at `e2f076a` with the hooks of the FCAF repository) passes with `--strict`, with the overlay laid over `submitted`; the `include-markdown` pages render all 239 test cases. `scripts/site-build.sh` runs it, and `.github/workflows/pages.yml` publishes the result at [rp-conformance.eudi-wallet.dev](https://rp-conformance.eudi-wallet.dev/), under this project's name and colours instead of the Commission's.
 

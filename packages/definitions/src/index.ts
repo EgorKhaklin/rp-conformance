@@ -23,6 +23,7 @@ import { definitions as protocolFlow } from './wallet_solution/Interaction/Proto
 import { definitions as identifyingData } from './wallet_solution/DataModel/IdentifyingData';
 import { definitions as credentialMetadata } from './wallet_solution/DataModel/CredentialMetadata';
 import { definitions as ucPresentation } from './wallet_solution/UseCases/Presentation';
+import { attestationVariants } from './attestation_provider/variants';
 
 /** The 121 baseline test definitions, in the order of the baseline lists. */
 export const baselineDefinitions: TestCaseDefinition[] = [
@@ -61,6 +62,13 @@ export const definitions: TestCaseDefinition[] = [
   ...credentialMetadata,
   ...ucPresentation,
 ];
+
+/**
+ * The `RP_AP` test definitions: the category variants `Q`, `PB` and `E` of the `RP_PP` ones (catalogue section 2.1),
+ * after every other definition so the order of the earlier ones stays as it was.
+ */
+export const attestationProviderDefinitions: TestCaseDefinition[] = attestationVariants(definitions);
+definitions.push(...attestationProviderDefinitions);
 
 /** The definitions the harness can execute. */
 export const executableDefinitions = definitions.filter(isExecutable);

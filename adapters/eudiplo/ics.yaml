@@ -26,6 +26,7 @@ RP.R.5: "Yes"   # caches status list tokens for their ttl (at most 1 h; 5 min wi
 RP.R.6: PT10S   # STATUS_LIST_TIMEOUT_MS (status-list-verifier.service.ts)
 RP.R.7: None    # checks only that iat is present (status-list-verifier.service.ts)
 RP.R.8: "Yes"   # Status List JWT verification refuses an iat in the future ("JWT is not yet valid")
+RP.R.9: "Yes"   # statusCheckMode strict applies to every credential, whatever its category
 RP.T.1: PT5M    # trust list cache
 RP.T.2: PT0S
 RP.T.4: Discard  # a list whose seal fails is discarded with the cached one (trust-store.service.ts); fail-closed by design, and the adapter's refreshTrust (DELETE /api/cache/trust-list) empties the cache itself

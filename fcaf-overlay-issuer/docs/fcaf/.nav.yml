@@ -33,6 +33,10 @@ nav:
                   - Overview: suts/relying_party/pid_provider/rp_pp.md
                   - Baseline tests: suts/relying_party/pid_provider/baseline-tests.md
                   - Test cases: suts/relying_party/pid_provider/test-cases.md
+              - (rp_ap) Attestation Provider:
+                  - Overview: suts/relying_party/attestation_provider/rp_ap.md
+                  - Baseline tests: suts/relying_party/attestation_provider/baseline-tests.md
+                  - Test cases: suts/relying_party/attestation_provider/test-cases.md
               - (rp_inf) Trust Infrastructure:
                   - Overview: suts/relying_party/infrastructure/rp_inf.md
                   - Baseline tests: suts/relying_party/infrastructure/baseline-tests.md

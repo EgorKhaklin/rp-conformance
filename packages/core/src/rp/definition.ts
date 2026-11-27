@@ -27,6 +27,11 @@ export const ics = {
   usesTrustedAuthorities: { item: 'RP.P.3', text: 'Relying Party uses `trusted_authorities` in DCQL queries.', equals: 'Yes' },
   appliesClockTolerance: { item: 'RP.P.5', text: 'Relying Party applies a clock tolerance greater than zero.', equals: 'Yes' },
   checksPidRevocation: { item: 'RP.R.1', text: 'Relying Party checks the revocation status of PIDs.', equals: 'Yes' },
+  checksAttestationRevocation: {
+    item: 'RP.R.9',
+    text: 'Relying Party checks the revocation status of QEAAs, PuB-EAAs and non-qualified EAAs.',
+    equals: 'Yes',
+  },
   appliesGracePeriod: {
     item: 'RP.T.3',
     text: 'Relying Party keeps using a trust list for a grace period greater than zero after its `NextUpdate`.',
@@ -325,9 +330,22 @@ export type StepDefinition = StepDefinitionOf<StepAction, Expectation>;
 
 /** An executable RP test definition (harness design section 4.2). */
 export interface TestCaseDefinition extends TestCaseDefinitionOf<StepDefinition> {
-  /** `RP_<class>_<layer>_<area>_<nnn><variant>[_UF]`; class, layer and area also give the file location. */
+  /**
+   * `RP_<class>_<layer>_<area>_<nnn><variant>[<category>][_UF]`; class, layer and area also give the file location. The
+   * category variant `Q`, `PB` or `E` is that of class `RP_AP` only.
+   */
   id: string;
 }
+
+/** The category variant of an `RP_AP` test case (catalogue section 2.1): QEAA, PuB-EAA or non-qualified EAA. */
+export type AttestationVariant = 'Q' | 'PB' | 'E';
+
+/** The credential category of each category variant. */
+export const ATTESTATION_VARIANT_CATEGORY: Record<AttestationVariant, Exclude<CredentialCategory, 'pid'>> = {
+  Q: 'qeaa',
+  PB: 'pub-eaa',
+  E: 'eaa',
+};
 
 export interface TestCaseId {
   sutClass: 'WS' | 'PP' | 'AP' | 'Inf';
@@ -335,22 +353,26 @@ export interface TestCaseId {
   area: string;
   number: number;
   variant: string;
+  /** The category variant of an `RP_AP` test case. */
+  category?: AttestationVariant;
   unhappyFlow: boolean;
 }
 
-const TEST_CASE_ID = /^RP_(WS|PP|AP|Inf)_([A-Z]{2})_([A-Za-z]+)_(\d{3})([a-z]?)(_UF)?$/;
+const TEST_CASE_ID = /^RP_(WS|PP|AP|Inf)_([A-Z]{2})_([A-Za-z]+)_(\d{3})([a-z]?)(Q|PB|E)?(_UF)?$/;
 
 /** Parses a Relying Party test case ID, for selection and for the renderer's file layout. */
 export function parseTestCaseId(id: string): TestCaseId {
   const match = TEST_CASE_ID.exec(id);
   if (!match) throw new Error(`${id} is not a Relying Party test case ID`);
+  if ((match[1] === 'AP') !== Boolean(match[6])) throw new Error(`${id}: a category variant belongs to class RP_AP, and every RP_AP test case has one`);
   return {
     sutClass: match[1] as TestCaseId['sutClass'],
     layer: match[2],
     area: match[3],
     number: Number(match[4]),
     variant: match[5],
-    unhappyFlow: Boolean(match[6]),
+    ...(match[6] ? { category: match[6] as AttestationVariant } : {}),
+    unhappyFlow: Boolean(match[7]),
   };
 }
 

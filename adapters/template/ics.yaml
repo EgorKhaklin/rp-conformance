@@ -34,6 +34,7 @@ RP.R.5: "Yes"   # caches Status List Tokens until their ttl or exp
 RP.R.6: PT5S    # timeout for retrieving a status list or identifier list
 RP.R.7: None    # maximum age of a Status List Token by its iat, or None
 RP.R.8: "Yes"   # refuses a Status List Token whose iat is in the future by more than T_skew
+RP.R.9: "Yes"   # checks the revocation status of QEAAs, PuB-EAAs and non-qualified EAAs
 
 # Trust infrastructure
 RP.T.1: PT1H    # trust list refresh interval T_refresh
