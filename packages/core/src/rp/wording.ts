@@ -3,6 +3,7 @@
 import type { DefaultQueryId } from './adapter';
 import type { CredentialFormat, IcsCondition } from '../definition';
 import {
+  type AttestationVariant,
   type CredentialSpec,
   type Expectation,
   type Flow,
@@ -44,9 +45,16 @@ export const queries = {
   eaa: item('default_query_eaa'),
 };
 
-/** A Relying Party test case ID: `RP_<class>_<layer>_<area>_<nnn><variant>[_UF]`. */
+/** A Relying Party test case ID: `RP_<class>_<layer>_<area>_<nnn><variant>[_UF]` (class `RP_AP`: see `attestationTestCaseId`). */
 export const testCaseId = (sutClass: 'WS' | 'PP' | 'Inf', layer: 'IA' | 'SM' | 'MS' | 'DM' | 'UC' | 'SH', area: string, number: number, variant = '', unhappyFlow = false) =>
   `RP_${sutClass}_${layer}_${area}_${String(number).padStart(3, '0')}${variant}${unhappyFlow ? '_UF' : ''}`;
+
+/** The ID of the `RP_AP` test case for category `variant` with the same number as the `RP_PP` test case `ppId`. */
+export const attestationTestCaseId = (ppId: string, variant: AttestationVariant) => {
+  const match = /^RP_PP_(.*_\d{3}[a-z]?)(_UF)?$/.exec(ppId);
+  if (!match) throw new Error(`${ppId} is not an RP_PP test case ID`);
+  return `RP_AP_${match[1]}${variant}${match[2] ?? ''}`;
+};
 
 export interface FormatWording {
   /** Variant letter of the test case ID. */

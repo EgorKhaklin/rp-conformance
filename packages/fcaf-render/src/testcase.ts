@@ -1,7 +1,12 @@
 import { parseTestCaseId, type TestCaseDefinition } from '@rp-conformance/core';
 
-export const CLASS_DIR: Record<string, string> = { WS: 'wallet_solution', PP: 'pid_provider', Inf: 'infrastructure' };
-export const CLASS_TITLE: Record<string, string> = { WS: 'Relying Party - Wallet Solution', PP: 'Relying Party - PID Provider', Inf: 'Relying Party - Trust Infrastructure' };
+export const CLASS_DIR: Record<string, string> = { WS: 'wallet_solution', PP: 'pid_provider', AP: 'attestation_provider', Inf: 'infrastructure' };
+export const CLASS_TITLE: Record<string, string> = {
+  WS: 'Relying Party - Wallet Solution',
+  PP: 'Relying Party - PID Provider',
+  AP: 'Relying Party - Attestation Provider',
+  Inf: 'Relying Party - Trust Infrastructure',
+};
 export const LAYER_DIR: Record<string, string> = { IA: 'Interaction', SM: 'SecurityMechanisms', MS: 'MessageStructure', DM: 'DataModel', UC: 'UseCases', SH: 'Shared' };
 export const LAYER_TITLE: Record<string, string> = { IA: 'Interaction', SM: 'Security Mechanisms', MS: 'Message Structure', DM: 'Data Model', UC: 'Use Cases', SH: 'Shared' };
 export const AREA_TITLE: Record<string, string> = {

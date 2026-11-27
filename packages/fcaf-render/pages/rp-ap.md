@@ -1,0 +1,7 @@
+# Relying Party - Attestation Provider interface
+
+The `(rp_ap)` test class covers the interface between the Relying Party and Attestation Providers in presentation flows: retrieving and validating the status lists and identifier lists that QEAA Providers, PuB-EAA Providers and non-qualified EAA Providers publish. Its test cases are those of the `(rp_pp)` class with the same numbers, for `default_credential_A` issued in one of three categories: variant `Q` as a QEAA by `QP-A`, `PB` as a PuB-EAA by `PB-A`, and `E` as a non-qualified EAA by `EP-A`. Variant `a` uses a Status List Token in JWT format with a credential in SD-JWT VC format, variant `b` a Status List Token in CWT format with a credential in mdoc format.
+
+What changes with the category is the root of trust of a status list, which `default_trust_configuration_rp` defines per category: the anchor of the granted qualified EAA service of `QP-A` in `TL-QEAA`, the PubEAA/Revocation anchor of `PB-A` in `TL-PUB`, or the anchor `CA-EP-A` that the rulebook of `default_credential_eaa` defines. When a status list cannot be used, the Relying Party applies the policy it declares in ICS item RP.R.2 instead of rejecting the presentation.
+
+`RP_PP_SM_Revocation_011a_UF` and `_011b_UF` have no counterpart in this class: they present a status list signed under the issuance anchor of an entity that publishes a separate revocation anchor, and no entity of the attestation categories does.

@@ -48,9 +48,10 @@ Items with the ID `N/A` are surrogate ICS items that select test cases through t
 | RP.R.6 | Timeout for retrieving a status list or an identifier list. | Duration | After the timeout the Relying Party has no reliable revocation status ([ARF] Annex 2, VCR_14). |
 | RP.R.7 | Maximum age of a Status List Token by its `iat`. | Duration, or None | [Token Status List] section 8.3. An older token gives no reliable revocation status. |
 | RP.R.8 | Relying Party refuses a Status List Token whose `iat` lies in the future by more than `T_skew`. | Yes/No | [Token Status List] section 8.3. |
-| N/A | Status List Token in JWT format. | Yes/No | Follows RP.G.1 and RP.R.1. |
-| N/A | Status List Token in CWT format. | Yes/No | Follows RP.G.2 and RP.R.1. |
-| N/A | Identifier list in CWT format. | Yes/No | Follows RP.G.2 and RP.R.1. |
+| RP.R.9 | Relying Party checks the revocation status of QEAAs, PuB-EAAs and non-qualified EAAs. | Yes/No | [ARF] Annex 2, VCR_13. Applies to the categories the Relying Party requests (RP.G.3 to RP.G.5); selects the `RP_AP` test cases. |
+| N/A | Status List Token in JWT format. | Yes/No | Follows RP.G.1 and RP.R.1 or RP.R.9. |
+| N/A | Status List Token in CWT format. | Yes/No | Follows RP.G.2 and RP.R.1 or RP.R.9. |
+| N/A | Identifier list in CWT format. | Yes/No | Follows RP.G.2 and RP.R.1 or RP.R.9. |
 
 ## Trust infrastructure
 

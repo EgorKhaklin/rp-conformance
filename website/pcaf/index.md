@@ -75,7 +75,7 @@ A **Test Class** groups all functionality associated with one interface of the S
 - **Relying Party (RP)**
     - **RelyingParty_WalletSolution (RP_WS)**: the presentation interface to Wallet Units, including all checks on the presented credentials.
     - **RelyingParty_PidProvider (RP_PP)**: retrieval and validation of the status information published for PIDs.
-    - **RelyingParty_AttestationProvider (RP_AP)**: retrieval and validation of the status information published for attestations. Not yet defined; the `RP_PP` test cases are expected to apply with the same numbers.
+    - **RelyingParty_AttestationProvider (RP_AP)**: retrieval and validation of the status information published for QEAAs, PuB-EAAs and non-qualified EAAs: the `RP_PP` test cases with the same numbers, in the category variants `Q`, `PB` and `E`.
     - **RelyingParty_Infrastructure (RP_Inf)**: retrieval and validation of trust lists.
 - **PID Provider (PP)**
     - **PidProvider_WalletSolution (PP_WS)**: the issuance interface to Wallet Units, and the PID issued.
@@ -100,7 +100,7 @@ flowchart LR
     AP -- "AP_WS<br/>issuance (OpenID4VCI)" --> WU
     WU -- "RP_WS<br/>presentation (OpenID4VP)" --> RP
     PP -- "PP_RP / RP_PP<br/>status lists" --> RP
-    AP -- "AP_RP / RP_AP (reserved)<br/>status lists" --> RP
+    AP -- "AP_RP / RP_AP<br/>status lists" --> RP
     INF -- "PP_Inf" --> PP
     INF -- "AP_Inf" --> AP
     INF -- "RP_Inf<br/>trust lists" --> RP

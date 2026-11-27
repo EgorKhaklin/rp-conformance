@@ -367,7 +367,9 @@ Later issues added test cases outside these phases:
 - Issue 31: 21 test cases for combined presentations (`UC_Presentation`: a PID and an EAA in one response, `credential_sets`, entries left out, unknown or repeated, one DeviceResponse for two mdocs, attribute-based binding).
 - Issue 32: 27 test cases: robustness against malformed and oversized input (`SH_Encoding`), how status lists are retrieved (`RP_PP_IA_Supportive`: the request, caching within `ttl`, failing endpoints, redirect loops, link-local URIs), and six single objectives on status list freshness, revocation mechanisms and validity policies (the Issue 32 part of Phase 5 above).
 
-Together with the 121 baseline test cases and the 97 of Phase 5, 306 test cases run unattended, each once per presentation flow the Relying Party supports.
+- Class `RP_AP`: 150 test cases, the `RP_PP` test cases for QEAAs, PuB-EAAs and non-qualified EAAs (category variants `Q`, `PB`, `E`, catalogue section 2.1), derived from the `RP_PP` definitions with the credential, query, positive control and status list anchor of the category; `NOSTAT` follows RP.R.2, and the ICS item RP.R.9 selects them. `RP_PP_SM_Revocation_011_UF` has no counterpart (catalogue section 8.2).
+
+Together with the 121 baseline test cases and the 97 of Phase 5, 456 test cases run unattended, each once per presentation flow the Relying Party supports.
 
 ## 12. Decisions
 
